@@ -20,6 +20,44 @@ export function activate(context: vscode.ExtensionContext) {
 	});
 
 	context.subscriptions.push(disposable);
+
+	const searchDisposable = vscode.commands.registerCommand('owlspotlight.searchCode', async () => {
+		const query = await vscode.window.showInputBox({
+			prompt: '検索したいコード断片を入力してください',
+		});
+		if (!query) {
+			return;
+		}
+
+		const workspaceFolders = vscode.workspace.workspaceFolders;
+		if (!workspaceFolders || workspaceFolders.length === 0) {
+			vscode.window.showErrorMessage('ワークスペースフォルダが見つかりません');
+			return;
+		}
+		const folderPath = workspaceFolders[0].uri.fsPath;
+
+		// インデックス構築APIを呼ぶ
+		await fetch('http://localhost:8000/build_index', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ directory: folderPath, file_ext: '.py' })
+		});
+
+		// 検索APIを呼ぶ
+		const res = await fetch('http://localhost:8000/search', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ query, top_k: 5 })
+		});
+		const data: any = await res.json();
+		if (data && data.results && Array.isArray(data.results) && data.results.length > 0) {
+			const items = data.results.map((r: any) => `${r.name || r.function_name || 'unknown'} (${r.file || ''})`);
+			vscode.window.showQuickPick(items, { placeHolder: '検索結果' });
+		} else {
+			vscode.window.showInformationMessage('該当する関数が見つかりませんでした');
+		}
+	});
+	context.subscriptions.push(searchDisposable);
 }
 
 // This method is called when your extension is deactivated

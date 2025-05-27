@@ -9,13 +9,16 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
         "command": "owlspotlight.helloWorld",
         "title": "Hello World"
+      },
+      {
+        "command": "owlspotlight.searchCode",
+        "title": "Search Code"
       }
     ]
   },
