@@ -46,7 +46,6 @@ class SearchFunctionsSimpleRequest(BaseModel):
     top_k: int = 5
 
 # サーバー全体で1つのインデックスを保持
-global_indexer = None
 index_lock = Lock()
 
 # インデックス情報を保持するクラス
@@ -56,6 +55,7 @@ class GlobalIndexerState:
         self.file_mtimes: Dict[str, float] = {}
         self.directory: Optional[str] = None
         self.last_indexed: float = 0.0
+        self.file_ext: str = ".py"
 
     def is_up_to_date(self) -> bool:
         if not self.directory:
@@ -86,13 +86,11 @@ def is_ignored(path: str, spec: Optional[PathSpec], root_dir: str) -> bool:
     return spec.match_file(rel_path)
 
 # ディレクトリ内の全ファイルから関数抽出・インデックス作成（一時的なインデックス、状態保存なし）
-def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8):
+def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, update_state: bool = False):
     spec = load_gitignore_spec(directory)
     file_paths = []
     for root, dirs, files in os.walk(directory):
-        # --- ディレクトリをフィルタリング ---
         dirs[:] = [d for d in dirs if not is_ignored(os.path.join(root, d), spec, directory)]
-        # --- ファイルを収集 ---
         for fname in files:
             if not fname.endswith(file_ext):
                 continue
@@ -101,6 +99,21 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8):
                 continue
             file_paths.append(fpath)
 
+    # 差分インデックス用: 既存情報
+    prev_mtimes = dict(global_index_state.file_mtimes) if update_state else {}
+    prev_indexer = global_index_state.indexer if update_state else None
+    prev_funcs_by_file = {}
+    if prev_indexer:
+        for func in prev_indexer.functions:
+            prev_funcs_by_file.setdefault(func.get("file"), []).append(func)
+
+    # 追加・変更・削除ファイルを判定
+    new_mtimes = {f: os.path.getmtime(f) for f in file_paths}
+    added_or_modified = [f for f in file_paths if f not in prev_mtimes or prev_mtimes.get(f) != new_mtimes[f]]
+    unchanged = [f for f in file_paths if f in prev_mtimes and prev_mtimes.get(f) == new_mtimes[f]]
+    deleted = [f for f in prev_mtimes if f not in new_mtimes]
+
+    # 追加・変更ファイルのみ再抽出
     def process_file(fpath):
         try:
             funcs = extract_functions(fpath)
@@ -112,19 +125,31 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8):
             return []
 
     results = []
-    if len(file_paths) < 16:
-        # ファイル数が少なければ直列で十分
-        for fpath in tqdm(file_paths, desc="Indexing (serial)"):
-            results.extend(process_file(fpath))
-    else:
-        # 多い場合は並列
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            for res in tqdm(executor.map(process_file, file_paths), total=len(file_paths), desc="Indexing (parallel)"):
-                results.extend(res)
+    # 変更なしファイルは前回の関数情報を再利用
+    for f in unchanged:
+        results.extend(prev_funcs_by_file.get(f, []))
+    # 追加・変更ファイルのみ再抽出
+    if added_or_modified:
+        if len(added_or_modified) < 16:
+            for fpath in tqdm(added_or_modified, desc="Indexing (serial, diff)"):
+                results.extend(process_file(fpath))
+        else:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                for res in tqdm(executor.map(process_file, added_or_modified), total=len(added_or_modified), desc="Indexing (parallel, diff)"):
+                    results.extend(res)
+    # 削除ファイルは何もしない（除外）
 
     indexer = CodeIndexer()
     indexer.add_functions(results)
-    print(f"[build_index] {len(file_paths)} files scanned, {len(results)} functions indexed.")
+    print(f"[build_index-diff] {len(file_paths)} files scanned, {len(results)} functions indexed. (added/modified: {len(added_or_modified)}, deleted: {len(deleted)}, unchanged: {len(unchanged)})")
+
+    if update_state:
+        global_index_state.indexer = indexer
+        global_index_state.directory = directory
+        global_index_state.file_ext = file_ext
+        global_index_state.last_indexed = float(__import__('time').time())
+        global_index_state.file_mtimes = new_mtimes
+
     return results, len(file_paths), indexer
 
 @app.post("/embed")
@@ -137,7 +162,6 @@ async def embed(req: EmbedRequest):
 @app.post("/index_and_search")
 async def index_and_search(req: IndexAndSearchRequest):
     print("/index_and_search called")
-    global global_indexer
     device = get_device()
     with index_lock:
         if global_indexer is None:
@@ -154,7 +178,8 @@ async def index_and_search(req: IndexAndSearchRequest):
 @app.post("/build_index")
 async def build_index_api(req: BuildIndexRequest):
     print(f"/build_index called for directory: {req.directory}")
-    results, file_count, _ = build_index(req.directory, req.file_ext)
+    with index_lock:
+        results, file_count, _ = build_index(req.directory, req.file_ext, update_state=True)
     return {"num_functions": len(results), "num_files": file_count}
 
 @app.get("/index_status")
@@ -248,9 +273,41 @@ def build_index_and_search(directory: str, query: str, file_ext: str = ".py", to
 @app.post("/search_functions_simple")
 async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
     """
-    指定ディレクトリ内の関数を抽出・埋め込み・FAISSで検索し、該当関数リストを返すシンプルなAPI
+    状態保存型: 既存インデックスが最新ならそれを使い、古い/未構築なら再構築して検索
     """
-    return build_index_and_search(req.directory, req.query, top_k=req.top_k)
+    with index_lock:
+        # インデックスが最新か判定
+        if (
+            global_index_state.indexer is not None and
+            global_index_state.directory == req.directory and
+            global_index_state.file_ext == ".py" and
+            global_index_state.is_up_to_date()
+        ):
+            indexer = global_index_state.indexer
+            results = []
+            for f in global_index_state.file_mtimes.keys():
+                funcs = extract_functions(f)
+                for func in funcs:
+                    func["file"] = f
+                results.extend(funcs)
+        else:
+            # インデックス再構築
+            results, _, indexer = build_index(req.directory, ".py", update_state=True)
+        if not results:
+            return {"results": [], "message": "No functions found."}
+        device = get_device()
+        model.to(device)
+        codes = [func["code"] for func in results]
+        embeddings = model.encode(codes, batch_size=1, show_progress_bar=True, device=device)
+        query_emb = model.encode([req.query], device=device)
+        index = faiss.IndexFlatL2(embeddings.shape[1])
+        index.add(np.array(embeddings).astype('float32'))
+        D, I = index.search(np.array(query_emb).astype('float32'), req.top_k)
+        found = []
+        for idx in I[0]:
+            if 0 <= idx < len(results):
+                found.append(results[idx])
+        return {"results": found, "num_functions": len(results), "num_files": len(results)}
 
 def get_device():
     # Apple Silicon (M1/M2/M3) などで mps が使える場合は mps を優先

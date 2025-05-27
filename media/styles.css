@@ -1,0 +1,15 @@
+/* styles.css */
+body { font-family: var(--vscode-font-family, sans-serif); margin: 0; padding: 0; background: var(--vscode-sideBar-background, #1e1e1e); color: var(--vscode-foreground, #d4d4d4); }
+.header { padding: 0.8em 1em 0.5em 1em; font-size: 1.15em; font-weight: bold; border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #333); background: var(--vscode-sideBar-background, #1e1e1e); letter-spacing: 0.05em; }
+.actions { display: flex; gap: 0.5em; align-items: center; padding: 0.7em 1em 0.5em 1em; border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #333); background: var(--vscode-sideBar-background, #1e1e1e); }
+button { padding: 0.25em 1.1em; border-radius: 4px; border: 1px solid var(--vscode-button-border, #3c3c3c); background: var(--vscode-button-background, #0e639c); color: var(--vscode-button-foreground, #fff); font-weight: 500; font-size: 1em; cursor: pointer; transition: background 0.2s, border 0.2s; }
+button:hover { background: var(--vscode-button-hoverBackground, #1177bb); }
+.searchbar { display: flex; gap: 0.5em; padding: 0.8em 1em 0.5em 1em; background: var(--vscode-sideBar-background, #1e1e1e); }
+input[type=text] { flex: 1; padding: 0.4em; border-radius: 4px; border: 1px solid var(--vscode-input-border, #333); font-size: 1em; background: var(--vscode-input-background, #252526); color: var(--vscode-input-foreground, #d4d4d4); }
+.status { padding: 0.5em 1em 0.2em 1em; color: var(--vscode-descriptionForeground, #999); font-size: 0.97em; }
+.results { padding: 0.2em 0.5em 0.5em 0.5em; }
+.result-item { margin: 0.2em 0; padding: 0.6em 0.8em; border-radius: 4px; background: transparent; cursor: pointer; border-left: 3px solid transparent; transition: background 0.15s, border 0.15s; }
+.result-item:hover { background: var(--vscode-list-hoverBackground, #2a2d2e); border-left: 3px solid var(--vscode-list-activeSelectionForeground, #3794ff); }
+.result-title { font-weight: 500; color: var(--vscode-list-highlightForeground, #d7ba7d); }
+.result-path { font-size: 0.95em; color: var(--vscode-descriptionForeground, #999); }
+.result-snippet { font-size: 0.95em; color: var(--vscode-foreground, #d4d4d4); margin-top: 0.2em; }

@@ -11,14 +11,41 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "owlspotlight",
+          "title": "OwlSpotlight",
+          "icon": "media/owl.svg"
+        }
+      ]
+    },
+    "views": {
+      "owlspotlight": [
+        {
+          "id": "owlspotlight.sidebar",
+          "name": "コード検索",
+          "type": "webview"
+        }
+      ]
+    },
     "commands": [
       {
-        "command": "owlspotlight.helloWorld",
-        "title": "Hello World"
+        "command": "owlspotlight.startServer",
+        "title": "OwlSpotlight: サーバー起動"
       },
       {
         "command": "owlspotlight.searchCode",
-        "title": "Search Code"
+        "title": "OwlSpotlight: コード検索"
+      }
+    ]
+  },
+  "menus": {
+    "view/item/context": [
+      {
+        "command": "owlspotlight.startServer",
+        "when": "view == owlspotlight-actions",
+        "group": "inline"
       }
     ]
   },
