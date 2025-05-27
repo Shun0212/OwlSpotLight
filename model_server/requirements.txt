@@ -2,10 +2,12 @@ annotated-types==0.7.0
 anyio==4.9.0
 certifi==2025.4.26
 charset-normalizer==3.4.2
+click==8.2.1
 faiss-cpu==1.11.0
 fastapi==0.115.12
 filelock==3.18.0
 fsspec==2025.5.1
+h11==0.16.0
 hf-xet==1.1.2
 huggingface-hub==0.32.1
 idna==3.10
@@ -37,3 +39,4 @@ transformers==4.52.3
 typing-inspection==0.4.1
 typing_extensions==4.13.2
 urllib3==2.4.0
+uvicorn==0.34.2
