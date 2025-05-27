@@ -1,107 +1,51 @@
-# OwlSpotLight README
+## OwlSpotlight: Semantic Python Code Search in VS Code
 
-This is the README for your extension "OwlSpotLight". After writing up a brief description, we recommend including the following sections.
+OwlSpotlight is a powerful VS Code extension designed to revolutionize how you navigate and understand your Python codebase. By leveraging its custom-developed **CodeSearch-ModernBERT-Owl-2.0-Plus** model, OwlSpotlight enables **semantic code search** and intelligent highlighting of similar Python code snippets directly within your editor. This allows for incredibly fast and accurate searches using either natural language queries or even partial code fragments.
 
-## 機能紹介・概要（日本語）
+**Key Features:**
 
-**OwlSpotlight** は、VS Code上で類似コードスニペットをセマンティック検索し、ハイライト表示できる拡張機能です。Pythonコードを対象に、関数単位でインデックスを作成し、自然言語やコード断片で高速に検索できます。検索結果から該当箇所へジャンプも可能です。
+* Effortless Search & Navigation: A dedicated sidebar UI provides a seamless experience for initiating searches and instantly jumping to the desired code locations.
+* Intelligent Function Indexing: The extension automatically indexes your Python functions, respecting your `.gitignore` settings to ensure only relevant code is included.
+* Cutting-Edge Semantic Understanding: Powered by a proprietary BERT-based embedding model, OwlSpotlight goes beyond simple keyword matching to understand the *meaning* of your code.
+* Proven Performance: Successfully tested on Mac M4 architecture, ensuring a smooth and efficient experience.
 
-- サイドバーUIから簡単に検索・ジャンプ
-- 独自のBERTベース埋め込みモデルを利用
-- `.gitignore` 準拠のインデックス作成
-- Mac M4で動作確認中
+**Getting Started:**
 
-### 起動方法
-1. VS Codeで拡張機能を有効化
-2. サイドバーの「OwlSpotlight」から「サーバー起動」ボタンを押す
-3. 検索バーに関数名やコード断片を入力し「検索」
+1.  **Activation:** Enable the OwlSpotlight extension within your VS Code environment.
+2.  **Server Startup:** Navigate to the "OwlSpotlight" sidebar and click the "Start Server" button to initialize the search engine.
+3.  **Initiate Search:** Enter your search query – whether it's a function name or a snippet of code – into the search bar and click "Search."
 
----
+**Development Status:**
 
-## Features & Overview (English)
+Please note that OwlSpotlight is currently under active development. As such, the features, functionality, and behavior of the extension are subject to change without prior notice. We appreciate your understanding as we continue to improve and refine this tool.
 
-**OwlSpotlight** is a VS Code extension for semantic search and highlighting of similar code snippets. It indexes Python functions and enables fast search using natural language or code fragments. You can jump directly to the found code from the sidebar UI.
+**License:**
 
-- Easy search and jump from the sidebar UI
-- Uses a custom BERT-based embedding model
-- Indexing respects `.gitignore`
-- Tested on Mac M4
-
-### How to Run
-1. Enable the extension in VS Code
-2. Click the "Start Server" button in the OwlSpotlight sidebar
-3. Enter a function name or code fragment in the search bar and click "Search"
+This software is released under the **MIT License**.
 
 ---
 
-現在開発中のため、動作や仕様は今後変更される可能性があります。
+**日本語概要:**
 
-This extension is under development; features and behavior may change.
+**OwlSpotlight** は、VS Code 上で Python コードの意味的検索とハイライト表示を実現する拡張機能です。独自開発の **CodeSearch-ModernBERT-Owl-2.0-Plus** モデルにより、自然言語やコード断片を用いた高速かつ高精度な検索が可能です。
 
-## Features
+**主な機能:**
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+* 簡単な検索とジャンプ: サイドバーUIから直感的に検索を実行し、該当箇所へ素早く移動できます。
+* 関数単位の自動インデックス化: `.gitignore` を遵守し、プロジェクト内のPython関数を自動的にインデックス化します。
+* 独自の BERT ベース埋め込みモデル: 意味理解に特化したカスタムモデルにより、高度な検索精度を実現します。
+* Mac M4 で動作確認済み: 最新の Apple Silicon 環境での動作が確認されています。
 
-For example if there is an image subfolder under your extension project workspace:
+**起動方法:**
 
-\!\[feature X\]\(images/feature-x.png\)
+1.  VS Code で拡張機能を有効にします。
+2.  サイドバーの「OwlSpotlight」から「サーバー起動」ボタンをクリックします。
+3.  検索バーに関数名やコード断片を入力し、「検索」ボタンを押します。
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+**開発状況:**
 
-## Requirements
+この拡張機能は現在開発段階にあります。今後のアップデートにより、仕様や動作が予告なく変更される可能性があります。ご了承ください。
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+**ライセンス:**
 
-## Extension Settings
-
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
-
-For example:
-
-This extension contributes the following settings:
-
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
-
-## Known Issues
-
-Calling out known issues can help limit users opening duplicate issues against your extension.
-
-## Release Notes
-
-Users appreciate release notes as you update your extension.
-
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
-
----
-
-## Following extension guidelines
-
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
-
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+**MIT ライセンス**
