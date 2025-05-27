@@ -38,6 +38,52 @@ It uses a custom-developed model: [CodeSearch-ModernBERT-Owl-2.0-Plus](https://h
 
 ---
 
+## セットアップ・デバッグ方法（日本語）
+
+1. このリポジトリをクローンします。
+   ```zsh
+   git clone https://github.com/yourname/owlspotlight.git
+   cd owlspotlight
+   ```
+2. VS Code で本フォルダを開きます。
+3. 拡張機能のデバッグモード（F5 または「実行とデバッグ」→「拡張機能のデバッグ」）を開始します。
+4. サイドバー「OwlSpotlight」から「サーバー起動」ボタンを押し、動作をテストしてください。
+
+---
+
+## Setup & Debug Instructions (English)
+
+1. Clone this repository:
+   ```zsh
+   git clone https://github.com/yourname/owlspotlight.git
+   cd owlspotlight
+   ```
+2. Open the folder in VS Code.
+3. Start the extension in debug mode (press F5 or use "Run & Debug" → "Start Debugging").
+4. In the OwlSpotlight sidebar, click "Start Server" and test the extension.
+
+---
+
+## 注意点・環境構築について
+
+- Python 3.9 以上（動作確認は 3.11 で実施）、pip、virtualenv などの基本的な開発環境が必要です。
+- `model_server/requirements.txt` を使って依存パッケージをインストールしてください。
+- Transformerベースのモデル（CodeSearch-ModernBERT-Owl-2.0-Plus）を利用するため、**メモリを大量に消費する場合があります**。
+- 検索やインデックス作成の効率は、**CPUやGPUの性能に大きく依存**します。高速なGPUがあるとより快適に動作します。
+- Apple Silicon (M1/M2/M3/M4) では `torch` の `mps` サポートにより高速化されますが、環境によっては追加のセットアップが必要な場合があります。
+
+---
+
+## Notes on Environment Setup
+
+- Requires Python 3.9+ (tested with 3.11), pip, and basic development tools (e.g., virtualenv).
+- Install dependencies using `model_server/requirements.txt`.
+- Since this extension uses a transformer-based model (CodeSearch-ModernBERT-Owl-2.0-Plus), **it may consume a large amount of memory**.
+- The efficiency of search and indexing depends heavily on your **CPU and GPU performance**. A fast GPU is recommended for best results.
+- On Apple Silicon (M1/M2/M3/M4), PyTorch's `mps` backend can accelerate processing, but additional setup may be required depending on your environment.
+
+---
+
 ## 開発状況 / Development Status
 
 この拡張機能は現在開発中です。仕様や挙動は今後予告なく変更される可能性があります。  
