@@ -67,20 +67,36 @@ It uses a custom-developed model: [CodeSearch-ModernBERT-Owl-2.0-Plus](https://h
 ## 注意点・環境構築について
 
 - Python 3.9 以上（動作確認は 3.11 で実施）、pip、virtualenv などの基本的な開発環境が必要です。
+- サーバーはPython仮想環境（venv）上で起動します。**必ずPython 3.11系で仮想環境を作成してください。**
+   ```zsh
+   python3.11 -m venv .venv
+   source .venv/bin/activate
+   pip install -r model_server/requirements.txt
+   ```
+- 仮想環境や依存パッケージのインストールには数GBの空き容量が必要になる場合があります。
 - `model_server/requirements.txt` を使って依存パッケージをインストールしてください。
 - Transformerベースのモデル（CodeSearch-ModernBERT-Owl-2.0-Plus）を利用するため、**メモリを大量に消費する場合があります**。
 - 検索やインデックス作成の効率は、**CPUやGPUの性能に大きく依存**します。高速なGPUがあるとより快適に動作します。
 - Apple Silicon (M1/M2/M3/M4) では `torch` の `mps` サポートにより高速化されますが、環境によっては追加のセットアップが必要な場合があります。
+- 検索対象外としたいファイルやディレクトリ（例: 仮想環境 `.venv/` など）は `.gitignore` に追加しておくことを推奨します。
 
 ---
 
 ## Notes on Environment Setup
 
 - Requires Python 3.9+ (tested with 3.11), pip, and basic development tools (e.g., virtualenv).
+- The server runs in a Python virtual environment (venv). **Be sure to create the venv with Python 3.11.**
+   ```zsh
+   python3.11 -m venv .venv
+   source .venv/bin/activate
+   pip install -r model_server/requirements.txt
+   ```
+- Installing the virtual environment and dependencies may require several GB of free disk space.
 - Install dependencies using `model_server/requirements.txt`.
 - Since this extension uses a transformer-based model (CodeSearch-ModernBERT-Owl-2.0-Plus), **it may consume a large amount of memory**.
 - The efficiency of search and indexing depends heavily on your **CPU and GPU performance**. A fast GPU is recommended for best results.
 - On Apple Silicon (M1/M2/M3/M4), PyTorch's `mps` backend can accelerate processing, but additional setup may be required depending on your environment.
+- It is recommended to add unnecessary files and directories (e.g., virtual environments like `.venv/`) to `.gitignore` to exclude them from search and indexing.
 
 ---
 
