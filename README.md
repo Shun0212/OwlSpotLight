@@ -1,6 +1,42 @@
-# owlspotlight README
+# OwlSpotLight README
 
-This is the README for your extension "owlspotlight". After writing up a brief description, we recommend including the following sections.
+This is the README for your extension "OwlSpotLight". After writing up a brief description, we recommend including the following sections.
+
+## 機能紹介・概要（日本語）
+
+**OwlSpotlight** は、VS Code上で類似コードスニペットをセマンティック検索し、ハイライト表示できる拡張機能です。Pythonコードを対象に、関数単位でインデックスを作成し、自然言語やコード断片で高速に検索できます。検索結果から該当箇所へジャンプも可能です。
+
+- サイドバーUIから簡単に検索・ジャンプ
+- 独自のBERTベース埋め込みモデルを利用
+- `.gitignore` 準拠のインデックス作成
+- Mac M4で動作確認中
+
+### 起動方法
+1. VS Codeで拡張機能を有効化
+2. サイドバーの「OwlSpotlight」から「サーバー起動」ボタンを押す
+3. 検索バーに関数名やコード断片を入力し「検索」
+
+---
+
+## Features & Overview (English)
+
+**OwlSpotlight** is a VS Code extension for semantic search and highlighting of similar code snippets. It indexes Python functions and enables fast search using natural language or code fragments. You can jump directly to the found code from the sidebar UI.
+
+- Easy search and jump from the sidebar UI
+- Uses a custom BERT-based embedding model
+- Indexing respects `.gitignore`
+- Tested on Mac M4
+
+### How to Run
+1. Enable the extension in VS Code
+2. Click the "Start Server" button in the OwlSpotlight sidebar
+3. Enter a function name or code fragment in the search bar and click "Search"
+
+---
+
+現在開発中のため、動作や仕様は今後変更される可能性があります。
+
+This extension is under development; features and behavior may change.
 
 ## Features
 
