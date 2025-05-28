@@ -138,7 +138,6 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
             global_index_state.indexer,
         )
 
-    # ↓↓↓ 以下は本当に差分がある場合のみ実行 ↓↓↓
     # 追加・変更ファイルのみ再抽出
     def process_file(fpath):
         try:
@@ -151,18 +150,18 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
             return []
 
     results = []
-    # 変更なしファイルは前回の関数情報を再利用
     for f in unchanged:
         results.extend(prev_funcs_by_file.get(f, []))
-    # 追加・変更ファイルのみ再抽出
+    added_modified_funcs = []
     if added_or_modified:
         if len(added_or_modified) < 16:
             for fpath in tqdm(added_or_modified, desc="Indexing (serial, diff)", disable=False, file=sys.stdout):
-                results.extend(process_file(fpath))
+                added_modified_funcs.extend(process_file(fpath))
         else:
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 for res in tqdm(executor.map(process_file, added_or_modified), total=len(added_or_modified), desc="Indexing (parallel, diff)", disable=False, file=sys.stdout):
-                    results.extend(res)
+                    added_modified_funcs.extend(res)
+        results.extend(added_modified_funcs)
     # 削除ファイルは何もしない（除外）
 
     indexer = CodeIndexer()
@@ -176,18 +175,31 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
         global_index_state.last_indexed = float(__import__('time').time())
         global_index_state.file_mtimes = new_mtimes
         # 埋め込みとFAISSインデックスも保存
-        codes = [func["code"] for func in results]
-        if codes:
-            get_device_and_prepare()
-            encode = partial(model.encode, show_progress_bar=True)
-            embeddings = encode(codes, batch_size=32, convert_to_numpy=True)
-            faiss_index = faiss.IndexFlatL2(embeddings.shape[1])
-            faiss_index.add(embeddings)
-            global_index_state.embeddings = embeddings
-            global_index_state.faiss_index = faiss_index
+        # 削除ファイルがあれば全件再構築、なければ追記のみ
+        if deleted or global_index_state.embeddings is None or global_index_state.faiss_index is None:
+            codes = [func["code"] for func in results]
+            if codes:
+                get_device_and_prepare()
+                encode = partial(model.encode, show_progress_bar=True)
+                embeddings = encode(codes, batch_size=32, convert_to_numpy=True)
+                faiss_index = faiss.IndexFlatL2(embeddings.shape[1])
+                faiss_index.add(embeddings)
+                global_index_state.embeddings = embeddings
+                global_index_state.faiss_index = faiss_index
+            else:
+                global_index_state.embeddings = None
+                global_index_state.faiss_index = None
         else:
-            global_index_state.embeddings = None
-            global_index_state.faiss_index = None
+            # 追加・変更分だけエンコードして追記
+            if added_modified_funcs:
+                get_device_and_prepare()
+                encode = partial(model.encode, show_progress_bar=True)
+                new_codes = [func["code"] for func in added_modified_funcs]
+                new_embeddings = encode(new_codes, batch_size=32, convert_to_numpy=True)
+                # vstackで追記
+                global_index_state.embeddings = np.vstack([global_index_state.embeddings, new_embeddings])
+                global_index_state.faiss_index.add(new_embeddings)
+        # 何もなければ何もしない
 
     return results, len(file_paths), indexer
 
