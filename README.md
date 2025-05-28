@@ -14,9 +14,29 @@
 
 ### 起動方法
 
-1. VS Code で拡張機能を有効化  
-2. サイドバー「OwlSpotlight」から「サーバー起動」ボタンを押す  
-3. 検索バーに関数名やコード断片を入力し「検索」ボタンを押す  
+1. npm をインストールしていない場合、インストールします:
+   ```zsh
+   brew install npm
+   ```
+2. Python 3.11 がインストールされていない場合、インストールします:
+   ```zsh
+   brew install pyenv
+   pyenv install 3.11.9
+   ```
+3. モデルサーバー用の Python 環境をセットアップします:
+   ```zsh
+   cd model_server
+   pyenv local 3.11
+   python3 -m venv .venv
+   source .venv/bin/activate
+   pip install -r requirements.txt
+   cd ..
+   ```
+4. VS Code で本フォルダを開き、デバッグモード（F5 または「実行とデバッグ」→「拡張機能のデバッグ」）で起動します。
+5. サイドバー「OwlSpotlight」から「サーバー起動」ボタンを押してください。  
+   ※ 検索を行うたびに、まず「サーバー起動」を押してからご利用ください。
+6. 検索バーに関数名やコード断片を入力し「検索」ボタンを押します。  
+   ※ 一度サーバーを起動しインデックスが作成されれば、以降は変更がない限り高速に検索できます。
 
 ---
 
@@ -32,35 +52,81 @@ It uses a custom-developed model: [CodeSearch-ModernBERT-Owl-2.0-Plus](https://h
 
 ### How to Run
 
-1. Activate the extension in VS Code  
-2. Click "Start Server" in the OwlSpotlight sidebar  
-3. Enter a function name or code fragment in the search bar and click "Search"  
+1. Install npm if not already installed:
+   ```zsh
+   brew install npm
+   ```
+2. If Python 3.11 is not installed, install it:
+   ```zsh
+   brew install pyenv
+   pyenv install 3.11.9
+   ```
+3. Set up the Python environment for the model server:
+   ```zsh
+   cd model_server
+   pyenv local 3.11
+   python3 -m venv .venv
+   source .venv/bin/activate
+   pip install -r requirements.txt
+   cd ..
+   ```
+4. Open this folder in VS Code and start in debug mode (press F5 or use "Run & Debug" → "Start Debugging").
+5. In the OwlSpotlight sidebar, click the "Start Server" button before each search.  
+   ※ Always click "Start Server" before searching.
+6. Enter a function name or code fragment in the search bar and click "Search".  
+   ※ After the first run, an index is created, so as long as there are no changes, subsequent searches will be much faster.
 
 ---
 
 ## セットアップ・デバッグ方法（日本語）
 
-1. このリポジトリをクローンします。
+1. npm をインストールしていない場合、インストールします:
+   ```zsh
+   brew install npm
+   ```
+2. モデルサーバー用の Python 環境をセットアップします:
+   ```zsh
+   cd model_server
+   pyenv local 3.11
+   python3 -m venv .venv
+   source .venv/bin/activate
+   pip install -r requirements.txt
+   cd ..
+   ```
+3. このリポジトリをクローンします。
    ```zsh
    git clone https://github.com/yourname/owlspotlight.git
    cd owlspotlight
    ```
-2. VS Code で本フォルダを開きます。
-3. 拡張機能のデバッグモード（F5 または「実行とデバッグ」→「拡張機能のデバッグ」）を開始します。
-4. サイドバー「OwlSpotlight」から「サーバー起動」ボタンを押し、動作をテストしてください。
+4. VS Code で本フォルダを開きます。
+5. 拡張機能のデバッグモード（F5 または「実行とデバッグ」→「拡張機能のデバッグ」）を開始します。
+6. サイドバー「OwlSpotlight」から「サーバー起動」ボタンを押し、動作をテストしてください。
 
 ---
 
 ## Setup & Debug Instructions (English)
 
-1. Clone this repository:
+1. Install npm if not already installed:
+   ```zsh
+   brew install npm
+   ```
+2. Set up the Python environment for the model server:
+   ```zsh
+   cd model_server
+   pyenv local 3.11
+   python3 -m venv .venv
+   source .venv/bin/activate
+   pip install -r requirements.txt
+   cd ..
+   ```
+3. Clone this repository:
    ```zsh
    git clone https://github.com/yourname/owlspotlight.git
    cd owlspotlight
    ```
-2. Open the folder in VS Code.
-3. Start the extension in debug mode (press F5 or use "Run & Debug" → "Start Debugging").
-4. In the OwlSpotlight sidebar, click "Start Server" and test the extension.
+4. Open the folder in VS Code.
+5. Start the extension in debug mode (press F5 or use "Run & Debug" → "Start Debugging").
+6. In the OwlSpotlight sidebar, click "Start Server" and test the extension.
 
 ---
 
