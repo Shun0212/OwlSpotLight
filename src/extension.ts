@@ -116,13 +116,13 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
   <link rel="stylesheet" href="${styleUri}">
 </head>
 <body>
-  <div class="header">🦉 OwlSpotlight</div>
+  <div class="header">🦉 OwlSpotLight</div>
   <div class="actions">
-    <button id="startServerBtn">サーバー起動</button>
+    <button id="startServerBtn">Start Server</button>
   </div>
   <div class="searchbar">
-    <input id="searchInput" type="text" placeholder="関数名やコード断片で検索..." />
-    <button id="searchBtn">検索</button>
+    <input id="searchInput" type="text" placeholder="Search by function name or code snippet..." />
+    <button id="searchBtn">Search</button>
   </div>
   <div class="status" id="status"></div>
   <div class="results" id="results"></div>
