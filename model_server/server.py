@@ -14,9 +14,11 @@ from pathspec import PathSpec
 from pathspec.patterns import GitWildMatchPattern
 import sys
 from functools import partial
+from pathlib import Path
 
 from extractor import extract_functions
 from indexer import CodeIndexer
+from cluster_index import ClusterIndex
 
 app = FastAPI()
 
@@ -254,36 +256,31 @@ async def search_api(query: str, top_k: int = 5):
         results = global_index_state.indexer.search(query, top_k=top_k)
     return {"results": results}
 
+# --- クラスタ分割・ClusterManager利用の雛形 ---
+# グローバルでクラスタマネージャを保持（本実装ではリクエストごとに再構築せずキャッシュ推奨）
+global_cluster_manager = None
+
+def get_or_create_cluster_manager(directory: str, file_ext: str = ".py"):
+    global global_cluster_manager
+    if global_cluster_manager is None or global_cluster_manager.base_dir != directory:
+        global_cluster_manager = ClusterManager(directory, file_ext)
+    return global_cluster_manager
+
 @app.post("/search_functions")
 async def search_functions_api(directory: str, query: str, top_k: int = 5):
-    with index_lock:
-        # 既存インデックス・埋め込み・faiss_indexが使える場合は再利用
-        if (
-            global_index_state.indexer is not None and
-            global_index_state.directory == directory and
-            global_index_state.file_ext == ".py" and
-            global_index_state.is_up_to_date() and
-            global_index_state.embeddings is not None and
-            global_index_state.faiss_index is not None
-        ):
-            results = global_index_state.indexer.functions
-            embeddings = global_index_state.embeddings
-            faiss_index = global_index_state.faiss_index
-            file_count = len(global_index_state.file_mtimes)
-        else:
-            results, file_count, indexer = build_index(directory, update_state=True)
-            embeddings = global_index_state.embeddings
-            faiss_index = global_index_state.faiss_index
-        if not results or embeddings is None or faiss_index is None:
-            return {"results": [], "message": "No functions found."}
-        get_device_and_prepare()
-        query_emb = model.encode([query], convert_to_numpy=True)
-        D, I = faiss_index.search(query_emb, top_k)
-        found = []
-        for idx in I[0]:
-            if 0 <= idx < len(results):
-                found.append(results[idx])
-        return {"results": found, "num_functions": len(results), "num_files": file_count}
+    # クラスタ分割・検索の雛形
+    cluster_manager = get_or_create_cluster_manager(directory)
+    # まず全クラスタのcentroidを計算し、クエリに近いクラスタを選ぶ（ここでは全クラスタ検索の雛形）
+    found = []
+    for cluster in cluster_manager.get_all_clusters():
+        # centroidや部分検索は後続で実装、ここでは全件検索の雛形
+        if cluster.index is not None:
+            get_device_and_prepare()
+            query_emb = model.encode([query], convert_to_numpy=True)
+            results = cluster.search(query_emb, top_k)
+            found.extend(results)
+    # top_k件だけ返す（スコア順ソートは後続で実装）
+    return {"results": found[:top_k], "num_clusters": len(cluster_manager.cluster_indexes)}
 
 def build_index_and_search(directory: str, query: str, file_ext: str = ".py", top_k: int = 5, max_workers: int = 8):
     # 既存インデックス・埋め込み・faiss_indexが使える場合は再利用
@@ -357,3 +354,128 @@ def get_device():
         return "cuda"
     else:
         return "cpu"
+
+OWL_INDEX_DIR = ".owl_index"
+
+# ディレクトリ単位でクラスタ分割
+# 例: src/ → cluster_src, tests/ → cluster_tests
+
+def get_clusters_for_directory(directory: str, file_ext: str = ".py"):
+    clusters = {}
+    for root, dirs, files in os.walk(directory):
+        rel_root = os.path.relpath(root, directory)
+        if rel_root == ".":
+            cluster_name = "root"
+        else:
+            cluster_name = rel_root.replace(os.sep, "_")
+        cluster_files = [os.path.join(root, f) for f in files if f.endswith(file_ext)]
+        if cluster_files:
+            clusters[cluster_name] = cluster_files
+    return clusters
+
+# クラスタごとに .owl_index/cluster_xxx/ を作成
+
+def get_cluster_index_path(base_dir: str, cluster_name: str) -> str:
+    return os.path.join(base_dir, OWL_INDEX_DIR, f"cluster_{cluster_name}")
+
+# クラスタ一覧を管理
+class ClusterManager:
+    def __init__(self, base_dir: str, file_ext: str = ".py"):
+        self.base_dir = base_dir
+        self.file_ext = file_ext
+        self.clusters = get_clusters_for_directory(base_dir, file_ext)
+        self.cluster_indexes = {}
+        for cname in self.clusters:
+            cpath = get_cluster_index_path(base_dir, cname)
+            os.makedirs(cpath, exist_ok=True)
+            self.cluster_indexes[cname] = ClusterIndex(cname, Path(cpath))
+
+    def get_cluster_for_file(self, file_path: str) -> str:
+        rel = os.path.relpath(file_path, self.base_dir)
+        parts = rel.split(os.sep)
+        if len(parts) == 1:
+            return "root"
+        return parts[0]
+
+    def get_all_clusters(self):
+        return self.cluster_indexes.values()
+
+    def rebuild_changed_clusters(self):
+        # 変更があったディレクトリ（クラスタ）は問答無用で再構築
+        for cname, files in self.clusters.items():
+            cluster = self.cluster_indexes[cname]
+            # 関数抽出
+            funcs = []
+            for f in files:
+                try:
+                    funcs.extend(extract_functions(f))
+                except Exception as e:
+                    print(f"[ClusterManager] extract error: {f}: {e}")
+            # 埋め込み生成
+            codes = [func["code"] for func in funcs]
+            if codes:
+                get_device_and_prepare()
+                encode = partial(model.encode, show_progress_bar=True)
+                embeddings = encode(codes, batch_size=32, convert_to_numpy=True)
+                # FAISSインデックス再構築
+                faiss_index = faiss.IndexFlatL2(embeddings.shape[1])
+                faiss_index.add(embeddings)
+                cluster.meta = funcs
+                cluster.index = faiss_index
+                cluster.save()
+            else:
+                # ファイルが空ならインデックス削除
+                cluster.meta = []
+                cluster.index = None
+                cluster.save()
+
+    def rebuild_clusters_with_diff(self, changed_dirs: set, added_files: set):
+        # 追加ファイルは差分追加、変更ディレクトリは問答無用で再構築
+        for cname, files in self.clusters.items():
+            cluster = self.cluster_indexes[cname]
+            cluster_dir = os.path.join(self.base_dir, *(cname.split('_'))) if cname != 'root' else self.base_dir
+            if cluster_dir in changed_dirs:
+                # ディレクトリごと再構築
+                funcs = []
+                for f in files:
+                    try:
+                        funcs.extend(extract_functions(f))
+                    except Exception as e:
+                        print(f"[ClusterManager] extract error: {f}: {e}")
+                codes = [func["code"] for func in funcs]
+                if codes:
+                    get_device_and_prepare()
+                    encode = partial(model.encode, show_progress_bar=True)
+                    embeddings = encode(codes, batch_size=32, convert_to_numpy=True)
+                    faiss_index = faiss.IndexFlatL2(embeddings.shape[1])
+                    faiss_index.add(embeddings)
+                    cluster.meta = funcs
+                    cluster.index = faiss_index
+                    cluster.save()
+                else:
+                    cluster.meta = []
+                    cluster.index = None
+                    cluster.save()
+            else:
+                # 追加ファイルのみ差分追加
+                add_funcs = []
+                add_files = [f for f in files if f in added_files]
+                for f in add_files:
+                    try:
+                        add_funcs.extend(extract_functions(f))
+                    except Exception as e:
+                        print(f"[ClusterManager] extract error: {f}: {e}")
+                if add_funcs:
+                    codes = [func["code"] for func in add_funcs]
+                    get_device_and_prepare()
+                    encode = partial(model.encode, show_progress_bar=True)
+                    embeddings = encode(codes, batch_size=32, convert_to_numpy=True)
+                    if cluster.index is None and len(embeddings) > 0:
+                        faiss_index = faiss.IndexFlatL2(embeddings.shape[1])
+                        faiss_index.add(embeddings)
+                        cluster.index = faiss_index
+                        cluster.meta = add_funcs
+                    else:
+                        cluster.index.add(embeddings)
+                        cluster.meta.extend(add_funcs)
+                    cluster.save()
