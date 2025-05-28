@@ -20,6 +20,7 @@ app = FastAPI()
 
 # モデルロード
 model = SentenceTransformer("Shuu12121/CodeSearch-ModernBERT-Owl-2.0-Plus")
+model.half()  # 半精度化
 model_device = None  # 現在のデバイスを記録
 
 def get_device_and_prepare():
@@ -140,11 +141,11 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
     # 追加・変更ファイルのみ再抽出
     if added_or_modified:
         if len(added_or_modified) < 16:
-            for fpath in tqdm(added_or_modified, desc="Indexing (serial, diff)"):
+            for fpath in tqdm(added_or_modified, desc="Indexing (serial, diff)", disable=False):
                 results.extend(process_file(fpath))
         else:
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                for res in tqdm(executor.map(process_file, added_or_modified), total=len(added_or_modified), desc="Indexing (parallel, diff)"):
+                for res in tqdm(executor.map(process_file, added_or_modified), total=len(added_or_modified), desc="Indexing (parallel, diff)", disable=False):
                     results.extend(res)
     # 削除ファイルは何もしない（除外）
 
