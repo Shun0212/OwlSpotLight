@@ -33,12 +33,16 @@ _OwlSpotlight is a semantic code search extension for Python that anyone can use
   Just set up a Python virtual environment and install dependencies to get started.
 
 - **Apple Silicon最適化 / Optimized for Apple Silicon**  
-  最新のMac (M1/M2/M3/M4) でも高速動作。  
-  Runs fast on the latest Apple Silicon Macs.
+  最新のMac (M1/M2/M3/M4) では動作確認済みです。  
+  Runs on the latest Apple Silicon Macs (M1/M2/M3/M4; tested).
+
+- **GPU・CUDA環境について / About GPU & CUDA Environments**  
+  GPUやCUDA環境での動作は現時点で十分な確認ができていません。  
+  Operation on GPU or CUDA environments has not been fully tested yet.
 
 - **今後も拡張予定 / Actively Improving**  
-  CUDAやflash-attention対応、さらなる機能追加も予定しています。  
-  CUDA/flash-attention support and more features are planned.
+  CUDAやflash-attention対応、さらなる機能追加も予定しています。また、現状はPythonのみ対応ですが、CodeSearch-ModernBERT-Owl-2.0は複数言語対応モデルのため、今後も対応言語を追加予定です。  
+  CUDA/flash-attention support and more features are planned. Currently, only Python is supported, but since CodeSearch-ModernBERT-Owl-2.0 is a multi-language model, support for more languages is planned in the future.
 
 ---
 
