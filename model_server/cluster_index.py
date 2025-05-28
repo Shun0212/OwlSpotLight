@@ -49,5 +49,35 @@ class ClusterIndex:
     def update_files(self, added: List[Dict[str, Any]], deleted_files: List[str], embeddings: np.ndarray, ids: List[int]):
         # 追加/更新: add_with_ids, 削除: remove_ids
         # meta, file_map, indexを更新
-        # ...実装は後続で追加...
-        pass
+        with self.lock:
+            # 削除処理
+            remove_ids = set()
+            for file in deleted_files:
+                if file in self.file_map:
+                    remove_ids.update(self.file_map[file])
+                    del self.file_map[file]
+            if remove_ids and self.index is not None:
+                remove_ids_list = list(remove_ids)
+                self.index.remove_ids(np.array(remove_ids_list, dtype=np.int64))
+                # metaからも削除
+                self.meta = [m for i, m in enumerate(self.meta) if i not in remove_ids]
+                # file_mapのfunc_idも再構成
+                new_file_map = {}
+                id_map = {}
+                new_idx = 0
+                for i, m in enumerate(self.meta):
+                    id_map[i] = new_idx
+                    new_idx += 1
+                for file, ids in self.file_map.items():
+                    new_file_map[file] = [id_map[i] for i in ids if i in id_map]
+                self.file_map = new_file_map
+            # 追加処理
+            if len(added) > 0 and embeddings is not None and self.index is not None:
+                start_id = len(self.meta)
+                self.index.add_with_ids(embeddings, np.array(ids, dtype=np.int64))
+                self.meta.extend(added)
+                for i, item in enumerate(added):
+                    file = item.get('file')
+                    if file:
+                        self.file_map.setdefault(file, []).append(ids[i])
+            self.save()
