@@ -21,7 +21,7 @@
 2. Python 3.11 がインストールされていない場合、インストールします:
    ```zsh
    brew install pyenv
-   pyenv install 3.11.9
+   pyenv install 3.11
    ```
 3. モデルサーバー用の Python 環境をセットアップします:
    ```zsh
@@ -34,7 +34,7 @@
    ```
 4. VS Code で本フォルダを開き、デバッグモード（F5 または「実行とデバッグ」→「拡張機能のデバッグ」）で起動します。
 5. サイドバー「OwlSpotlight」から「サーバー起動」ボタンを押してください。  
-   ※ 検索を行うたびに、まず「サーバー起動」を押してからご利用ください。
+   ※ エディタを再起動するたびに、まず「サーバー起動」を押してからご利用ください。
 6. 検索バーに関数名やコード断片を入力し「検索」ボタンを押します。  
    ※ 一度サーバーを起動しインデックスが作成されれば、以降は変更がない限り高速に検索できます。
 
@@ -59,7 +59,7 @@ It uses a custom-developed model: [CodeSearch-ModernBERT-Owl-2.0-Plus](https://h
 2. If Python 3.11 is not installed, install it:
    ```zsh
    brew install pyenv
-   pyenv install 3.11.9
+   pyenv install 3.11
    ```
 3. Set up the Python environment for the model server:
    ```zsh
@@ -71,8 +71,8 @@ It uses a custom-developed model: [CodeSearch-ModernBERT-Owl-2.0-Plus](https://h
    cd ..
    ```
 4. Open this folder in VS Code and start in debug mode (press F5 or use "Run & Debug" → "Start Debugging").
-5. In the OwlSpotlight sidebar, click the "Start Server" button before each search.  
-   ※ Always click "Start Server" before searching.
+5. In the OwlSpotlight sidebar, click the "Start Server" button.  
+   ※ Please click "Start Server" every time you restart the editor before searching.
 6. Enter a function name or code fragment in the search bar and click "Search".  
    ※ After the first run, an index is created, so as long as there are no changes, subsequent searches will be much faster.
 
@@ -104,29 +104,45 @@ It uses a custom-developed model: [CodeSearch-ModernBERT-Owl-2.0-Plus](https://h
 
 ---
 
-## Setup & Debug Instructions (English)
+## 技術的な特徴・アーキテクチャのポイント / Technical Highlights
 
-1. Install npm if not already installed:
-   ```zsh
-   brew install npm
-   ```
-2. Set up the Python environment for the model server:
-   ```zsh
-   cd model_server
-   pyenv local 3.11
-   python3 -m venv .venv
-   source .venv/bin/activate
-   pip install -r requirements.txt
-   cd ..
-   ```
-3. Clone this repository:
-   ```zsh
-   git clone https://github.com/yourname/owlspotlight.git
-   cd owlspotlight
-   ```
-4. Open the folder in VS Code.
-5. Start the extension in debug mode (press F5 or use "Run & Debug" → "Start Debugging").
-6. In the OwlSpotlight sidebar, click "Start Server" and test the extension.
+- **独自BERTモデルによる意味的コード検索 / Custom BERT-based model for semantic code search**
+  - [CodeSearch-ModernBERT-Owl-2.0-Plus](https://huggingface.co/Shuu12121/CodeSearch-ModernBERT-Owl-2.0-Plus) を活用し、自然言語・コード断片の両方で高精度な関数検索が可能。
+  - Utilizes [CodeSearch-ModernBERT-Owl-2.0-Plus](https://huggingface.co/Shuu12121/CodeSearch-ModernBERT-Owl-2.0-Plus) for high-accuracy function search with both natural language and code fragments.
+- **関数単位の自動インデックス化と差分更新 / Automatic function-level indexing and incremental updates**
+  - コードベース全体を関数単位で自動抽出し、`.gitignore` 準拠で不要ファイルを除外。
+  - Extracts all functions automatically, respects `.gitignore` to exclude unnecessary files.
+  - 追加ファイルは差分のみインデックス化、変更ディレクトリは問答無用で再構築することで、大規模リポジトリでも効率的な運用が可能。
+  - Newly added files are indexed incrementally; directories with changes are fully rebuilt for efficient operation on large repositories.
+- **クラスタ分割によるスケーラビリティと高速化 / Clustered indexing for scalability and speed**
+  - ディレクトリ単位でクラスタ分割し、各クラスタごとにFAISSインデックスを管理。
+  - Splits the codebase into clusters by directory, each with its own FAISS index.
+  - クラスタごとに部分的な再構築や検索ができるため、巨大なプロジェクトでもメモリ消費・検索速度を最適化。
+  - Enables partial rebuild/search per cluster, optimizing memory usage and search speed for large projects.
+- **FAISSによる高速ベクトル検索 / Fast vector search with FAISS**
+  - 埋め込みベクトルの類似度計算にFAISSを利用し、数万関数規模でも高速な検索レスポンスを実現。
+  - Uses FAISS for similarity search, providing fast responses even with tens of thousands of functions.
+- **VS Code拡張としての高いユーザビリティ / High usability as a VS Code extension**
+  - サイドバーUIから直感的に検索・ジャンプ・ハイライトが可能。
+  - Intuitive sidebar UI for search, jump, and highlight.
+  - 検索結果は即座にエディタ上でハイライト表示。
+  - Search results are instantly highlighted in the editor.
+- **マルチプラットフォーム・最新環境対応 / Multi-platform & modern environment support**
+  - Apple Silicon (M1/M2/M3/M4) など最新Macにも最適化。PyTorchのmps対応で高速動作。
+  - Optimized for Apple Silicon (M1/M2/M3/M4) with PyTorch mps backend.
+  - **CUDA環境では未検証**ですが、今後対応予定です。
+  - **CUDA environments are not yet tested**, but support is planned.
+- **堅牢な差分検出・インデックス管理 / Robust diff detection and index management**
+  - ファイルの追加・削除・関数の消失も正確に検知し、インデックスを自動で更新。
+  - Detects file addition, deletion, and function removal accurately, updating the index automatically.
+  - クラスタごとにメタ情報・インデックスを分離管理し、部分的な再構築やGCも容易。
+  - Each cluster manages its own metadata and index, making partial rebuilds and GC easy.
+- **flash-attention対応モデルの場合 / If using a flash-attention compatible model**
+  - flash-attentionに対応したモデルを利用する場合は、仮想環境に`flash-attn`を追加インストールしてください。
+  - Please install `flash-attn` in your virtual environment:
+    ```zsh
+    pip install flash-attn --no-build-isolation
+    ```
 
 ---
 
