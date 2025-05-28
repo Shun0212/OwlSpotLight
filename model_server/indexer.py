@@ -6,14 +6,20 @@ class CodeIndexer:
     def __init__(self, dim: int = 768):
         self.index = faiss.IndexFlatIP(dim)
         self.metadata = []
-        self.functions = []  # 追加: 関数リストを保持
+        self.functions = []  # 関数リスト
+        self.code2emb = {}   # コード文字列→埋め込みベクトル
 
     def add_functions(self, functions: list[dict]):
         codes = [f["code"] for f in functions]
-        embeddings = encode_code(codes)
+        new_codes = [c for c in codes if c not in self.code2emb]
+        if new_codes:
+            new_embs = encode_code(new_codes)
+            for c, e in zip(new_codes, new_embs):
+                self.code2emb[c] = e
+        embeddings = np.stack([self.code2emb[c] for c in codes])
         self.index.add(embeddings)
         self.metadata.extend(functions)
-        self.functions.extend(functions)  # 追加: 関数リストにも追加
+        self.functions.extend(functions)
 
     def search(self, query_code: str, top_k=5):
         query_vec = encode_code([query_code])

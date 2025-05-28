@@ -20,6 +20,15 @@ app = FastAPI()
 
 # モデルロード
 model = SentenceTransformer("Shuu12121/CodeSearch-ModernBERT-Owl-2.0-Plus")
+model_device = None  # 現在のデバイスを記録
+
+def get_device_and_prepare():
+    global model_device
+    device = get_device()
+    if model_device != device:
+        model.to(device)
+        model_device = device
+    return device
 
 # ✅ リクエスト用の Pydantic モデル
 class EmbedRequest(BaseModel):
@@ -155,14 +164,14 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
 @app.post("/embed")
 async def embed(req: EmbedRequest):
     print("/embed called")
-    device = get_device()
-    embeddings = model.encode(req.texts, convert_to_numpy=True, device=device).tolist()
+    get_device_and_prepare()
+    embeddings = model.encode(req.texts, convert_to_numpy=True).tolist()
     return {"embeddings": embeddings}
 
 @app.post("/index_and_search")
 async def index_and_search(req: IndexAndSearchRequest):
     print("/index_and_search called")
-    device = get_device()
+    get_device_and_prepare()
     with index_lock:
         if global_indexer is None:
             # 初回のみインデックス作成
@@ -196,7 +205,7 @@ async def index_status():
 @app.post("/search")
 async def search_api(query: str, top_k: int = 5):
     print(f"/search called with query: {query}")
-    device = get_device()
+    get_device_and_prepare()
     with index_lock:
         if not global_index_state.indexer:
             return {"results": [], "error": "No index built."}
@@ -205,15 +214,13 @@ async def search_api(query: str, top_k: int = 5):
 
 @app.post("/search_functions")
 async def search_functions_api(directory: str, query: str, top_k: int = 5):
-    # 1. 関数抽出・埋め込み・インデックス作成（毎回一時的に実行）
     results, file_count, indexer = build_index(directory)
     if not results:
         return {"results": [], "message": "No functions found."}
-    # 2. クエリの埋め込み
-    query_emb = model.encode([query], device=get_device())
+    get_device_and_prepare()
+    query_emb = model.encode([query])
     import numpy as np
     D, I = indexer.index.search(np.array(query_emb).astype('float32'), top_k)
-    # 3. 検索結果を整形
     found = []
     for idx in I[0]:
         if 0 <= idx < len(results):
@@ -255,12 +262,10 @@ def build_index_and_search(directory: str, query: str, file_ext: str = ".py", to
     if not results:
         return {"results": [], "message": "No functions found."}
 
-    device = get_device()
-    print(device)
-    model.to(device)
+    get_device_and_prepare()
     codes = [func["code"] for func in results]
-    embeddings = model.encode(codes, batch_size=1, show_progress_bar=True, device=device)
-    query_emb = model.encode([query], device=device)
+    embeddings = model.encode(codes, batch_size=1, show_progress_bar=True)
+    query_emb = model.encode([query])
     index = faiss.IndexFlatL2(embeddings.shape[1])
     index.add(np.array(embeddings).astype('float32'))
     D, I = index.search(np.array(query_emb).astype('float32'), top_k)
@@ -272,11 +277,7 @@ def build_index_and_search(directory: str, query: str, file_ext: str = ".py", to
 
 @app.post("/search_functions_simple")
 async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
-    """
-    状態保存型: 既存インデックスが最新ならそれを使い、古い/未構築なら再構築して検索
-    """
     with index_lock:
-        # インデックスが最新か判定
         if (
             global_index_state.indexer is not None and
             global_index_state.directory == req.directory and
@@ -284,29 +285,15 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
             global_index_state.is_up_to_date()
         ):
             indexer = global_index_state.indexer
-            results = []
-            for f in global_index_state.file_mtimes.keys():
-                funcs = extract_functions(f)
-                for func in funcs:
-                    func["file"] = f
-                results.extend(funcs)
+            results = indexer.functions
         else:
-            # インデックス再構築
             results, _, indexer = build_index(req.directory, ".py", update_state=True)
         if not results:
             return {"results": [], "message": "No functions found."}
-        device = get_device()
-        model.to(device)
+        get_device_and_prepare()
         codes = [func["code"] for func in results]
-        embeddings = model.encode(codes, batch_size=1, show_progress_bar=True, device=device)
-        query_emb = model.encode([req.query], device=device)
-        index = faiss.IndexFlatL2(embeddings.shape[1])
-        index.add(np.array(embeddings).astype('float32'))
-        D, I = index.search(np.array(query_emb).astype('float32'), req.top_k)
-        found = []
-        for idx in I[0]:
-            if 0 <= idx < len(results):
-                found.append(results[idx])
+        query_emb = model.encode([req.query])
+        found = indexer.search(req.query, top_k=req.top_k)
         return {"results": found, "num_functions": len(results), "num_files": len(results)}
 
 def get_device():
