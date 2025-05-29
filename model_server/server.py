@@ -15,6 +15,10 @@ from pathspec.patterns import GitWildMatchPattern
 import sys
 from functools import partial
 from pathlib import Path
+import json
+import hashlib
+
+OWL_INDEX_DIR = ".owl_index"
 
 from extractor import extract_functions
 from indexer import CodeIndexer
@@ -65,29 +69,128 @@ class FunctionRangeRequest(BaseModel):
 
 # サーバー全体で1つのインデックスを保持
 index_lock = Lock()
+global_indexer = None
 
 # インデックス情報を保持するクラス
 class GlobalIndexerState:
     def __init__(self):
         self.indexer: Optional[CodeIndexer] = None
-        self.file_mtimes: Dict[str, float] = {}
+        self.file_info: Dict[str, Dict[str, float | str]] = {}  # mtimeとhashを保持
         self.directory: Optional[str] = None
         self.last_indexed: float = 0.0
         self.file_ext: str = ".py"
         self.embeddings: Optional[np.ndarray] = None  # 追加: 関数埋め込み
         self.faiss_index: Optional[faiss.IndexFlatL2] = None  # 追加: FAISSインデックス
+        self.index_dir = None  # ディレクトリごとに動的に設定
 
-    def is_up_to_date(self, tol: float = 1e-3) -> bool:
-        if not self.directory:
-            return False
-        for path, old_mtime in self.file_mtimes.items():
-            if not os.path.exists(path):
+    def set_index_dir(self, directory: str):
+        safe_dir = os.path.basename(os.path.abspath(directory))
+        self.index_dir = os.path.join(os.getcwd(), OWL_INDEX_DIR, safe_dir)
+        # ディレクトリの作成は保存時のみ行う（startup時は作成しない）
+
+    def is_up_to_date(self, tol: float = 1e-3, directory: Optional[str] = None) -> bool:
+        # directory引数が指定された場合はそれとself.directoryを比較
+        if directory is not None:
+            if os.path.abspath(directory) != os.path.abspath(self.directory or ""):
+                print(f"[is_up_to_date] directory mismatch: {directory} != {self.directory}")
                 return False
-            if abs(os.path.getmtime(path) - old_mtime) > tol:
+        if not self.directory:
+            print("[is_up_to_date] self.directory is None")
+            return False
+        for path, info in self.file_info.items():
+            if not os.path.exists(path):
+                print(f"[is_up_to_date] file missing: {path}")
+                return False
+            mtime = os.path.getmtime(path)
+            hash_now = file_hash(path)
+            if abs(mtime - info["mtime"]) > tol or hash_now != info["hash"]:
+                print(f"[is_up_to_date] file changed: {path}")
                 return False
         return True
 
+    def clear_cache(self):
+        """メモリキャッシュをクリアして強制的に再構築を促す"""
+        self.indexer = None
+        self.embeddings = None
+        self.faiss_index = None
+        self.file_info = {}
+        self.directory = None
+        self.last_indexed = 0.0
+
+    def force_rebuild_from_disk(self, directory: str):
+        """ディスクから強制的にインデックスを再構築"""
+        self.clear_cache()
+        self.load(directory)
+
+    def save(self):
+        if not self.index_dir:
+            return
+        os.makedirs(self.index_dir, exist_ok=True)
+        # 関数リスト
+        if self.indexer:
+            with open(os.path.join(self.index_dir, "functions.json"), "w", encoding="utf-8") as f:
+                json.dump(self.indexer.functions, f, ensure_ascii=False)
+        # 埋め込み
+        if self.embeddings is not None:
+            np.save(os.path.join(self.index_dir, "embeddings.npy"), self.embeddings)
+        # faiss
+        if self.faiss_index is not None:
+            faiss.write_index(self.faiss_index, os.path.join(self.index_dir, "faiss.index"))
+        # その他メタ
+        meta = {
+            "file_info": self.file_info,
+            "directory": os.path.abspath(self.directory) if self.directory else None,
+            "last_indexed": self.last_indexed,
+            "file_ext": self.file_ext
+        }
+        with open(os.path.join(self.index_dir, "meta.json"), "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False)
+
+    def load(self, directory: str):
+        directory = os.path.abspath(directory)
+        self.set_index_dir(directory)
+        
+        # インデックスディレクトリが存在しない場合は何もしない（メモリキャッシュ優先）
+        if not os.path.exists(self.index_dir):
+            self.indexer = None
+            self.embeddings = None
+            self.faiss_index = None
+            self.file_info = {}
+            self.directory = None
+            self.last_indexed = 0.0
+            self.file_ext = ".py"
+            return
+            
+        try:
+            with open(os.path.join(self.index_dir, "functions.json"), "r", encoding="utf-8") as f:
+                functions = json.load(f)
+            self.indexer = CodeIndexer()
+            self.indexer.add_functions(functions)
+        except Exception:
+            self.indexer = None
+        try:
+            self.embeddings = np.load(os.path.join(self.index_dir, "embeddings.npy"))
+        except Exception:
+            self.embeddings = None
+        try:
+            self.faiss_index = faiss.read_index(os.path.join(self.index_dir, "faiss.index"))
+        except Exception:
+            self.faiss_index = None
+        try:
+            with open(os.path.join(self.index_dir, "meta.json"), "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            self.file_info = meta.get("file_info", {})
+            self.directory = os.path.abspath(meta.get("directory", directory))
+            self.last_indexed = meta.get("last_indexed", 0.0)
+            self.file_ext = meta.get("file_ext", ".py")
+        except Exception:
+            self.file_info = {}
+            self.directory = None
+            self.last_indexed = 0.0
+            self.file_ext = ".py"
+
 global_index_state = GlobalIndexerState()
+# サーバー起動時は自動ロードを行わない（メモリキャッシュ優先、必要時のみディスクアクセス）
 
 def load_gitignore_spec(root_dir: str) -> Optional[PathSpec]:
     """
@@ -109,6 +212,27 @@ def is_ignored(path: str, spec: Optional[PathSpec], root_dir: str) -> bool:
 
 # ディレクトリ内の全ファイルから関数抽出・インデックス作成（一時的なインデックス、状態保存なし）
 def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, update_state: bool = False):
+    import hashlib
+    def func_id(func):
+        # ファイルパス・関数名・lineno・end_linenoを組み合わせて一意なIDを生成
+        key = f"{func.get('file','')}|{func.get('name','')}|{func.get('lineno','')}|{func.get('end_lineno','')}"
+        return hashlib.sha256(key.encode()).hexdigest()
+
+    directory = os.path.abspath(directory)
+    
+    # メモリキャッシュが有効で、同じディレクトリで最新なら、ディスクアクセスをスキップ
+    if (global_index_state.indexer is not None and 
+        global_index_state.directory == directory and 
+        global_index_state.file_ext == file_ext and
+        global_index_state.is_up_to_date(directory=directory)):
+        print(f"[build_index] メモリキャッシュが最新、ディスクアクセスをスキップ (funcs={len(global_index_state.indexer.functions)}, files={len(global_index_state.file_info)})")
+        return (global_index_state.indexer.functions, 
+                len(global_index_state.file_info), 
+                global_index_state.indexer)
+    
+    # 必要な時のみディスクからロード
+    global_index_state.load(directory)
+    global_index_state.set_index_dir(directory)
     spec = load_gitignore_spec(directory)
     file_paths = []
     for root, dirs, files in os.walk(directory):
@@ -122,25 +246,25 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
             file_paths.append(fpath)
 
     # 差分インデックス用: 既存情報
-    prev_mtimes = dict(global_index_state.file_mtimes) if update_state else {}
+    prev_info = dict(global_index_state.file_info) if update_state else {}
     prev_indexer = global_index_state.indexer if update_state else None
     prev_funcs_by_file = {}
     if prev_indexer:
         for func in prev_indexer.functions:
             prev_funcs_by_file.setdefault(func.get("file"), []).append(func)
 
-    # 追加・変更・削除ファイルを判定
-    new_mtimes = {f: os.path.getmtime(f) for f in file_paths}
-    added_or_modified = [f for f in file_paths if f not in prev_mtimes or abs(prev_mtimes.get(f, 0) - new_mtimes[f]) > 1e-3]
-    unchanged = [f for f in file_paths if f in prev_mtimes and abs(prev_mtimes.get(f) - new_mtimes[f]) <= 1e-3]
-    deleted = [f for f in prev_mtimes if f not in new_mtimes]
+    # 追加・変更・削除ファイルを判定（mtimeとhash両方で判定）
+    new_info = {f: {"mtime": os.path.getmtime(f), "hash": file_hash(f)} for f in file_paths}
+    added_or_modified = [f for f in file_paths if f not in prev_info or prev_info[f]["hash"] != new_info[f]["hash"]]
+    unchanged = [f for f in file_paths if f in prev_info and prev_info[f]["hash"] == new_info[f]["hash"]]
+    deleted = [f for f in prev_info if f not in new_info]
 
     # 変更・削除ゼロなら何もしないで戻る（キャッシュ再利用）
     if update_state and not added_or_modified and not deleted:
         print("[build_index] up-to-date ⇒ cache reuse")
         return (
             global_index_state.indexer.functions,
-            len(global_index_state.file_mtimes),
+            len(global_index_state.file_info),
             global_index_state.indexer,
         )
 
@@ -168,22 +292,53 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
                 for res in tqdm(executor.map(process_file, added_or_modified), total=len(added_or_modified), desc="Indexing (parallel, diff)", disable=False, file=sys.stdout):
                     added_modified_funcs.extend(res)
         results.extend(added_modified_funcs)
-    # 削除ファイルは何もしない（除外）
 
-    indexer = CodeIndexer()
-    indexer.add_functions(results)
-    print(f"[build_index-diff] {len(file_paths)} files scanned, {len(results)} functions indexed. (added/modified: {len(added_or_modified)}, deleted: {len(deleted)}, unchanged: {len(unchanged)})")
-
+    # --- 差分高速化: 削除ファイルがあっても全再エンコードを避ける ---
     if update_state:
-        global_index_state.indexer = indexer
-        global_index_state.directory = directory
-        global_index_state.file_ext = file_ext
-        global_index_state.last_indexed = float(__import__('time').time())
-        global_index_state.file_mtimes = new_mtimes
-        # 埋め込みとFAISSインデックスも保存
-        # 削除ファイルがあれば全件再構築、なければ追記のみ
-        if deleted or global_index_state.embeddings is None or global_index_state.faiss_index is None:
-            codes = [func["code"] for func in results]
+        # 1. 既存関数IDリスト
+        prev_funcs = prev_indexer.functions if prev_indexer else []
+        prev_func_ids = [func_id(f) for f in prev_funcs]
+        prev_func_id2idx = {fid: i for i, fid in enumerate(prev_func_ids)}
+        # 2. 削除ファイルに含まれる関数ID
+        deleted_func_ids = set()
+        for f in deleted:
+            for func in prev_funcs_by_file.get(f, []):
+                deleted_func_ids.add(func_id(func))
+        # 3. 変更のない関数ID
+        unchanged_func_ids = [func_id(f) for f in results]
+        # 4. 追加・変更分の関数ID
+        added_func_ids = [func_id(f) for f in added_modified_funcs]
+        # 5. 新しい全関数リスト
+        new_funcs = results
+        # 6. 新しい全関数IDリスト
+        new_func_ids = unchanged_func_ids + added_func_ids
+        # 7. 埋め込みの再構築
+        if prev_indexer and global_index_state.embeddings is not None and global_index_state.faiss_index is not None:
+            # 既存埋め込みから削除分を除外
+            prev_embeddings = global_index_state.embeddings
+            keep_indices = [prev_func_id2idx[fid] for fid in unchanged_func_ids if fid in prev_func_id2idx]
+            kept_embeddings = prev_embeddings[keep_indices] if keep_indices else np.zeros((0, prev_embeddings.shape[1]), dtype=prev_embeddings.dtype)
+            # 追加・変更分の埋め込み
+            if added_modified_funcs:
+                get_device_and_prepare()
+                encode = partial(model.encode, show_progress_bar=True)
+                new_codes = [func["code"] for func in added_modified_funcs]
+                new_embeddings = encode(new_codes, batch_size=32, convert_to_numpy=True)
+                embeddings = np.vstack([kept_embeddings, new_embeddings]) if kept_embeddings.shape[0] > 0 else new_embeddings
+            else:
+                embeddings = kept_embeddings
+            # FAISSインデックス再構築
+            if embeddings is not None and embeddings.shape[0] > 0:
+                faiss_index = faiss.IndexFlatL2(embeddings.shape[1])
+                faiss_index.add(embeddings)
+            else:
+                faiss_index = None
+                embeddings = None
+            global_index_state.embeddings = embeddings
+            global_index_state.faiss_index = faiss_index
+        else:
+            # 初回 or キャッシュなし: 全件エンコード
+            codes = [func["code"] for func in new_funcs]
             if codes:
                 get_device_and_prepare()
                 encode = partial(model.encode, show_progress_bar=True)
@@ -195,18 +350,18 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
             else:
                 global_index_state.embeddings = None
                 global_index_state.faiss_index = None
-        else:
-            # 追加・変更分だけエンコードして追記
-            if added_modified_funcs:
-                get_device_and_prepare()
-                encode = partial(model.encode, show_progress_bar=True)
-                new_codes = [func["code"] for func in added_modified_funcs]
-                new_embeddings = encode(new_codes, batch_size=32, convert_to_numpy=True)
-                # vstackで追記
-                global_index_state.embeddings = np.vstack([global_index_state.embeddings, new_embeddings])
-                global_index_state.faiss_index.add(new_embeddings)
-        # 何もなければ何もしない
-
+        # インデックス・メタ情報更新
+        indexer = CodeIndexer()
+        indexer.add_functions(new_funcs)
+        global_index_state.indexer = indexer
+        global_index_state.directory = os.path.abspath(directory)
+        global_index_state.file_ext = file_ext
+        global_index_state.last_indexed = float(__import__('time').time())
+        global_index_state.file_info = new_info
+        global_index_state.save()
+    else:
+        indexer = CodeIndexer()
+        indexer.add_functions(results)
     return results, len(file_paths), indexer
 
 @app.post("/embed")
@@ -220,6 +375,7 @@ async def embed(req: EmbedRequest):
 async def index_and_search(req: IndexAndSearchRequest):
     print("/index_and_search called")
     get_device_and_prepare()
+    global global_indexer
     with index_lock:
         if global_indexer is None:
             # 初回のみインデックス作成
@@ -239,13 +395,22 @@ async def build_index_api(req: BuildIndexRequest):
         results, file_count, _ = build_index(req.directory, req.file_ext, update_state=True)
     return {"num_functions": len(results), "num_files": file_count}
 
+@app.post("/force_rebuild_index")
+async def force_rebuild_index_api(req: BuildIndexRequest):
+    """キャッシュをクリアして強制的にインデックスを再構築"""
+    print(f"/force_rebuild_index called for directory: {req.directory}")
+    with index_lock:
+        global_index_state.clear_cache()
+        results, file_count, _ = build_index(req.directory, req.file_ext, update_state=True)
+    return {"num_functions": len(results), "num_files": file_count, "message": "Index forcefully rebuilt"}
+
 @app.get("/index_status")
 async def index_status():
     print("/index_status called")
     up_to_date = global_index_state.is_up_to_date()
     return IndexStatus(
         directory=global_index_state.directory or "",
-        indexed_files=list(global_index_state.file_mtimes.keys()),
+        indexed_files=list(global_index_state.file_info.keys()),
         last_indexed=global_index_state.last_indexed,
         up_to_date=up_to_date
     )
@@ -287,19 +452,19 @@ async def search_functions_api(directory: str, query: str, top_k: int = 5):
     return {"results": found[:top_k], "num_clusters": len(cluster_manager.cluster_indexes)}
 
 def build_index_and_search(directory: str, query: str, file_ext: str = ".py", top_k: int = 5, max_workers: int = 8):
-    # 既存インデックス・埋め込み・faiss_indexが使える場合は再利用
+    # メモリキャッシュが有効で最新なら、ディスクアクセスをスキップ
     if (
         global_index_state.indexer is not None and
         global_index_state.directory == directory and
         global_index_state.file_ext == file_ext and
-        global_index_state.is_up_to_date() and
+        global_index_state.is_up_to_date(directory=directory) and
         global_index_state.embeddings is not None and
         global_index_state.faiss_index is not None
     ):
         results = global_index_state.indexer.functions
         embeddings = global_index_state.embeddings
         faiss_index = global_index_state.faiss_index
-        file_count = len(global_index_state.file_mtimes)
+        file_count = len(global_index_state.file_info)
     else:
         results, file_count, indexer = build_index(directory, file_ext, max_workers, update_state=True)
         embeddings = global_index_state.embeddings
@@ -322,20 +487,22 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
     print("embeddings_cached:", global_index_state.embeddings is not None)
     print("file_ext:", global_index_state.file_ext)
     with index_lock:
-        # 既存インデックス・埋め込み・faiss_indexが使える場合は再利用
+        # メモリキャッシュが有効で最新なら、ディスクアクセスをスキップ
         if (
             global_index_state.indexer is not None and
             global_index_state.directory == req.directory and
             global_index_state.file_ext == ".py" and
-            global_index_state.is_up_to_date() and
+            global_index_state.is_up_to_date(directory=req.directory) and
             global_index_state.embeddings is not None and
             global_index_state.faiss_index is not None
         ):
+            print("[search_functions_simple] メモリキャッシュを使用")
             results = global_index_state.indexer.functions
             embeddings = global_index_state.embeddings
             faiss_index = global_index_state.faiss_index
-            file_count = len(global_index_state.file_mtimes)
+            file_count = len(global_index_state.file_info)
         else:
+            print("[search_functions_simple] インデックス再構築")
             results, file_count, indexer = build_index(req.directory, ".py", update_state=True)
             embeddings = global_index_state.embeddings
             faiss_index = global_index_state.faiss_index
@@ -376,7 +543,17 @@ def get_device():
     else:
         return "cpu"
 
-OWL_INDEX_DIR = ".owl_index"
+# ファイルのハッシュ計算関数
+
+def file_hash(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(8192)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
 
 # ディレクトリ単位でクラスタ分割
 # 例: src/ → cluster_src, tests/ → cluster_tests
@@ -408,7 +585,7 @@ class ClusterManager:
         self.cluster_indexes = {}
         for cname in self.clusters:
             cpath = get_cluster_index_path(base_dir, cname)
-            os.makedirs(cpath, exist_ok=True)
+            # ディレクトリは作成せず、必要時に作成
             self.cluster_indexes[cname] = ClusterIndex(cname, Path(cpath))
 
     def get_cluster_for_file(self, file_path: str) -> str:
