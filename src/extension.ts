@@ -74,6 +74,92 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
 					const decorationType = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(255,0,0,0.3)' });
 					editor.setDecorations(decorationType, [new vscode.Range(pos, pos.translate(1, 0))]);
+
+					// --- クラス範囲検出とハイライト ---
+					const text = doc.getText();
+					const lines = text.split('\n');
+					let classStart = -1;
+					let classEnd = -1;
+					let funcIndent = lines[lineNum].search(/\S|$/); // 関数のインデント
+					// 上方向にclassを探す
+					for (let i = lineNum; i >= 0; i--) {
+						const l = lines[i];
+						if (/^\s*class\s+\w+/.test(l)) {
+							classStart = i;
+							break;
+						}
+					}
+					// 前回のクラスハイライトを消す
+					if (lastClassDeco) {
+						for (const ed of vscode.window.visibleTextEditors) {
+							ed.setDecorations(lastClassDeco, []);
+						}
+						lastClassDeco.dispose();
+						lastClassDeco = null;
+						lastClassEditor = null;
+					}
+					if (classStart !== -1) {
+						// クラスのインデント
+						const classIndent = lines[classStart].search(/\S|$/);
+						// ジャンプした関数が本当にクラス内か判定
+						if (funcIndent > classIndent) {
+							for (let i = classStart + 1; i < lines.length; i++) {
+								const l = lines[i];
+								if (l.trim() === '') { continue; }
+								const indent = l.search(/\S|$/);
+								// クラス宣言より同じか浅いインデントでdef/class宣言行が出てきたら、その直前まで
+								if (indent <= classIndent && i > classStart && (/^\s*def\s+\w+/.test(l) || /^\s*class\s+\w+/.test(l))) {
+									classEnd = i - 1;
+									break;
+								}
+							}
+							if (classEnd === -1) { classEnd = lines.length - 1; }
+							// クラス範囲をハイライト
+							const classDeco = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(0,128,255,0.15)' });
+							const startPos = new vscode.Position(classStart, 0);
+							const endPos = new vscode.Position(classEnd, lines[classEnd].length);
+							editor.setDecorations(classDeco, [new vscode.Range(startPos, endPos)]);
+							// 新しいクラスハイライトを記録
+							lastClassDeco = classDeco;
+							lastClassEditor = editor;
+						}
+					}
+					// --- ここまでクラス範囲ハイライト ---
+
+					// --- 関数呼び出し箇所のハイライト ---
+					if (msg.funcName) {
+						// ワークスペース全体で関数呼び出し箇所を検索
+						const funcName = msg.funcName;
+						const files = await vscode.workspace.findFiles('**/*.py', '**/site-packages/**');
+						for (const f of files) {
+							try {
+								const d = await vscode.workspace.openTextDocument(f);
+								const t = d.getText();
+								const callRegex = new RegExp(`\\b${funcName}\\s*\\(`, 'g');
+								let match;
+								const callRanges: vscode.Range[] = [];
+								while ((match = callRegex.exec(t)) !== null) {
+									const start = t.slice(0, match.index).split('\n').length - 1;
+									const lineText = d.lineAt(start).text;
+									const charIdx = lineText.indexOf(funcName);
+									if (charIdx !== -1) {
+										callRanges.push(new vscode.Range(new vscode.Position(start, charIdx), new vscode.Position(start, charIdx + funcName.length)));
+									}
+								}
+								if (callRanges.length > 0) {
+									const ed = await vscode.window.showTextDocument(d, { preview: false, preserveFocus: true });
+									const callDeco = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(255,255,0,0.25)' });
+									ed.setDecorations(callDeco, callRanges);
+									setTimeout(() => {
+										ed.setDecorations(callDeco, []);
+										callDeco.dispose();
+									}, 2000);
+								}
+							} catch (e) { /* ignore */ }
+						}
+					}
+					// --- ここまで関数呼び出し箇所ハイライト ---
+
 					setTimeout(() => {
 						editor.setDecorations(decorationType, []);
 						decorationType.dispose();
@@ -131,6 +217,10 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 </html>`;
 	}
 }
+
+// クラス範囲ハイライト用のグローバル変数
+let lastClassDeco: vscode.TextEditorDecorationType | null = null;
+let lastClassEditor: vscode.TextEditor | null = null;
 
 export function activate(context: vscode.ExtensionContext) {
 	console.log('Congratulations, your extension "owlspotlight" is now active!');
