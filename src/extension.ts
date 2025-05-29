@@ -72,14 +72,40 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					const pos = new vscode.Position(lineNum > 0 ? lineNum : 0, 0);
 					editor.selection = new vscode.Selection(pos, pos);
 					editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
-					const decorationType = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(255,255,0,0.5)' }); // yellow highlight
-					// --- まとめてデコレーションを適用 ---
-					const decorations: { type: vscode.TextEditorDecorationType, ranges: vscode.Range[] }[] = [];
+					// --- 既存のデコレーションをクリア ---
+					if (lastClassDeco && lastClassEditor) {
+						lastClassEditor.setDecorations(lastClassDeco, []);
+						lastClassDeco.dispose();
+						lastClassDeco = null;
+						lastClassEditor = null;
+					}
 
-					// 行（ジャンプ先1行）
-					decorations.push({ type: decorationType, ranges: [new vscode.Range(pos, pos.translate(1, 0))] });
+					// --- エディタ切り替え時のみデコレーションを消す ---
+					vscode.window.onDidChangeActiveTextEditor(() => {
+						if (lastClassDeco && lastClassEditor) {
+							lastClassEditor.setDecorations(lastClassDeco, []);
+							lastClassDeco.dispose();
+							lastClassDeco = null;
+							lastClassEditor = null;
+						}
+					});
+					vscode.window.onDidChangeTextEditorSelection((e) => {
+						// クリック時のみ消す（カーソル移動は残す）
+						if (e.kind === vscode.TextEditorSelectionChangeKind.Mouse && lastClassDeco && lastClassEditor) {
+							lastClassEditor.setDecorations(lastClassDeco, []);
+							lastClassDeco.dispose();
+							lastClassDeco = null;
+							lastClassEditor = null;
+						}
+					});
 
 					// --- ASTベースの関数 & クラス範囲ハイライト ---
+					const decorations: { type: vscode.TextEditorDecorationType, ranges: vscode.Range[] }[] = [];
+					// 行（ジャンプ先1行）
+					const decorationType = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(255,255,0,0.5)' }); // yellow highlight
+					const lineRange = new vscode.Range(pos, pos.translate(1, 0));
+					decorations.push({ type: decorationType, ranges: [lineRange] });
+
 					let symbols: vscode.DocumentSymbol[] | undefined = [];
 					try {
 						symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
@@ -115,103 +141,43 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 						target = found.symbol;
 						parentSymbol = found.parent;
 					}
-					let selfClass: vscode.DocumentSymbol | undefined = undefined;
-					if (target) {
-						// クラス（所属クラス・外側クラス）を先にデコレーション
-						if (target.kind === vscode.SymbolKind.Function || target.kind === vscode.SymbolKind.Method) {
-							// 親をたどって所属クラスを取得
-							let parent = parentSymbol;
-							while (parent && parent.kind !== vscode.SymbolKind.Class) {
-								parent = (parent as any).parent;
-							}
-							if (parent && parent.kind === vscode.SymbolKind.Class) {
-								selfClass = parent;
-								const selfClassDeco = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(0,200,100,0.10)' }); // green highlight, subtle, no border
-								decorations.push({ type: selfClassDeco, ranges: [parent.range] });
-								lastClassDeco = selfClassDeco;
-								lastClassEditor = editor;
-								// さらに外側のクラス（入れ子の場合）
-								let outerCls = (parent as any).parent;
-								while (outerCls && outerCls.kind !== vscode.SymbolKind.Class) { outerCls = outerCls.parent; }
-								if (outerCls && outerCls.kind === vscode.SymbolKind.Class) {
-									const outerClassDeco = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(255,0,128,0.07)' }); // pink for outer class, very subtle
-									decorations.push({ type: outerClassDeco, ranges: [outerCls.range] });
-								}
-							}
-							// 最後に関数部分をデコレーション
-							const funcDeco = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(0,128,255,0.2)' }); // blue highlight, less intense
-							decorations.push({ type: funcDeco, ranges: [target.range] });
-							lastClassDeco = funcDeco;
-							lastClassEditor = editor;
-						} else if (target.kind === vscode.SymbolKind.Class) {
-							// クラス自体を選択している場合
+					// 関数・メソッド
+					if (target && (target.kind === vscode.SymbolKind.Function || target.kind === vscode.SymbolKind.Method)) {
+						// 親をたどって所属クラスを取得
+						let parent = parentSymbol;
+						while (parent && parent.kind !== vscode.SymbolKind.Class) {
+							parent = (parent as any).parent;
+						}
+						if (parent && parent.kind === vscode.SymbolKind.Class) {
 							const selfClassDeco = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(0,200,100,0.10)' }); // green highlight, subtle, no border
-							decorations.push({ type: selfClassDeco, ranges: [target.range] });
+							decorations.push({ type: selfClassDeco, ranges: [parent.range] });
 							lastClassDeco = selfClassDeco;
 							lastClassEditor = editor;
 							// さらに外側のクラス（入れ子の場合）
-							let outerCls = parentSymbol;
-							while (outerCls && outerCls.kind !== vscode.SymbolKind.Class) { outerCls = (outerCls as any).parent; }
+							let outerCls = (parent as any).parent;
+							while (outerCls && outerCls.kind !== vscode.SymbolKind.Class) { outerCls = outerCls.parent; }
 							if (outerCls && outerCls.kind === vscode.SymbolKind.Class) {
 								const outerClassDeco = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(255,0,128,0.07)' }); // pink for outer class, very subtle
 								decorations.push({ type: outerClassDeco, ranges: [outerCls.range] });
 							}
 						}
-					} else {
-						// --- フォールバック: 旧インデント走査 ---
-						console.log('[OwlSpotlight] fallback: using old indent-based range detection');
-						const text = doc.getText();
-						const lines = text.split('\n');
-						let classStart = -1;
-						let classEnd = -1;
-						let funcIndent = lines[lineNum].search(/\S|$/);
-						for (let i = lineNum; i >= 0; i--) {
-							const l = lines[i];
-							if (/^\s*class\s+\w+/.test(l)) {
-								classStart = i;
-								break;
-							}
-						}
-						if (classStart !== -1) {
-							const classIndent = lines[classStart].search(/\S|$/);
-							if (funcIndent > classIndent) {
-								for (let i = classStart + 1; i < lines.length; i++) {
-									const l = lines[i];
-									if (l.trim() === '') { continue; }
-									const indent = l.search(/\S|$/);
-									if (indent <= classIndent && i > classStart && (/^\s*def\s+\w+/.test(l) || /^\s*class\s+\w+/.test(l))) {
-										classEnd = i - 1;
-										break;
-									}
-								}
-								if (classEnd === -1) { classEnd = lines.length - 1; }
-								const classDeco = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(255,0,128,0.3)' }); // pink highlight
-								const startPos = new vscode.Position(classStart, 0);
-								const endPos = new vscode.Position(classEnd, lines[classEnd].length);
-								editor.setDecorations(classDeco, [new vscode.Range(startPos, endPos)]);
-								lastClassDeco = classDeco;
-								lastClassEditor = editor;
-							}
-						}
-						// --- サーバーから関数範囲取得＆ハイライト（旧方式） ---
-						if (msg.funcName) {
-							const res = await fetch('http://localhost:8000/get_function_range', {
-								method: 'POST',
-								headers: { 'Content-Type': 'application/json' },
-								body: JSON.stringify({ file, func_name: msg.funcName })
-							});
-							if (res.ok) {
-								const data = await res.json() as any;
-								if (data && typeof data.start_line === 'number' && typeof data.end_line === 'number') {
-									const startPos = new vscode.Position(data.start_line - 1, 0);
-									const endLineText = doc.lineAt(data.end_line - 1).text;
-									const endPos = new vscode.Position(data.end_line - 1, endLineText.length);
-									const funcDeco = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(0,128,255,0.3)' }); // blue highlight
-									editor.setDecorations(funcDeco, [new vscode.Range(startPos, endPos)]);
-									lastClassDeco = funcDeco;
-									lastClassEditor = editor;
-								}
-							}
+						// 最後に関数部分をデコレーション
+						const funcDeco = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(0,128,255,0.2)' }); // blue highlight, less intense
+						decorations.push({ type: funcDeco, ranges: [target.range] });
+						lastClassDeco = funcDeco;
+						lastClassEditor = editor;
+					} else if (target && target.kind === vscode.SymbolKind.Class) {
+						// クラス自体を選択している場合
+						const selfClassDeco = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(0,200,100,0.10)' }); // green highlight, subtle, no border
+						decorations.push({ type: selfClassDeco, ranges: [target.range] });
+						lastClassDeco = selfClassDeco;
+						lastClassEditor = editor;
+						// さらに外側のクラス（入れ子の場合）
+						let outerCls = parentSymbol;
+						while (outerCls && outerCls.kind !== vscode.SymbolKind.Class) { outerCls = (outerCls as any).parent; }
+						if (outerCls && outerCls.kind === vscode.SymbolKind.Class) {
+							const outerClassDeco = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(255,0,128,0.07)' }); // pink for outer class, very subtle
+							decorations.push({ type: outerClassDeco, ranges: [outerCls.range] });
 						}
 					}
 					// --- まとめて適用 ---
