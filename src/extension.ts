@@ -38,17 +38,17 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				const query = msg.text;
 				const workspaceFolders = vscode.workspace.workspaceFolders;
 				if (!workspaceFolders || workspaceFolders.length === 0) {
-					webviewView.webview.postMessage({ type: 'error', message: 'ワークスペースフォルダが見つかりません' });
+					webviewView.webview.postMessage({ type: 'error', message: 'No workspace folder found' });
 					return;
 				}
 				const folderPath = workspaceFolders[0].uri.fsPath;
-				webviewView.webview.postMessage({ type: 'status', message: 'インデックス構築中...' });
+				webviewView.webview.postMessage({ type: 'status', message: 'Building index...' });
 				await fetch('http://localhost:8000/build_index', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify({ directory: folderPath, file_ext: '.py' })
 				});
-				webviewView.webview.postMessage({ type: 'status', message: '検索中...' });
+				webviewView.webview.postMessage({ type: 'status', message: 'Searching...' });
 				const res = await fetch('http://localhost:8000/search_functions_simple', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
@@ -185,7 +185,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 						editor.setDecorations(deco.type, deco.ranges);
 					}
 				} catch (e) {
-					vscode.window.showErrorMessage('ファイルを開けませんでした: ' + file);
+					vscode.window.showErrorMessage('Could not open file: ' + file);
 				}
 			}
 			if (msg.command === 'startServer') {
@@ -259,7 +259,7 @@ export function activate(context: vscode.ExtensionContext) {
 			// 正しいView IDでサイドバーを開く
 			await vscode.commands.executeCommand('workbench.view.extension.owlspotlight');
 			vscode.commands.executeCommand('owlspotlight.sidebar.focus');
-			vscode.window.showInformationMessage('サイドバーから検索してください');
+			vscode.window.showInformationMessage('Please use the sidebar to search.');
 		})
 	);
 
@@ -274,7 +274,7 @@ export function activate(context: vscode.ExtensionContext) {
 		terminal.sendText('source .venv/bin/activate', true);
 		terminal.sendText('uvicorn server:app --host 127.0.0.1 --port 8000 --reload', true);
 		terminal.show();
-		vscode.window.showInformationMessage('OwlSpotlightサーバーを新しいターミナルで起動しました');
+		vscode.window.showInformationMessage('OwlSpotlight server started in a new terminal.');
 	});
 	context.subscriptions.push(startServerDisposable);
 
@@ -296,7 +296,7 @@ export function activate(context: vscode.ExtensionContext) {
 		terminal.sendText('source .venv/bin/activate', true);
 		terminal.sendText('pip install --upgrade pip', true);
 		terminal.sendText('pip install -r requirements.txt', true);
-		vscode.window.showInformationMessage('OwlSpotlight Python 3.11環境セットアップコマンドを新しいターミナルで実行しました。pyenvやPython 3.11が未インストールの場合は指示に従ってください。完了後にサーバーを起動してください。');
+		vscode.window.showInformationMessage('OwlSpotlight Python 3.11 environment setup command executed in a new terminal. If pyenv or Python 3.11 is not installed, please follow the instructions. Start the server after setup is complete.');
 	});
 	context.subscriptions.push(setupEnvDisposable);
 }
