@@ -167,6 +167,22 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.window.showInformationMessage('OwlSpotlightサーバーを新しいターミナルで起動しました');
 	});
 	context.subscriptions.push(startServerDisposable);
+
+	// --- 環境セットアップコマンドを追加 ---
+	const setupEnvDisposable = vscode.commands.registerCommand('owlspotlight.setupEnv', async () => {
+		const serverDir = path.join(context.extensionPath, 'model_server');
+		const terminal = vscode.window.createTerminal({
+			name: 'OwlSpotlight Setup',
+			cwd: serverDir
+		});
+		terminal.show();
+		terminal.sendText('python3 -m venv .venv', true);
+		terminal.sendText('source .venv/bin/activate', true);
+		terminal.sendText('pip install --upgrade pip', true);
+		terminal.sendText('pip install -r requirements.txt', true);
+		vscode.window.showInformationMessage('OwlSpotlight Python環境セットアップコマンドを新しいターミナルで実行しました。完了後にサーバーを起動してください。');
+	});
+	context.subscriptions.push(setupEnvDisposable);
 }
 
 export function deactivate() {}

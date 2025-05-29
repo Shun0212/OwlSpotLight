@@ -6,6 +6,21 @@ _OwlSpotlight is a semantic code search extension for Python that anyone can use
 
 ---
 
+# クイックセットアップ / Quick Setup (Recommended)
+
+OwlSpotlight拡張機能には、Python環境の自動セットアップ機能が用意されています。
+
+## コマンドパレットの使い方 / How to Use the Command Palette
+
+1. VS Codeで本リポジトリを開きます。
+2. `Cmd+Shift+P`（Mac）または `Ctrl+Shift+P`（Windows/Linux）でコマンドパレットを開きます。
+3. `OwlSpotlight: Setup Python Environment` と入力して実行します。
+   - これにより `model_server/` ディレクトリで仮想環境の作成と依存パッケージのインストールが自動で行われます。
+4. セットアップ完了後、再度コマンドパレットで `OwlSpotlight: Start Server` を実行してサーバーを起動してください。
+5. その後はサイドバーから通常通り検索が利用できます。
+
+---
+
 ## OwlSpotlightの強み・おすすめポイント / What Makes OwlSpotlight Great
 
 - **直感的なUIと即応性 / Intuitive UI & Responsiveness**  

@@ -24,7 +24,7 @@
       "owlspotlight": [
         {
           "id": "owlspotlight.sidebar",
-          "name": "コード検索",
+          "name": "Code Search",
           "type": "webview"
         }
       ]
@@ -32,11 +32,15 @@
     "commands": [
       {
         "command": "owlspotlight.startServer",
-        "title": "OwlSpotlight: サーバー起動"
+        "title": "OwlSpotlight: Start Server"
       },
       {
         "command": "owlspotlight.searchCode",
-        "title": "OwlSpotlight: コード検索"
+        "title": "OwlSpotlight: Code Search"
+      },
+      {
+        "command": "owlspotlight.setupEnv",
+        "title": "OwlSpotlight: Setup Python Environment"
       }
     ]
   },
