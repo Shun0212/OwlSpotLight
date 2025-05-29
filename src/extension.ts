@@ -176,11 +176,17 @@ export function activate(context: vscode.ExtensionContext) {
 			cwd: serverDir
 		});
 		terminal.show();
-		terminal.sendText('python3 -m venv .venv', true);
+		// pyenvが入っているかチェックし、なければインストール案内
+		terminal.sendText('if ! command -v pyenv >/dev/null 2>&1; then echo "[OwlSpotlight] pyenv is not installed. Please install pyenv first. For example: brew install pyenv"; exit 1; fi', true);
+		// Python 3.11がpyenvで入っているかチェックし、なければインストール案内
+		terminal.sendText('if ! pyenv versions --bare | grep -q "^3.11"; then echo "[OwlSpotlight] Python 3.11 is not installed in pyenv. Please run: pyenv install 3.11"; exit 1; fi', true);
+		// pyenv local 3.11 & venv作成
+		terminal.sendText('pyenv local 3.11', true);
+		terminal.sendText('python3.11 -m venv .venv', true);
 		terminal.sendText('source .venv/bin/activate', true);
 		terminal.sendText('pip install --upgrade pip', true);
 		terminal.sendText('pip install -r requirements.txt', true);
-		vscode.window.showInformationMessage('OwlSpotlight Python環境セットアップコマンドを新しいターミナルで実行しました。完了後にサーバーを起動してください。');
+		vscode.window.showInformationMessage('OwlSpotlight Python 3.11環境セットアップコマンドを新しいターミナルで実行しました。pyenvやPython 3.11が未インストールの場合は指示に従ってください。完了後にサーバーを起動してください。');
 	});
 	context.subscriptions.push(setupEnvDisposable);
 }
