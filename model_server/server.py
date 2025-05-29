@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
 import torch
@@ -58,6 +58,10 @@ class SearchFunctionsSimpleRequest(BaseModel):
     directory: str
     query: str
     top_k: int = 5
+
+class FunctionRangeRequest(BaseModel):
+    file: str
+    func_name: str
 
 # サーバー全体で1つのインデックスを保持
 index_lock = Lock()
@@ -345,6 +349,23 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
             if 0 <= idx < len(results):
                 found.append(results[idx])
         return {"results": found, "num_functions": len(results), "num_files": file_count}
+
+@app.post("/get_function_range")
+async def get_function_range(req: FunctionRangeRequest):
+    """
+    指定ファイル・関数名に該当する関数の開始・終了行番号を返すAPI
+    """
+    try:
+        funcs = extract_functions(req.file)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"extract_functions error: {e}")
+    for func in funcs:
+        if func.get("name") == req.func_name:
+            return {
+                "start_line": func.get("lineno"),
+                "end_line": func.get("end_lineno")
+            }
+    raise HTTPException(status_code=404, detail="Function not found")
 
 def get_device():
     # Apple Silicon (M1/M2/M3) などで mps が使える場合は mps を優先

@@ -75,132 +75,92 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					const decorationType = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(255,0,0,0.3)' });
 					editor.setDecorations(decorationType, [new vscode.Range(pos, pos.translate(1, 0))]);
 
-					// --- クラス範囲検出とハイライト ---
-					const text = doc.getText();
-					const lines = text.split('\n');
-					let classStart = -1;
-					let classEnd = -1;
-					let funcIndent = lines[lineNum].search(/\S|$/); // 関数のインデント
-					// 上方向にclassを探す
-					for (let i = lineNum; i >= 0; i--) {
-						const l = lines[i];
-						if (/^\s*class\s+\w+/.test(l)) {
-							classStart = i;
-							break;
-						}
+					// --- ASTベースの関数 & クラス範囲ハイライト ---
+					let symbols: vscode.DocumentSymbol[] | undefined = [];
+					try {
+						symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
+							'vscode.executeDocumentSymbolProvider',
+							doc.uri
+						) ?? [];
+					} catch (e) {
+						symbols = [];
 					}
-					// 前回のクラスハイライトを消す
-					if (lastClassDeco) {
-						for (const ed of vscode.window.visibleTextEditors) {
-							ed.setDecorations(lastClassDeco, []);
-						}
-						lastClassDeco.dispose();
-						lastClassDeco = null;
-						lastClassEditor = null;
-					}
-					if (classStart !== -1) {
-						// クラスのインデント
-						const classIndent = lines[classStart].search(/\S|$/);
-						// ジャンプした関数が本当にクラス内か判定
-						if (funcIndent > classIndent) {
-							for (let i = classStart + 1; i < lines.length; i++) {
-								const l = lines[i];
-								if (l.trim() === '') { continue; }
-								const indent = l.search(/\S|$/);
-								// クラス宣言より同じか浅いインデントでdef/class宣言行が出てきたら、その直前まで
-								if (indent <= classIndent && i > classStart && (/^\s*def\s+\w+/.test(l) || /^\s*class\s+\w+/.test(l))) {
-									classEnd = i - 1;
-									break;
-								}
+					function findSymbol(list: vscode.DocumentSymbol[], pos: vscode.Position): vscode.DocumentSymbol | undefined {
+						for (const s of list) {
+							if (s.range.contains(pos)) {
+								// 子を優先（入れ子対応）
+								return findSymbol(s.children, pos) ?? s;
 							}
-							if (classEnd === -1) { classEnd = lines.length - 1; }
-							// クラス範囲をハイライト
+						}
+						return undefined;
+					}
+					const target = findSymbol(symbols, pos);
+					if (target) {
+						// 関数
+						if (target.kind === vscode.SymbolKind.Function) {
+							const funcDeco = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(0,200,0,0.15)' });
+							editor.setDecorations(funcDeco, [target.range]);
+						}
+						// クラス（親探索）
+						let cls: any = (target as any).parent;
+						while (cls && cls.kind !== vscode.SymbolKind.Class) { cls = cls.parent; }
+						if (cls && cls.kind === vscode.SymbolKind.Class) {
 							const classDeco = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(0,128,255,0.15)' });
-							const startPos = new vscode.Position(classStart, 0);
-							const endPos = new vscode.Position(classEnd, lines[classEnd].length);
-							editor.setDecorations(classDeco, [new vscode.Range(startPos, endPos)]);
-							// 新しいクラスハイライトを記録
-							lastClassDeco = classDeco;
-							lastClassEditor = editor;
+							editor.setDecorations(classDeco, [cls.range]);
 						}
-					}
-					// --- ここまでクラス範囲ハイライト ---
-
-					// --- 関数呼び出し箇所のハイライト ---
-					if (msg.funcName) {
-						// ワークスペース全体で関数呼び出し箇所を検索
-						const funcName = msg.funcName;
-						const files = await vscode.workspace.findFiles('**/*.py', '**/site-packages/**');
-						for (const f of files) {
-							try {
-								const d = await vscode.workspace.openTextDocument(f);
-								const t = d.getText();
-								const callRegex = new RegExp(`\\b${funcName}\\s*\\(`, 'g');
-								let match;
-								const callRanges: vscode.Range[] = [];
-								while ((match = callRegex.exec(t)) !== null) {
-									const start = t.slice(0, match.index).split('\n').length - 1;
-									const lineText = d.lineAt(start).text;
-									const charIdx = lineText.indexOf(funcName);
-									if (charIdx !== -1) {
-										callRanges.push(new vscode.Range(new vscode.Position(start, charIdx), new vscode.Position(start, charIdx + funcName.length)));
-									}
-								}
-								if (callRanges.length > 0) {
-									const ed = await vscode.window.showTextDocument(d, { preview: false, preserveFocus: true });
-									const callDeco = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(255,255,0,0.25)' });
-									ed.setDecorations(callDeco, callRanges);
-									setTimeout(() => {
-										ed.setDecorations(callDeco, []);
-										callDeco.dispose();
-									}, 2000);
-								}
-							} catch (e) { /* ignore */ }
-						}
-					}
-					// --- ここまで関数呼び出し箇所ハイライト ---
-
-					// --- 関数範囲検出とハイライト ---
-					// def宣言行を探す（現在行から上方向に）
-					let funcStart = -1;
-					let funcEnd = -1;
-					for (let i = lineNum; i >= 0; i--) {
-						const l = lines[i];
-						if (/^\s*def\s+\w+/.test(l)) {
-							funcStart = i;
-							break;
-						}
-					}
-					if (funcStart !== -1) {
-						const funcIndent = lines[funcStart].search(/\S|$/);
-						for (let i = funcStart + 1; i < lines.length; i++) {
+					} else {
+						// --- フォールバック: 旧インデント走査 ---
+						console.log('[OwlSpotlight] fallback: using old indent-based range detection');
+						const text = doc.getText();
+						const lines = text.split('\n');
+						let classStart = -1;
+						let classEnd = -1;
+						let funcIndent = lines[lineNum].search(/\S|$/);
+						for (let i = lineNum; i >= 0; i--) {
 							const l = lines[i];
-							if (l.trim() === '') { continue; }
-							const indent = l.search(/\S|$/);
-							// def宣言と同じか浅いインデントでdef/class宣言行が出てきたら、その直前まで
-							if (indent <= funcIndent && i > funcStart && (/^\s*def\s+\w+/.test(l) || /^\s*class\s+\w+/.test(l))) {
-								funcEnd = i - 1;
+							if (/^\s*class\s+\w+/.test(l)) {
+								classStart = i;
 								break;
 							}
 						}
-						if (funcEnd === -1) { funcEnd = lines.length - 1; }
-						// 関数範囲をハイライト
-						const funcDeco = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(0,200,0,0.15)' });
-						const startPos = new vscode.Position(funcStart, 0);
-						const endPos = new vscode.Position(funcEnd, lines[funcEnd].length);
-						editor.setDecorations(funcDeco, [new vscode.Range(startPos, endPos)]);
-						// 1500ms後に消す（必要ならグローバル管理も可）
-						setTimeout(() => {
-							editor.setDecorations(funcDeco, []);
-							funcDeco.dispose();
-						}, 1500);
+						if (classStart !== -1) {
+							const classIndent = lines[classStart].search(/\S|$/);
+							if (funcIndent > classIndent) {
+								for (let i = classStart + 1; i < lines.length; i++) {
+									const l = lines[i];
+									if (l.trim() === '') { continue; }
+									const indent = l.search(/\S|$/);
+									if (indent <= classIndent && i > classStart && (/^\s*def\s+\w+/.test(l) || /^\s*class\s+\w+/.test(l))) {
+										classEnd = i - 1;
+										break;
+									}
+								}
+								if (classEnd === -1) { classEnd = lines.length - 1; }
+								const classDeco = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(0,128,255,0.15)' });
+								const startPos = new vscode.Position(classStart, 0);
+								const endPos = new vscode.Position(classEnd, lines[classEnd].length);
+								editor.setDecorations(classDeco, [new vscode.Range(startPos, endPos)]);
+							}
+						}
+						// --- サーバーから関数範囲取得＆ハイライト（旧方式） ---
+						if (msg.funcName) {
+							const res = await fetch('http://localhost:8000/get_function_range', {
+								method: 'POST',
+								headers: { 'Content-Type': 'application/json' },
+								body: JSON.stringify({ file, func_name: msg.funcName })
+							});
+							if (res.ok) {
+								const data = await res.json() as any;
+								if (data && typeof data.start_line === 'number' && typeof data.end_line === 'number') {
+									const startPos = new vscode.Position(data.start_line - 1, 0);
+									const endLineText = doc.lineAt(data.end_line - 1).text;
+									const endPos = new vscode.Position(data.end_line - 1, endLineText.length);
+									const funcDeco = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(0,200,0,0.15)' });
+									editor.setDecorations(funcDeco, [new vscode.Range(startPos, endPos)]);
+								}
+							}
+						}
 					}
-					// --- ここまで関数範囲ハイライト ---
-
-					setTimeout(() => {
-						editor.setDecorations(decorationType, []);
-						decorationType.dispose();
-					}, 1500);
 				} catch (e) {
 					vscode.window.showErrorMessage('ファイルを開けませんでした: ' + file);
 				}
