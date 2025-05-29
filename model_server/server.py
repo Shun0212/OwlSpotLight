@@ -28,7 +28,6 @@ app = FastAPI()
 
 # モデルロード
 model = SentenceTransformer("Shuu12121/CodeSearch-ModernBERT-Owl-2.0-Plus")
-model.half()  # 半精度化
 model_device = None  # 現在のデバイスを記録
 
 def get_device_and_prepare():
