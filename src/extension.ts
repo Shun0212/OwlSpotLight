@@ -160,6 +160,43 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					}
 					// --- ここまで関数呼び出し箇所ハイライト ---
 
+					// --- 関数範囲検出とハイライト ---
+					// def宣言行を探す（現在行から上方向に）
+					let funcStart = -1;
+					let funcEnd = -1;
+					for (let i = lineNum; i >= 0; i--) {
+						const l = lines[i];
+						if (/^\s*def\s+\w+/.test(l)) {
+							funcStart = i;
+							break;
+						}
+					}
+					if (funcStart !== -1) {
+						const funcIndent = lines[funcStart].search(/\S|$/);
+						for (let i = funcStart + 1; i < lines.length; i++) {
+							const l = lines[i];
+							if (l.trim() === '') { continue; }
+							const indent = l.search(/\S|$/);
+							// def宣言と同じか浅いインデントでdef/class宣言行が出てきたら、その直前まで
+							if (indent <= funcIndent && i > funcStart && (/^\s*def\s+\w+/.test(l) || /^\s*class\s+\w+/.test(l))) {
+								funcEnd = i - 1;
+								break;
+							}
+						}
+						if (funcEnd === -1) { funcEnd = lines.length - 1; }
+						// 関数範囲をハイライト
+						const funcDeco = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(0,200,0,0.15)' });
+						const startPos = new vscode.Position(funcStart, 0);
+						const endPos = new vscode.Position(funcEnd, lines[funcEnd].length);
+						editor.setDecorations(funcDeco, [new vscode.Range(startPos, endPos)]);
+						// 1500ms後に消す（必要ならグローバル管理も可）
+						setTimeout(() => {
+							editor.setDecorations(funcDeco, []);
+							funcDeco.dispose();
+						}, 1500);
+					}
+					// --- ここまで関数範囲ハイライト ---
+
 					setTimeout(() => {
 						editor.setDecorations(decorationType, []);
 						decorationType.dispose();
