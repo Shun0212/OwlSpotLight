@@ -27,7 +27,7 @@ from cluster_index import ClusterIndex
 app = FastAPI()
 
 # モデルロード
-model = SentenceTransformer("Shuu12121/CodeSearch-ModernBERT-Owl-2.0-Plus")
+model = SentenceTransformer("Shuu12121/CodeSearch-ModernBERT-Owl-Plus")
 model_device = None  # 現在のデバイスを記録
 
 def get_device_and_prepare():
