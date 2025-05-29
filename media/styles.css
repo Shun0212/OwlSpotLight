@@ -7,9 +7,66 @@ button:hover { background: var(--vscode-button-hoverBackground, #1177bb); }
 .searchbar { display: flex; gap: 0.5em; padding: 0.8em 1em 0.5em 1em; background: var(--vscode-sideBar-background, #1e1e1e); }
 input[type=text] { flex: 1; padding: 0.4em; border-radius: 4px; border: 1px solid var(--vscode-input-border, #333); font-size: 1em; background: var(--vscode-input-background, #252526); color: var(--vscode-input-foreground, #d4d4d4); }
 .status { padding: 0.5em 1em 0.2em 1em; color: var(--vscode-descriptionForeground, #999); font-size: 0.97em; }
-.results { padding: 0.2em 0.5em 0.5em 0.5em; }
-.result-item { margin: 0.2em 0; padding: 0.6em 0.8em; border-radius: 4px; background: transparent; cursor: pointer; border-left: 3px solid transparent; transition: background 0.15s, border 0.15s; }
+.results {
+  padding: 0.2em 0.5em 0.5em 0.5em;
+  max-width: 100%;
+  display: block;
+  overflow-y: auto;
+  height: auto;
+  position: relative;
+}
+.result-item {
+  margin: 0 0 0.4em 0;
+  padding: 0.6em 0.8em;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  transition: background 0.15s, border 0.15s;
+  display: block;
+  position: static;
+  width: 100%;
+  box-sizing: border-box;
+  clear: both;
+  float: none;
+  z-index: auto;
+  min-height: auto;
+  height: auto;
+}
 .result-item:hover { background: var(--vscode-list-hoverBackground, #2a2d2e); border-left: 3px solid var(--vscode-list-activeSelectionForeground, #3794ff); }
-.result-title { font-weight: 500; color: var(--vscode-list-highlightForeground, #d7ba7d); }
-.result-path { font-size: 0.95em; color: var(--vscode-descriptionForeground, #999); }
-.result-snippet { font-size: 0.95em; color: var(--vscode-foreground, #d4d4d4); margin-top: 0.2em; }
+.result-title { 
+  font-weight: 500; 
+  color: var(--vscode-list-highlightForeground, #d7ba7d); 
+  white-space: nowrap; 
+  overflow: hidden; 
+  text-overflow: ellipsis; 
+  max-width: 100%; 
+  box-sizing: border-box;
+  display: block;
+  position: static;
+}
+.result-path { 
+  font-size: 0.95em; 
+  color: var(--vscode-descriptionForeground, #999); 
+  white-space: nowrap; 
+  overflow: hidden; 
+  text-overflow: ellipsis; 
+  max-width: 100%; 
+  box-sizing: border-box;
+  display: block;
+  position: static;
+}
+.result-snippet { 
+  font-size: 0.95em; 
+  color: var(--vscode-foreground, #d4d4d4); 
+  margin-top: 0.2em; 
+  word-break: break-word; 
+  white-space: pre-line; 
+  max-height: 2.8em; 
+  overflow: hidden; 
+  display: -webkit-box; 
+  -webkit-line-clamp: 2; 
+  line-clamp: 2;
+  -webkit-box-orient: vertical; 
+  box-sizing: border-box; 
+}
