@@ -635,13 +635,22 @@ async def get_class_stats(request: ClassStatsRequest):
             else:
                 weighted_score = 0.0
                 best_rank = None
+            
+            proportion = len(search_result_ranks) / class_info["method_count"] if class_info["method_count"] > 0 else 0
+            
+            # 複合スコア: weighted_score * (1 + proportion_bonus)
+            # proportion_bonusは割合に基づくボーナス（0.0～1.0の範囲で最大100%のボーナス）
+            proportion_bonus = proportion * 1.0  # 100%ヒットなら100%ボーナス
+            composite_score = weighted_score * (1 + proportion_bonus)
+            
             class_info["weighted_score"] = weighted_score
             class_info["search_hits"] = len(search_result_ranks)
             class_info["all_ranks"] = search_result_ranks
             class_info["best_rank"] = best_rank
-            class_info["proportion"] = len(search_result_ranks) / class_info["method_count"] if class_info["method_count"] > 0 else 0
+            class_info["proportion"] = proportion
+            class_info["composite_score"] = composite_score
         
-        sorted_classes = sorted(classes.values(), key=lambda x: x["weighted_score"], reverse=True)
+        sorted_classes = sorted(classes.values(), key=lambda x: x["composite_score"], reverse=True)
         
         return {
             "classes": sorted_classes,
@@ -650,8 +659,8 @@ async def get_class_stats(request: ClassStatsRequest):
             "total_standalone_functions": len(standalone_functions),
             "search_query": request.query,
             "search_results_count": len(search_results),
-            "scoring_method": "sum_inverse_ranks",
-            "scoring_description": "Classes (per file) ranked by the sum of the inverse of all matched result ranks (∑(1/rank)). Each class includes best_rank (highest ranking position) and other statistics."
+            "scoring_method": "composite_score",
+            "scoring_description": "Classes (per file) ranked by composite score: weighted_score × (1 + proportion_bonus). This combines ranking quality (∑(1/rank)) with hit proportion to favor classes with both high-ranking methods and good coverage."
         }
     except Exception as e:
         print(f"Error getting class stats: {e}")

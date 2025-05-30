@@ -1,12 +1,81 @@
 /* styles.css */
-body { font-family: var(--vscode-font-family, sans-serif); margin: 0; padding: 0; background: var(--vscode-sideBar-background, #1e1e1e); color: var(--vscode-foreground, #d4d4d4); }
-.header { padding: 0.8em 1em 0.5em 1em; font-size: 1.15em; font-weight: bold; border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #333); background: var(--vscode-sideBar-background, #1e1e1e); letter-spacing: 0.05em; }
-.actions { display: flex; gap: 0.5em; align-items: center; padding: 0.7em 1em 0.5em 1em; border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #333); background: var(--vscode-sideBar-background, #1e1e1e); }
-button { padding: 0.25em 1.1em; border-radius: 4px; border: 1px solid var(--vscode-button-border, #3c3c3c); background: var(--vscode-button-background, #0e639c); color: var(--vscode-button-foreground, #fff); font-weight: 500; font-size: 1em; cursor: pointer; transition: background 0.2s, border 0.2s; }
-button:hover { background: var(--vscode-button-hoverBackground, #1177bb); }
-.searchbar { display: flex; gap: 0.5em; padding: 0.8em 1em 0.5em 1em; background: var(--vscode-sideBar-background, #1e1e1e); }
-input[type=text] { flex: 1; padding: 0.4em; border-radius: 4px; border: 1px solid var(--vscode-input-border, #333); font-size: 1em; background: var(--vscode-input-background, #252526); color: var(--vscode-input-foreground, #d4d4d4); }
-.status { padding: 0.5em 1em 0.2em 1em; color: var(--vscode-descriptionForeground, #999); font-size: 0.97em; }
+body { 
+  font-family: var(--vscode-font-family, sans-serif); 
+  margin: 0; 
+  padding: 0; 
+  background: var(--vscode-sideBar-background, #f3f3f3); 
+  color: var(--vscode-foreground, #333333); 
+}
+
+.header { 
+  padding: 0.8em 1em 0.5em 1em; 
+  font-size: 1.15em; 
+  font-weight: bold; 
+  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #e0e0e0); 
+  background: var(--vscode-sideBarSectionHeader-background, var(--vscode-sideBar-background, #f8f8f8)); 
+  color: var(--vscode-sideBarTitle-foreground, var(--vscode-foreground, #333333));
+  letter-spacing: 0.05em; 
+}
+
+.actions { 
+  display: flex; 
+  gap: 0.5em; 
+  align-items: center; 
+  padding: 0.7em 1em 0.5em 1em; 
+  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #e0e0e0); 
+  background: var(--vscode-sideBarSectionHeader-background, var(--vscode-sideBar-background, #f8f8f8)); 
+}
+button { 
+  padding: 0.25em 1.1em; 
+  border-radius: 4px; 
+  border: 1px solid var(--vscode-button-border, transparent); 
+  background: var(--vscode-button-background, #0078d4); 
+  color: var(--vscode-button-foreground, #ffffff); 
+  font-weight: 500; 
+  font-size: 1em; 
+  cursor: pointer; 
+  transition: background 0.2s, border 0.2s, box-shadow 0.2s; 
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+button:hover { 
+  background: var(--vscode-button-hoverBackground, #106ebe); 
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
+}
+
+button:focus {
+  outline: 1px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: 2px;
+}
+
+.searchbar { 
+  display: flex; 
+  gap: 0.5em; 
+  padding: 0.8em 1em 0.5em 1em; 
+  background: var(--vscode-sideBar-background, #f8f8f8); 
+}
+
+input[type=text] { 
+  flex: 1; 
+  padding: 0.4em; 
+  border-radius: 4px; 
+  border: 1px solid var(--vscode-input-border, #c8c8c8); 
+  font-size: 1em; 
+  background: var(--vscode-input-background, #ffffff); 
+  color: var(--vscode-input-foreground, #333333); 
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+input[type=text]:focus {
+  outline: none;
+  border-color: var(--vscode-focusBorder, #0078d4);
+  box-shadow: 0 0 0 1px var(--vscode-focusBorder, #0078d4);
+}
+.status { 
+  padding: 0.5em 1em 0.2em 1em; 
+  color: var(--vscode-descriptionForeground, #666666); 
+  font-size: 0.97em; 
+}
 .results {
   padding: 0.2em 0.5em 0.5em 0.5em;
   max-width: 100%;
@@ -109,27 +178,36 @@ input[type=text] { flex: 1; padding: 0.4em; border-radius: 4px; border: 1px soli
 /* タブスタイル */
 .tabs {
   display: flex;
-  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #333);
-  background: var(--vscode-sideBar-background, #1e1e1e);
+  background: var(--vscode-sideBarSectionHeader-background, var(--vscode-sideBar-background, #f8f8f8));
+  margin: 0;
+  padding: 0;
+  border-bottom: none;
 }
 
 .tab-btn {
-  padding: 0.6em 1.2em;
+  padding: 0.8em 1.5em;
   border: none;
-  background: transparent;
-  color: var(--vscode-foreground, #d4d4d4);
+  background: var(--vscode-tab-inactiveBackground, rgba(128, 128, 128, 0.1));
+  color: var(--vscode-tab-inactiveForeground, rgba(255, 255, 255, 0.7));
   cursor: pointer;
-  border-bottom: 2px solid transparent;
-  transition: all 0.2s;
+  font-weight: 500;
+  border-radius: 6px 6px 0 0;
+  margin-right: 2px;
+  transition: all 0.2s ease;
+  position: relative;
+  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #333);
 }
 
 .tab-btn:hover {
-  background: var(--vscode-list-hoverBackground, #2a2d2e);
+  background: var(--vscode-tab-hoverBackground, rgba(255, 255, 255, 0.12));
+  color: var(--vscode-tab-hoverForeground, rgba(255, 255, 255, 0.9));
 }
 
 .tab-btn.active {
-  border-bottom: 2px solid var(--vscode-focusBorder, #3794ff);
-  color: var(--vscode-list-activeSelectionForeground, #fff);
+  background: var(--vscode-tab-activeBackground, var(--vscode-editor-background, #1e1e1e));
+  color: var(--vscode-tab-activeForeground, var(--vscode-foreground, #ffffff));
+  border-bottom: 1px solid var(--vscode-tab-activeBackground, var(--vscode-editor-background, #1e1e1e));
+  z-index: 1;
 }
 
 .tab-content {
@@ -143,16 +221,16 @@ input[type=text] { flex: 1; padding: 0.4em; border-radius: 4px; border: 1px soli
 /* クラス統計用のスタイル */
 .stats-filter {
   padding: 0.8em 1em;
-  background: var(--vscode-sideBar-background, #1e1e1e);
-  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #333);
+  background: var(--vscode-sideBarSectionHeader-background, var(--vscode-sideBar-background, #f8f8f8));
+  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #e0e0e0);
 }
 
 .stats-filter select {
   padding: 0.4em;
   border-radius: 4px;
-  border: 1px solid var(--vscode-input-border, #333);
-  background: var(--vscode-input-background, #252526);
-  color: var(--vscode-input-foreground, #d4d4d4);
+  border: 1px solid var(--vscode-input-border, #c8c8c8);
+  background: var(--vscode-input-background, #ffffff);
+  color: var(--vscode-input-foreground, #333333);
   font-size: 0.95em;
 }
 

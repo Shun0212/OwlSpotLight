@@ -104,9 +104,9 @@ window.onload = function() {
 				const headerDiv = document.createElement('div');
 				headerDiv.className = 'stats-class-header';
 				
-				// 重み付けスコアと検索結果情報を表示
-				const scoreInfo = classInfo.weighted_score > 0 ? 
-					`Score: ${classInfo.weighted_score.toFixed(3)} (${classInfo.search_hits}/${classInfo.method_count} hits, best rank: ${classInfo.best_rank || 'N/A'})` :
+				// 総合スコア（composite_score）と検索結果情報を表示
+				const scoreInfo = classInfo.composite_score > 0 ? 
+					`Score: ${classInfo.composite_score.toFixed(3)} (${classInfo.search_hits}/${classInfo.method_count} hits, best rank: ${classInfo.best_rank || 'N/A'})` :
 					`Score: 0.000 (no search hits)`;
 				
 				headerDiv.innerHTML = `
