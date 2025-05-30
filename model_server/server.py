@@ -599,17 +599,26 @@ async def get_class_stats(request: ClassStatsRequest):
         for class_name, class_info in classes.items():
             # このクラスの関数が検索結果に含まれているかチェック
             search_result_ranks = []
+            matched_methods = set()  # 既にマッチした関数を記録
             
             for i, result in enumerate(search_results):
                 result_func_name = result["name"]
                 result_file = result.get("file", "")
+                result_lineno = result.get("lineno", result.get("line_number", 0))
                 
                 # 検索結果と一致する関数を探す
                 for method in class_info["methods"]:
-                    # 関数名とファイルパスで一致判定
+                    # 関数名、ファイルパス、行番号で厳密に一致判定
+                    method_file = method.get("file_path", method.get("file", ""))
+                    method_lineno = method.get("lineno", method.get("line_number", 0))
+                    method_key = (method["name"], method_file, method_lineno)
+                    
                     if (method["name"] == result_func_name and 
-                        method.get("file_path", method.get("file", "")) == result_file):
+                        method_file == result_file and
+                        method_lineno == result_lineno and
+                        method_key not in matched_methods):
                         search_result_ranks.append(i + 1)  # 順位は1ベース
+                        matched_methods.add(method_key)  # マッチした関数を記録
                         break
             
             # 重み付けスコア計算

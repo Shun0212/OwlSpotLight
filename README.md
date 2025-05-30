@@ -1,12 +1,189 @@
 # 🦉 OwlSpotlight
 
-**意味的検索でコードを瞬時に発見。Pythonプロジェクトの関数・クラスを自然言語で検索できるVS Code拡張機能**
-
-_Discover code instantly with semantic search. A VS Code extension that lets you search Python functions and classes using natural language._
+**Instantly discover code with semantic search. A VS Code extension for searching Python functions and classes using natural language.**
 
 ![Demo](screenshot/result.png)
 
-## ✨ 主な機能 / Key Features
+## ✨ Key Features
+
+- 🔍 **Natural language code search** – Find functions and classes with intuitive queries
+- ⚡ **Instant jump** – Jump directly to results in your editor
+- 🎯 **Function & class support** – Search both functions and class methods
+- 📊 **Class ranking view** – See class relevance based on function scores
+- 🚀 **Fast incremental updates** – Only changed files are re-indexed
+- 🎨 **Intuitive UI** – Simple sidebar interface
+
+---
+
+## 🚀 Quick Start
+
+> **Note for Windows users:**
+> Automatic setup (Quick Start) is not supported on Windows. Please follow the manual setup instructions below to create the Python environment and install dependencies yourself.
+
+### Automatic Setup (macOS/Linux recommended)
+
+1. Open this project in VS Code.
+2. Open the Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`) and run:
+   ```
+   OwlSpotlight: Setup Python Environment
+   ```
+3. Start the server:
+   ```
+   OwlSpotlight: Start Server
+   ```
+4. Start searching from the sidebar!
+
+![Quick Setup](screenshot/startserver.png)
+
+---
+
+## 🎬 Usage Examples
+
+### 1. Natural Language & Function/Class Search
+Search functions and class methods across your project using natural language queries.
+
+### 2. Class Ranking View
+Classes are ranked by a score: (proportion of top-ranked functions in the class) × (inverse of the highest function rank). You can also choose to show only standalone functions (not belonging to any class).
+
+![Class Statistics](screenshot/show_class_stats.png)
+
+### 3. Function-Only Filtering
+Display only functions that do not belong to any class.
+
+![Function Only](screenshot/show_only_function.png)
+
+### 4. Powerful Result Highlighting
+OwlSpotlight instantly highlights all matching functions and classes in the editor:
+- **Multi-location highlighting:** All relevant functions/classes are color-coded and emphasized.
+- **Jump integration:** Click to jump directly to highlighted locations.
+- **Dynamic updates:** Highlights update instantly as you change your search query.
+- **Scales to large files:** Even files with thousands of lines are highlighted smoothly.
+
+This makes it easy to find, refactor, and review code with confidence.
+
+---
+
+## 💡 Why Choose OwlSpotlight
+
+### 🎯 Semantic Search Accuracy
+- **Natural language queries** – Search for functions by intent
+- **Code fragment search** – Find code by example
+- **Function & class support** – Comprehensive search across your codebase
+
+### ⚡ Performance
+- **Fast incremental updates** – Only changed files are re-indexed
+- **Clustered indexing** – Fast even for large projects
+- **FAISS-powered** – Instant search for tens of thousands of functions
+
+### 🛠 Developer Experience
+- **Intuitive UI** – Simple sidebar interface
+- **Instant highlighting** – See results in your editor immediately
+- **.gitignore aware** – Unnecessary files are excluded
+- **Apple Silicon optimized** – Fast on M1/M2/M3/M4 chips
+
+### 🔄 Smart Updates
+- **Automatic change detection** – Index updates on file add/change/delete
+- **Function-level management** – Precise, up-to-date search
+- **Real-time sync** – Always current with your codebase
+
+---
+
+## ⚠️ Important Notes
+
+- **Initial indexing may take time** depending on the number of extracted functions, especially for large projects.
+- **Only functions are searchable.** Class definitions, variables, and constants are not indexed. If important information is only in class definitions or outside functions, it may not be found.
+- **Class ranking is based on function scores.** Class docstrings and attributes do not affect ranking.
+
+---
+
+## 🔧 Manual Setup
+
+If automatic setup does not work (or on Windows):
+
+1. Install required tools:
+   ```zsh
+   brew install npm
+   brew install pyenv
+   pyenv install 3.11
+   ```
+2. Set up the Python environment:
+   ```zsh
+   cd model_server
+   pyenv local 3.11
+   python3 -m venv .venv
+   source .venv/bin/activate
+   pip install -r requirements.txt
+   cd ..
+   ```
+3. Launch the extension in VS Code (F5) and click "Start Server" in the OwlSpotlight sidebar.
+4. Search for functions or keywords from the sidebar.
+
+---
+
+## ⚙️ System Requirements & Environment
+
+- **Python**: 3.9+ (3.11 recommended)
+- **Memory**: 4GB+ (8GB+ for large projects)
+- **Storage**: Several GB for virtualenv and dependencies
+- **Apple Silicon (M1/M2/M3/M4)**: Fully supported
+- **Windows/Linux**: Manual setup required; not fully tested
+- **CUDA/GPU**: Not tested (support planned)
+
+### Performance Tips
+- More memory = better performance (Transformer model)
+- Fast CPU/GPU = faster indexing/search
+- SSD recommended for best search speed
+- Always use Python 3.11 for the virtual environment
+- Exclude unnecessary files (e.g. `.venv/`) in `.gitignore`
+- Install `flash-attn` for CUDA environments if needed
+
+---
+
+## 🚧 Development Status & Roadmap
+
+### Current Status
+- ✅ Python function & class search
+- ✅ Natural language & code fragment search
+- ✅ Apple Silicon optimization
+- ✅ Incremental indexing updates
+- ✅ Class ranking view
+- ✅ Function-only filtering
+
+### Upcoming Features
+- 🔄 CUDA/flash-attention support (GPU acceleration)
+- 🔄 Multi-language support (JavaScript, TypeScript, Java, etc.)
+- 🔄 Class inheritance visualization
+- 🔄 VS Code Marketplace release
+- 🔄 Real-time code change detection (auto-update on save)
+
+### Limitations
+- Python only (multi-language support planned)
+- Only functions & class methods are indexed (variables/constants are not)
+- CUDA environments untested (support planned)
+
+---
+
+## 📄 License
+
+MIT License – See the `LICENSE` file for details.
+
+---
+
+**Notice:**
+*This extension is under active development. Features and behaviors may change without notice.*
+
+**Contributing:**
+Bug reports and feature requests are welcome in Issues.
+
+---
+
+# 🦉 OwlSpotlight（日本語版）
+
+**意味的検索でコードを瞬時に発見。Pythonプロジェクトの関数・クラスを自然言語で検索できるVS Code拡張機能**
+
+![Demo](screenshot/result.png)
+
+## ✨ 主な機能
 
 - 🔍 **自然言語でコード検索** - 「データを処理する関数」のような検索が可能
 - ⚡ **瞬時のジャンプ** - 検索結果から該当コードに即座に移動
@@ -17,50 +194,56 @@ _Discover code instantly with semantic search. A VS Code extension that lets you
 
 ---
 
-## 🚀 クイックスタート / Quick Start
+## 🚀 クイックスタート
 
-### 自動セットアップ（推奨）/ Automatic Setup (Recommended)
+> **Windowsユーザーへの注意：**
+> クイックスタート（自動セットアップ）はWindowsでは利用できません。下記の手動セットアップ手順に従ってPython環境の作成と依存パッケージのインストールを行ってください。
 
-1. **VS Codeで本プロジェクトを開く**
-2. **コマンドパレット** (`Cmd+Shift+P` / `Ctrl+Shift+P`) で以下を実行：
+### 自動セットアップ（macOS/Linux推奨）
+
+1. VS Codeで本プロジェクトを開く
+2. コマンドパレット（`Cmd+Shift+P` / `Ctrl+Shift+P`）で以下を実行：
    ```
    OwlSpotlight: Setup Python Environment
    ```
-3. **サーバー起動**：
+3. サーバー起動：
    ```
    OwlSpotlight: Start Server
    ```
-4. **サイドバーから検索開始！**
+4. サイドバーから検索開始！
 
 ![Quick Setup](screenshot/startserver.png)
 
 ---
 
-## 🎬 使用例 / Usage Examples
+## 🎬 使用例
 
-### 1. 自然言語でコード検索
-自然言語による直感的な検索が可能です：
+### 1. 自然言語・関数/クラス検索
+自然言語で関数やクラスメソッドを横断的に検索できます。
 
-![Code Search Result](screenshot/codesearchresult.png)
-
-### 2. 関数・クラス統合検索
-関数とクラスメソッドを一括で検索・表示：
-
-![Search Results](screenshot/result.png)
-
-### 3. クラス構造の可視化
-プロジェクト全体のクラス構造を統計表示：
+### 2. クラスランキング表示
+関連度の高いクラスは「上位に含まれる関数の割合 × 最上位関数の順位の逆数」でスコア化され、ランキング表示されます。
+また、オプションで「関数のみ（クラスに属さないもの）」の表示も可能です。
 
 ![Class Statistics](screenshot/show_class_stats.png)
 
-### 4. 検索結果の絞り込み
-関数のみに絞った精密な検索：
+### 3. 関数のみの絞り込み
+クラスに属さない関数のみを表示することもできます。
 
 ![Function Only](screenshot/show_only_function.png)
 
+### 4. 検索結果のハイライト
+OwlSpotlightは、検索結果の関数やクラスをエディタ上で即座にハイライト表示します。
+- **複数箇所同時ハイライト**：関連する関数・クラスがすべて色分けされて強調表示されます。
+- **ジャンプ機能と連動**：ハイライトされた箇所へワンクリックでジャンプ可能。
+- **動的なハイライト更新**：検索ワードを変更するたびに、ハイライトも即座に切り替わります。
+- **大規模ファイルでも快適**：数千行規模のファイルでもストレスなくハイライト。
+
+これにより、目的のコードがどこにあるかを瞬時に把握でき、リファクタリングやレビューも圧倒的に効率化されます。
+
 ---
 
-## 💡 OwlSpotlightの特長 / Why Choose OwlSpotlight
+## 💡 OwlSpotlightの特長
 
 ### 🎯 高精度な意味的検索
 - **自然言語クエリ対応** - 「データを処理する関数」のような検索が可能
@@ -85,151 +268,93 @@ _Discover code instantly with semantic search. A VS Code extension that lets you
 
 ---
 
-## 技術的な特徴・アーキテクチャ / Technical Highlights
+## ⚠️ 注意事項
 
-- **独自BERTモデルによる意味的コード検索 / Custom BERT-based model for semantic code search**
-  - [CodeSearch-ModernBERT-Owl-2.0-Plus](https://huggingface.co/Shuu12121/CodeSearch-ModernBERT-Owl-2.0-Plus) を活用し、自然言語・コード断片の両方で高精度な関数検索が可能。
-  - Utilizes [CodeSearch-ModernBERT-Owl-2.0-Plus](https://huggingface.co/Shuu12121/CodeSearch-ModernBERT-Owl-2.0-Plus) for high-accuracy function search with both natural language and code fragments.
-- **関数単位の自動インデックス化と差分更新 / Automatic function-level indexing and incremental updates**
-  - コードベース全体を関数単位で自動抽出し、`.gitignore` 準拠で不要ファイルを除外。
-  - Extracts all functions automatically, respects `.gitignore` to exclude unnecessary files.
-  - 追加ファイルは差分のみインデックス化、変更ディレクトリは問答無用で再構築することで、大規模リポジトリでも効率的な運用が可能。
-  - Newly added files are indexed incrementally; directories with changes are fully rebuilt for efficient operation on large repositories.
-- **クラスタ分割によるスケーラビリティと高速化 / Clustered indexing for scalability and speed**
-  - ディレクトリ単位でクラスタ分割し、各クラスタごとにFAISSインデックスを管理。
-  - Splits the codebase into clusters by directory, each with its own FAISS index.
-  - クラスタごとに部分的な再構築や検索ができるため、巨大なプロジェクトでもメモリ消費・検索速度を最適化。
-  - Enables partial rebuild/search per cluster, optimizing memory usage and search speed for large projects.
-- **FAISSによる高速ベクトル検索 / Fast vector search with FAISS**
-  - 埋め込みベクトルの類似度計算にFAISSを利用し、数万関数規模でも高速な検索レスポンスを実現。
-  - Uses FAISS for similarity search, providing fast responses even with tens of thousands of functions.
-- **VS Code拡張としての高いユーザビリティ / High usability as a VS Code extension**
-  - サイドバーUIから直感的に検索・ジャンプ・ハイライトが可能。
-  - Intuitive sidebar UI for search, jump, and highlight.
-  - 検索結果は即座にエディタ上でハイライト表示。
-  - Search results are instantly highlighted in the editor.
-- **マルチプラットフォーム・最新環境対応 / Multi-platform & modern environment support**
-  - Apple Silicon (M1/M2/M3/M4) など最新Macにも最適化。PyTorchのmps対応で高速動作。
-  - Optimized for Apple Silicon (M1/M2/M3/M4) with PyTorch mps backend.
-  - **CUDA環境では未検証**ですが、今後対応予定です。
-  - **CUDA environments are not yet tested**, but support is planned.
-- **堅牢な差分検出・インデックス管理 / Robust diff detection and index management**
-  - ファイルの追加・削除・関数の消失も正確に検知し、インデックスを自動で更新。
-  - Detects file addition, deletion, and function removal accurately, updating the index automatically.
-  - クラスタごとにメタ情報・インデックスを分離管理し、部分的な再構築やGCも容易。
-  - Each cluster manages its own metadata and index, making partial rebuilds and GC easy.
-- **flash-attention対応モデル（CUDA環境のみ） / If using a flash-attention compatible model (CUDA only)**
-  - CUDA環境でflash-attention対応モデルを利用する場合は、仮想環境に`flash-attn`を追加インストールしてください。
-  - If you use a flash-attention compatible model on CUDA, please install `flash-attn` in your virtual environment:
-    ```zsh
-    pip install flash-attn --no-build-isolation
-    ```
+- **初回インデックス作成には時間がかかる場合があります。**
+  - 関数の抽出数が多い大規模プロジェクトほど、初回セットアップやインデックス作成に時間を要します。
+- **検索対象は「関数」のみです。**
+  - クラス定義自体やクラス外の変数・定数は検索対象外です。
+  - クラス内の関数（メソッド）以外に重要な情報が含まれている場合、意図した検索結果が得られないことがあります。
+- **クラスランキングは関数のスコアに基づきます。**
+  - クラス自体の説明や属性はランキングに直接影響しません。
 
 ---
 
-## 🔧 手動セットアップ / Manual Setup
+## 🔧 手動セットアップ
 
-自動セットアップがうまくいかない場合の手動セットアップ手順：  
-_Manual setup instructions if automatic setup doesn't work:_
+自動セットアップがうまくいかない場合（またはWindowsの場合）は、以下の手順でセットアップしてください：
 
-### 1. 必要なツールのインストール / Install Required Tools
-```zsh
-brew install npm
-brew install pyenv
-pyenv install 3.11
-```
-
-### 2. Python環境のセットアップ / Python Environment Setup
-```zsh
-cd model_server
-pyenv local 3.11
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cd ..
-```
-
-### 3. VS Code拡張の起動 / Launch VS Code Extension
-1. VS Codeで本フォルダを開く / Open this folder in VS Code
-2. デバッグモード（F5）で起動 / Start in debug mode (F5)
-3. サイドバー「OwlSpotlight」から「サーバー起動」ボタンを押す / Click "Start Server" in OwlSpotlight sidebar
-4. 検索バーに関数名やキーワードを入力し「検索」 / Enter function name or keyword and search
-
-### 注意事項 / Important Notes
-- サーバーはエディタ再起動ごとに「サーバー起動」ボタンを押してください  
-  _Please click "Start Server" every time you restart the editor_
-- 一度インデックス作成後は、変更がなければ高速に検索できます  
-  _After initial indexing, searches will be fast unless there are changes_
-- 検索対象は「def」で定義された関数とクラスメソッドです  
-  _Search targets are functions and class methods defined with "def"_
+1. 必要なツールをインストール：
+   ```zsh
+   brew install npm
+   brew install pyenv
+   pyenv install 3.11
+   ```
+2. Python環境をセットアップ：
+   ```zsh
+   cd model_server
+   pyenv local 3.11
+   python3 -m venv .venv
+   source .venv/bin/activate
+   pip install -r requirements.txt
+   cd ..
+   ```
+3. VS Codeで拡張機能を起動（F5）し、サイドバーの「Start Server」ボタンを押してください。
+4. サイドバーから関数名やキーワードで検索できます。
 
 ---
 
-## ⚙️ システム要件・環境構築 / System Requirements & Environment Setup
+## ⚙️ システム要件・環境
 
-### 基本要件 / Basic Requirements
 - **Python**: 3.9以上（推奨: 3.11）
 - **メモリ**: 4GB以上（大規模プロジェクトでは8GB以上推奨）
-- **ストレージ**: 数GB（仮想環境・依存パッケージ用）
+- **ストレージ**: 仮想環境・依存パッケージ用に数GB
+- **Apple Silicon (M1/M2/M3/M4)**: 完全対応
+- **Windows/Linux**: 手動セットアップ必須・動作未検証
+- **CUDA/GPU**: 未検証（今後対応予定）
 
-### 動作確認済み環境 / Tested Environments
-- ✅ **Apple Silicon (M1/M2/M3/M4)** - PyTorch mps対応で高速化 / PyTorch mps backend for acceleration
-- ✅ **Intel Mac** - 標準的な動作 / Standard performance
-- ⚠️ **Windows/Linux** - 基本動作確認済み / Basic functionality verified
-- ❓ **CUDA/GPU環境** - 未検証（今後対応予定） / Untested (support planned)
-
-### パフォーマンス最適化 / Performance Optimization
-- **大容量メモリ** / **High Memory**: Transformerモデル使用のため、メモリが多いほど快適 / More memory = better performance due to Transformer model usage
-- **高速CPU/GPU** / **Fast CPU/GPU**: インデックス作成・検索速度に大きく影響 / Significantly affects indexing and search speed
-- **SSD**: ファイルI/O性能が検索速度に影響 / File I/O performance impacts search speed
-
-### 環境設定のヒント / Environment Setup Tips
-- **仮想環境** / **Virtual Environment**: 必ずPython 3.11系で作成 / Always use Python 3.11
-- **.gitignore**: 検索対象外ファイル（`.venv/`など）を適切に設定 / Properly exclude unnecessary files (`.venv/`, etc.)
-- **flash-attention**: CUDA環境では追加インストール可能 / Additional installation available for CUDA environments
+### パフォーマンスのヒント
+- メモリが多いほど快適（Transformerモデル）
+- 高速CPU/GPUほどインデックス作成・検索が高速
+- SSD推奨
+- 仮想環境は必ずPython 3.11で作成
+- `.gitignore`で不要ファイル（例：`.venv/`）を除外
+- CUDA環境では`flash-attn`の追加インストールも可能
 
 ---
 
-## 🚧 開発状況・今後の予定 / Development Status & Roadmap
+## 🚧 開発状況・今後の予定
 
-### 現在の状況 / Current Status
-- ✅ **Python関数・クラス検索** / Python function & class search
-- ✅ **自然言語・コード断片検索** / Natural language & code fragment search
-- ✅ **Apple Silicon最適化** / Apple Silicon optimization
-- ✅ **インクリメンタル更新** / Incremental indexing updates
-- ✅ **クラス統計表示** / Class structure statistics
-- ✅ **検索結果絞り込み** / Search result filtering
+### 現在の状況
+- ✅ Python関数・クラス検索
+- ✅ 自然言語・コード断片検索
+- ✅ Apple Silicon最適化
+- ✅ インクリメンタル更新
+- ✅ クラス統計表示
+- ✅ 関数のみ絞り込み
 
-### 今後の予定 / Upcoming Features
-- 🔄 **CUDA/flash-attention対応** / CUDA & flash-attention support  
-  GPU環境での高速化 / GPU acceleration for faster performance
-- 🔄 **多言語対応** / Multi-language support  
-  JavaScript, TypeScript, Java等 / JavaScript, TypeScript, Java, etc.
-- 🔄 **クラス継承関係表示** / Class inheritance visualization  
-  より詳細なコード構造分析 / More detailed code structure analysis
-- 🔄 **VS Code Marketplace公開** / VS Code Marketplace release  
-  簡単インストール / Easy installation for all users
-- 🔄 **コード変更リアルタイム検知** / Real-time code change detection  
-  ファイル保存時の自動更新 / Automatic updates on file save
+### 今後の予定
+- 🔄 CUDA/flash-attention対応（GPU高速化）
+- 🔄 多言語対応（JavaScript, TypeScript, Java等）
+- 🔄 クラス継承関係の可視化
+- 🔄 VS Code Marketplace公開
+- 🔄 コード変更のリアルタイム検知（自動更新）
 
-### 制限事項 / Current Limitations
-- **Python専用** / **Python only** (多言語対応予定 / multi-language support planned)
-- **関数・クラスメソッドのみ検索対象** / **Functions & class methods only** (変数・定数は対象外 / variables & constants not included)
-- **CUDA環境未検証** / **CUDA environments untested** (今後対応予定 / support planned)
+### 制限事項
+- Python専用（多言語対応予定）
+- 関数・クラスメソッドのみインデックス対象（変数・定数は対象外）
+- CUDA環境未検証（今後対応予定）
 
 ---
 
-## 📄 ライセンス / License
+## 📄 ライセンス
 
-MIT License - 詳細は `LICENSE` ファイルをご確認ください。  
-_MIT License - See `LICENSE` file for details._
+MIT License – 詳細は`LICENSE`ファイルを参照してください。
 
 ---
 
-**注意 / Notice:**  
-*この拡張機能は現在開発中です。仕様や挙動は今後予告なく変更される可能性があります。*  
-*This extension is under active development. Features and behaviors may change without notice.*
+**注意：**
+*この拡張機能は現在開発中です。仕様や挙動は今後予告なく変更される可能性があります。*
 
-**貢献 / Contributing:**  
-バグ報告や機能要望は Issues でお知らせください。  
-_Bug reports and feature requests are welcome in Issues._
+**貢献：**
+バグ報告や機能要望はIssuesでお知らせください。
