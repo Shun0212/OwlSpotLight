@@ -1,152 +1,87 @@
-# OwlSpotlight
+# 🦉 OwlSpotlight
 
-**OwlSpotlightは、どなたでも手軽に使えるPythonコードの意味的検索拡張です。VS Code上で関数単位の検索・ジャンプ・ハイライトを、シンプルな操作で実現します。**
+**意味的検索でコードを瞬時に発見。Pythonプロジェクトの関数・クラスを自然言語で検索できるVS Code拡張機能**
 
-_OwlSpotlight is a semantic code search extension for Python that anyone can use easily. It enables function-level search, jump, and highlight in VS Code with simple steps._
+_Discover code instantly with semantic search. A VS Code extension that lets you search Python functions and classes using natural language._
 
----
+![Demo](screenshot/result.png)
 
-# クイックセットアップ / Quick Setup (Recommended)
+## ✨ 主な機能 / Key Features
 
-OwlSpotlight拡張機能には、Python環境の自動セットアップ機能が用意されています。
-
-## コマンドパレットの使い方 / How to Use the Command Palette
-
-1. VS Codeで本リポジトリを開きます。
-2. `Cmd+Shift+P`（Mac）または `Ctrl+Shift+P`（Windows/Linux）でコマンドパレットを開きます。
-3. `OwlSpotlight: Setup Python Environment` と入力して実行します。
-   - これにより `model_server/` ディレクトリで仮想環境の作成と依存パッケージのインストールが自動で行われます。
-4. セットアップ完了後、再度コマンドパレットで `OwlSpotlight: Start Server` を実行してサーバーを起動してください。
-5. その後はサイドバーから通常通り検索が利用できます。
+- 🔍 **自然言語でコード検索** - 「データを処理する関数」のような検索が可能
+- ⚡ **瞬時のジャンプ** - 検索結果から該当コードに即座に移動
+- 🎯 **関数・クラス両対応** - 関数とクラスメソッドの両方を検索対象
+- 📊 **クラス統計表示** - プロジェクト内のクラス構造を一覧表示
+- 🚀 **高速インクリメンタル更新** - ファイル変更時も差分のみ更新
+- 🎨 **直感的なUI** - サイドバーから簡単操作
 
 ---
 
-## OwlSpotlightの強み・おすすめポイント / What Makes OwlSpotlight Great
+## 🚀 クイックスタート / Quick Start
 
-- **直感的なUIと即応性 / Intuitive UI & Responsiveness**  
-  サイドバーからすぐに検索・ジャンプでき、検索結果も即座にハイライトされます。  
-  Instantly search and jump from the sidebar, with immediate highlighting of results in the editor.
+### 自動セットアップ（推奨）/ Automatic Setup (Recommended)
 
-- **繰り返しの検索が高速 / Fast for Repeated Searches**  
-  一度インデックスを作成すれば、同じリポジトリ内での繰り返し検索はとても速くなります。  
-  After the initial indexing, repeated searches in the same repository are very fast.
-
-- **差分インデックスで常に最新 / Always Up-to-date with Incremental Indexing**  
-  追加・変更・削除を自動検知し、必要な部分だけインデックスを更新。  
-  Automatically detects additions, changes, and deletions, updating only what is needed.
-
-- **.gitignore準拠で不要なファイルを除外 / Respects .gitignore**  
-  仮想環境やビルド成果物など、不要なファイルは自動で除外されます。  
-  Unnecessary files (e.g., venv, build artifacts) are excluded automatically.
-
-- **自然言語でもコード断片でもOK / Flexible Querying**  
-  「○○する関数」やコードの一部など、自然言語・コード断片どちらでも検索可能。  
-  Search with natural language or code fragments—both are supported.
-
-- **セットアップが簡単 / Easy Setup**  
-  Python仮想環境と依存パッケージをインストールするだけですぐに使えます。  
-  Just set up a Python virtual environment and install dependencies to get started.
-
-- **Apple Silicon最適化 / Optimized for Apple Silicon**  
-  最新のMac (M1/M2/M3/M4) では動作確認済みです。  
-  Runs on the latest Apple Silicon Macs (M1/M2/M3/M4; tested).
-
-- **GPU・CUDA環境について / About GPU & CUDA Environments**  
-  GPUやCUDA環境での動作は現時点で十分な確認ができていません。  
-  Operation on GPU or CUDA environments has not been fully tested yet.
-
-- **今後も拡張予定 / Actively Improving**  
-  CUDAやflash-attention対応、さらなる機能追加も予定しています。また、現状はPythonのみ対応ですが、CodeSearch-ModernBERT-Owl-2.0は複数言語対応モデルのため、今後も対応言語を追加予定です。  
-  CUDA/flash-attention support and more features are planned. Currently, only Python is supported, but since CodeSearch-ModernBERT-Owl-2.0 is a multi-language model, support for more languages is planned in the future.
-
----
-
-## 主な特徴 / Features
-
-- サイドバーUIから簡単に検索・ジャンプ  
-  Intuitive sidebar UI for quick search and jump
-- 関数単位での自動インデックス化（`.gitignore` 準拠）  
-  Automatic function-level indexing (respects `.gitignore`)
-- 独自BERTモデルによる意味的検索  
-  Semantic search powered by a custom BERT model
-- Mac M4 で動作確認済み  
-  Tested on Mac M4
-
----
-
-## 使い方 / How to Use
-
-1. 必要なツールをインストール:  
-   Install required tools:
-   ```zsh
-   brew install npm
-   brew install pyenv
-   pyenv install 3.11
+1. **VS Codeで本プロジェクトを開く**
+2. **コマンドパレット** (`Cmd+Shift+P` / `Ctrl+Shift+P`) で以下を実行：
    ```
-2. Python環境セットアップ:  
-   Set up Python environment:
-   ```zsh
-   cd model_server
-   pyenv local 3.11
-   python3 -m venv .venv
-   source .venv/bin/activate
-   pip install -r requirements.txt
-   cd ..
+   OwlSpotlight: Setup Python Environment
    ```
-3. VS Codeで本フォルダを開き、デバッグモード（F5）で起動。  
-   Open this folder in VS Code and start debug mode (F5).
-4. サイドバー「OwlSpotlight」から「サーバー起動」ボタンを押す。  
-   In the OwlSpotlight sidebar, click "Start Server".
-5. 検索バーに関数名やキーワードを入力し「検索」。  
-   Enter a function name or keyword in the search bar and click "Search".
-   - サーバーはエディタ再起動ごとに「サーバー起動」ボタンを押してください。  
-     Please click "Start Server" every time you restart the editor.
-   - 一度インデックス作成後は、変更がなければ高速に検索できます。  
-     After the first run, searches will be fast unless there are changes.
+3. **サーバー起動**：
+   ```
+   OwlSpotlight: Start Server
+   ```
+4. **サイドバーから検索開始！**
+
+![Quick Setup](screenshot/startserver.png)
 
 ---
 
-## スクリーンショット / Screenshots
+## 🎬 使用例 / Usage Examples
 
-1. **デバッグモード起動 / Launching Debug Mode**
+### 1. 自然言語でコード検索
+自然言語による直感的な検索が可能です：
 
-   ![init](screenshot/init.png)
-   
-   VS Codeで拡張機能のデバッグモードを起動します。左側のOwlSpotlightサイドバーが表示されます。
-   _Start the extension in debug mode in VS Code. The OwlSpotlight sidebar will appear on the left._
+![Code Search Result](screenshot/codesearchresult.png)
 
-2. **サーバー起動ボタンを押す / Click "Start Server"**
+### 2. 関数・クラス統合検索
+関数とクラスメソッドを一括で検索・表示：
 
-   ![startserver](screenshot/startserver.png)
-   
-   サイドバーの「サーバー起動」ボタンを押して、検索用のモデルサーバーを起動します。
-   _Click the "Start Server" button in the sidebar to launch the model server for code search._
+![Search Results](screenshot/result.png)
 
-3. **検索例：「how to train CodeBERT」 / Example Search: "how to train CodeBERT"**
+### 3. クラス構造の可視化
+プロジェクト全体のクラス構造を統計表示：
 
-   ![codesearchresult](screenshot/codesearchresult.png)
-   
-   検索バーに「how to train CodeBERT」と入力して検索すると、関連する関数がリストアップされます。
-   _Type "how to train CodeBERT" in the search bar and press search. Related functions are listed as results._
+![Class Statistics](screenshot/show_class_stats.png)
 
-   例としてヒットした関数：
-   
-   `def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer, output_mode, ...)`
+### 4. 検索結果の絞り込み
+関数のみに絞った精密な検索：
 
-   この関数は、入力データ（examples）をBERTなどのモデルで学習・推論できる形式（InputFeaturesのリスト）に変換する処理を行います。
-   - テキストをトークン化し、必要に応じてペアシーケンスの切り詰めやパディングを行う
-   - BERTの入力形式（[CLS], [SEP]トークンやsegment_idsなど）に整形
-   - 分類・回帰タスクに応じてラベルIDを付与
-   - 変換結果をInputFeaturesとしてまとめて返します
-
-   _This function converts input examples into a list of InputFeatures suitable for training or inference with BERT-like models. It tokenizes text, handles sequence truncation and padding, formats inputs for BERT ([CLS], [SEP], segment_ids), assigns label IDs for classification/regression, and returns the results as InputFeatures._
+![Function Only](screenshot/show_only_function.png)
 
 ---
 
-## 注意事項 / Notes
+## 💡 OwlSpotlightの特長 / Why Choose OwlSpotlight
 
-- 検索対象は「def」で定義された関数のみです。クラス定義や関数外コードは対象外です。
-- Only functions defined with `def` are searchable. Class definitions and code outside functions are not included.
+### 🎯 高精度な意味的検索
+- **自然言語クエリ対応** - 「データを処理する関数」のような検索が可能
+- **コード断片検索** - 実際のコード片でも検索できる
+- **関数・クラス両対応** - 関数とクラスメソッドを包括的に検索
+
+### ⚡ パフォーマンス
+- **高速インクリメンタル更新** - 変更部分のみを効率的に更新
+- **クラスタ分割インデックス** - 大規模プロジェクトでも高速検索
+- **FAISS最適化** - 数万関数規模でも瞬時に検索
+
+### 🛠 開発体験
+- **直感的UI** - サイドバーから簡単操作
+- **即座のハイライト** - 検索結果をエディタで即座に表示
+- **.gitignore準拠** - 不要ファイルを自動除外
+- **Apple Silicon最適化** - M1/M2/M3/M4チップで高速動作
+
+### 🔄 スマートな更新
+- **差分検出** - ファイルの追加・変更・削除を自動検知
+- **関数レベル管理** - 関数単位での精密なインデックス管理
+- **リアルタイム同期** - コード変更に即座に対応
 
 ---
 
@@ -192,31 +127,109 @@ OwlSpotlight拡張機能には、Python環境の自動セットアップ機能�
 
 ---
 
-## 注意点・環境構築について / Environment Setup
+## 🔧 手動セットアップ / Manual Setup
 
-- Python 3.9 以上（動作確認は 3.11 で実施）、pip、virtualenv などの基本的な開発環境が必要です。
-- サーバーはPython仮想環境（venv）上で起動します。**必ずPython 3.11系で仮想環境を作成してください。**
-   ```zsh
-   python3.11 -m venv .venv
-   source .venv/bin/activate
-   pip install -r model_server/requirements.txt
-   ```
-- 仮想環境や依存パッケージのインストールには数GBの空き容量が必要になる場合があります。
-- `model_server/requirements.txt` を使って依存パッケージをインストールしてください。
-- Transformerベースのモデル（CodeSearch-ModernBERT-Owl-2.0-Plus）を利用するため、**メモリを大量に消費する場合があります**。
-- 検索やインデックス作成の効率は、**CPUやGPUの性能に大きく依存**します。高速なGPUがあるとより快適に動作します。
-- Apple Silicon (M1/M2/M3/M4) では `torch` の `mps` サポートにより高速化されますが、環境によっては追加のセットアップが必要な場合があります。
-- 検索対象外としたいファイルやディレクトリ（例: 仮想環境 `.venv/` など）は `.gitignore` に追加しておくことを推奨します。
+自動セットアップがうまくいかない場合の手動セットアップ手順：  
+_Manual setup instructions if automatic setup doesn't work:_
+
+### 1. 必要なツールのインストール / Install Required Tools
+```zsh
+brew install npm
+brew install pyenv
+pyenv install 3.11
+```
+
+### 2. Python環境のセットアップ / Python Environment Setup
+```zsh
+cd model_server
+pyenv local 3.11
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cd ..
+```
+
+### 3. VS Code拡張の起動 / Launch VS Code Extension
+1. VS Codeで本フォルダを開く / Open this folder in VS Code
+2. デバッグモード（F5）で起動 / Start in debug mode (F5)
+3. サイドバー「OwlSpotlight」から「サーバー起動」ボタンを押す / Click "Start Server" in OwlSpotlight sidebar
+4. 検索バーに関数名やキーワードを入力し「検索」 / Enter function name or keyword and search
+
+### 注意事項 / Important Notes
+- サーバーはエディタ再起動ごとに「サーバー起動」ボタンを押してください  
+  _Please click "Start Server" every time you restart the editor_
+- 一度インデックス作成後は、変更がなければ高速に検索できます  
+  _After initial indexing, searches will be fast unless there are changes_
+- 検索対象は「def」で定義された関数とクラスメソッドです  
+  _Search targets are functions and class methods defined with "def"_
 
 ---
 
-## 開発状況 / Development Status
+## ⚙️ システム要件・環境構築 / System Requirements & Environment Setup
 
-この拡張機能は現在開発中です。仕様や挙動は今後予告なく変更される可能性があります。  
-_This extension is under active development. Features and behaviors may change._
+### 基本要件 / Basic Requirements
+- **Python**: 3.9以上（推奨: 3.11）
+- **メモリ**: 4GB以上（大規模プロジェクトでは8GB以上推奨）
+- **ストレージ**: 数GB（仮想環境・依存パッケージ用）
+
+### 動作確認済み環境 / Tested Environments
+- ✅ **Apple Silicon (M1/M2/M3/M4)** - PyTorch mps対応で高速化 / PyTorch mps backend for acceleration
+- ✅ **Intel Mac** - 標準的な動作 / Standard performance
+- ⚠️ **Windows/Linux** - 基本動作確認済み / Basic functionality verified
+- ❓ **CUDA/GPU環境** - 未検証（今後対応予定） / Untested (support planned)
+
+### パフォーマンス最適化 / Performance Optimization
+- **大容量メモリ** / **High Memory**: Transformerモデル使用のため、メモリが多いほど快適 / More memory = better performance due to Transformer model usage
+- **高速CPU/GPU** / **Fast CPU/GPU**: インデックス作成・検索速度に大きく影響 / Significantly affects indexing and search speed
+- **SSD**: ファイルI/O性能が検索速度に影響 / File I/O performance impacts search speed
+
+### 環境設定のヒント / Environment Setup Tips
+- **仮想環境** / **Virtual Environment**: 必ずPython 3.11系で作成 / Always use Python 3.11
+- **.gitignore**: 検索対象外ファイル（`.venv/`など）を適切に設定 / Properly exclude unnecessary files (`.venv/`, etc.)
+- **flash-attention**: CUDA環境では追加インストール可能 / Additional installation available for CUDA environments
 
 ---
 
-## ライセンス / License
+## 🚧 開発状況・今後の予定 / Development Status & Roadmap
 
-MIT
+### 現在の状況 / Current Status
+- ✅ **Python関数・クラス検索** / Python function & class search
+- ✅ **自然言語・コード断片検索** / Natural language & code fragment search
+- ✅ **Apple Silicon最適化** / Apple Silicon optimization
+- ✅ **インクリメンタル更新** / Incremental indexing updates
+- ✅ **クラス統計表示** / Class structure statistics
+- ✅ **検索結果絞り込み** / Search result filtering
+
+### 今後の予定 / Upcoming Features
+- 🔄 **CUDA/flash-attention対応** / CUDA & flash-attention support  
+  GPU環境での高速化 / GPU acceleration for faster performance
+- 🔄 **多言語対応** / Multi-language support  
+  JavaScript, TypeScript, Java等 / JavaScript, TypeScript, Java, etc.
+- 🔄 **クラス継承関係表示** / Class inheritance visualization  
+  より詳細なコード構造分析 / More detailed code structure analysis
+- 🔄 **VS Code Marketplace公開** / VS Code Marketplace release  
+  簡単インストール / Easy installation for all users
+- 🔄 **コード変更リアルタイム検知** / Real-time code change detection  
+  ファイル保存時の自動更新 / Automatic updates on file save
+
+### 制限事項 / Current Limitations
+- **Python専用** / **Python only** (多言語対応予定 / multi-language support planned)
+- **関数・クラスメソッドのみ検索対象** / **Functions & class methods only** (変数・定数は対象外 / variables & constants not included)
+- **CUDA環境未検証** / **CUDA environments untested** (今後対応予定 / support planned)
+
+---
+
+## 📄 ライセンス / License
+
+MIT License - 詳細は `LICENSE` ファイルをご確認ください。  
+_MIT License - See `LICENSE` file for details._
+
+---
+
+**注意 / Notice:**  
+*この拡張機能は現在開発中です。仕様や挙動は今後予告なく変更される可能性があります。*  
+*This extension is under active development. Features and behaviors may change without notice.*
+
+**貢献 / Contributing:**  
+バグ報告や機能要望は Issues でお知らせください。  
+_Bug reports and feature requests are welcome in Issues._
