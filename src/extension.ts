@@ -4,6 +4,94 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as os from 'os';
 
+// インデントベースで関数の範囲を検出する関数
+async function getFunctionRangeByIndent(doc: vscode.TextDocument, startPos: vscode.Position): Promise<vscode.Range[]> {
+	const text = doc.getText();
+	const lines = text.split('\n');
+	const startLine = startPos.line;
+	
+	// 関数定義行のインデントレベルを取得
+	const defLine = lines[startLine];
+	const defIndent = defLine.length - defLine.trimStart().length;
+	
+	// 関数の終了行を見つける
+	let endLine = startLine;
+	for (let i = startLine + 1; i < lines.length; i++) {
+		const line = lines[i];
+		const trimmed = line.trim();
+		
+		// 空行やコメント行はスキップして続行
+		if (!trimmed || trimmed.startsWith('#')) {
+			endLine = i; // 空行も含める
+			continue;
+		}
+		
+		// 現在行のインデントレベルを取得
+		const currentIndent = line.length - line.trimStart().length;
+		
+		// インデントが関数定義と同じかそれより浅い場合、関数終了
+		if (currentIndent <= defIndent) {
+			break;
+		}
+		
+		endLine = i;
+	}
+	
+	// 各行を関数定義のインデント位置から行末までハイライト
+	const ranges: vscode.Range[] = [];
+	for (let i = startLine; i <= endLine; i++) {
+		const line = lines[i];
+		if (line !== undefined) {
+			ranges.push(new vscode.Range(
+				new vscode.Position(i, defIndent),
+				new vscode.Position(i, line.length)
+			));
+		}
+	}
+	
+	return ranges;
+}
+
+// インデントベースでクラスの範囲を検出する関数
+async function getClassRangeByIndent(doc: vscode.TextDocument, startPos: vscode.Position): Promise<vscode.Range> {
+	const text = doc.getText();
+	const lines = text.split('\n');
+	const startLine = startPos.line;
+	
+	// クラス定義行のインデントレベルを取得
+	const defLine = lines[startLine];
+	const defIndent = defLine.length - defLine.trimStart().length;
+	
+	// クラスの終了行を見つける
+	let endLine = startLine;
+	for (let i = startLine + 1; i < lines.length; i++) {
+		const line = lines[i];
+		const trimmed = line.trim();
+		
+		// 空行やコメント行はスキップして続行
+		if (!trimmed || trimmed.startsWith('#')) {
+			endLine = i; // 空行も含める
+			continue;
+		}
+		
+		// 現在行のインデントレベルを取得
+		const currentIndent = line.length - line.trimStart().length;
+		
+		// インデントがクラス定義と同じかそれより浅い場合、クラス終了
+		if (currentIndent <= defIndent) {
+			break;
+		}
+		
+		endLine = i;
+	}
+	
+	// クラス定義のインデント位置から開始して、クラス全体をカバー
+	return new vscode.Range(
+		new vscode.Position(startLine, defIndent),
+		new vscode.Position(endLine, lines[endLine]?.length || 0)
+	);
+}
+
 // クラス外にgetNonceを定義
 function getNonce() {
 	let text = '';
@@ -183,15 +271,18 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 								decorations.push({ type: outerClassDeco, ranges: [outerCls.range] });
 							}
 						}
-						// 最後に関数部分をデコレーション
+						
+						// インデントベースで関数の終わりを検出
+						const funcRanges = await getFunctionRangeByIndent(doc, target.range.start);
 						const funcDeco = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(0,128,255,0.2)' }); // blue highlight, less intense
-						decorations.push({ type: funcDeco, ranges: [target.range] });
+						decorations.push({ type: funcDeco, ranges: funcRanges });
 						lastClassDeco = funcDeco;
 						lastClassEditor = editor;
 					} else if (target && target.kind === vscode.SymbolKind.Class) {
-						// クラス自体を選択している場合
+						// クラス自体を選択している場合 - インデントベースで範囲を検出
+						const classRange = await getClassRangeByIndent(doc, target.range.start);
 						const selfClassDeco = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(0,200,100,0.10)' }); // green highlight, subtle, no border
-						decorations.push({ type: selfClassDeco, ranges: [target.range] });
+						decorations.push({ type: selfClassDeco, ranges: [classRange] });
 						lastClassDeco = selfClassDeco;
 						lastClassEditor = editor;
 						// さらに外側のクラス（入れ子の場合）
