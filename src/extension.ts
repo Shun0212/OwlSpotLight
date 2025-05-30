@@ -61,6 +61,27 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					webviewView.webview.postMessage({ type: 'results', results: [], folderPath });
 				}
 			}
+			if (msg.command === 'getClassStats') {
+				const workspaceFolders = vscode.workspace.workspaceFolders;
+				if (!workspaceFolders || workspaceFolders.length === 0) {
+					webviewView.webview.postMessage({ type: 'error', message: 'No workspace folder found' });
+					return;
+				}
+				const folderPath = workspaceFolders[0].uri.fsPath;
+				const query = msg.query || ''; // クエリパラメータを受け取る
+				webviewView.webview.postMessage({ type: 'status', message: 'Loading class statistics...' });
+				try {
+					const res = await fetch('http://localhost:8000/get_class_stats', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ directory: folderPath, query: query, top_k: 50 })
+					});
+					const data: any = await res.json();
+					webviewView.webview.postMessage({ type: 'classStats', data, folderPath });
+				} catch (error) {
+					webviewView.webview.postMessage({ type: 'error', message: 'Failed to load statistics. Make sure the server is running.' });
+				}
+			}
 			if (msg.command === 'jump') {
 				const file = msg.file;
 				const line = msg.line;
@@ -226,12 +247,37 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
   <div class="actions">
     <button id="startServerBtn">Start Server</button>
   </div>
-  <div class="searchbar">
-    <input id="searchInput" type="text" placeholder="Search by function name or code snippet..." />
-    <button id="searchBtn">Search</button>
+  
+  <!-- タブナビゲーション -->
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="search">Search</button>
+    <button class="tab-btn" data-tab="stats">Class Stats</button>
   </div>
-  <div class="status" id="status"></div>
-  <div class="results" id="results"></div>
+  
+  <!-- 検索タブ -->
+  <div class="tab-content active" id="search-tab">
+    <div class="searchbar">
+      <input id="searchInput" type="text" placeholder="Search by function name or code snippet..." />
+      <button id="searchBtn">Search</button>
+    </div>
+    <div class="status" id="status"></div>
+    <div class="results" id="results"></div>
+  </div>
+  
+  <!-- クラス統計タブ -->
+  <div class="tab-content" id="stats-tab">
+    <div class="stats-filter">
+      <button id="loadStatsBtn">Load Class Statistics</button>
+      <select id="statsFilter">
+        <option value="all">All Classes & Functions</option>
+        <option value="classes">Classes Only</option>
+        <option value="functions">Standalone Functions Only</option>
+      </select>
+    </div>
+    <div class="status" id="stats-status"></div>
+    <div class="stats-results" id="stats-results"></div>
+  </div>
+  
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;

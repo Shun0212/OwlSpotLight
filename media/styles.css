@@ -105,3 +105,207 @@ input[type=text] { flex: 1; padding: 0.4em; border-radius: 4px; border: 1px soli
   background: var(--vscode-list-hoverBackground, #2a2d2e);
   border-left: 3px solid var(--vscode-symbolIcon-functionForeground, #D19A66);
 }
+
+/* タブスタイル */
+.tabs {
+  display: flex;
+  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #333);
+  background: var(--vscode-sideBar-background, #1e1e1e);
+}
+
+.tab-btn {
+  padding: 0.6em 1.2em;
+  border: none;
+  background: transparent;
+  color: var(--vscode-foreground, #d4d4d4);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+}
+
+.tab-btn:hover {
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+}
+
+.tab-btn.active {
+  border-bottom: 2px solid var(--vscode-focusBorder, #3794ff);
+  color: var(--vscode-list-activeSelectionForeground, #fff);
+}
+
+.tab-content {
+  display: none;
+}
+
+.tab-content.active {
+  display: block;
+}
+
+/* クラス統計用のスタイル */
+.stats-filter {
+  padding: 0.8em 1em;
+  background: var(--vscode-sideBar-background, #1e1e1e);
+  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #333);
+}
+
+.stats-filter select {
+  padding: 0.4em;
+  border-radius: 4px;
+  border: 1px solid var(--vscode-input-border, #333);
+  background: var(--vscode-input-background, #252526);
+  color: var(--vscode-input-foreground, #d4d4d4);
+  font-size: 0.95em;
+}
+
+.stats-results {
+  padding: 0.5em;
+  overflow-y: auto;
+}
+
+.stats-class-item {
+  margin-bottom: 1em;
+  border: 1px solid var(--vscode-sideBarSectionHeader-border, #333);
+  border-radius: 6px;
+  background: var(--vscode-editor-background, #1e1e1e);
+}
+
+.stats-class-header {
+  padding: 0.8em 1em;
+  background: var(--vscode-sideBarSectionHeader-background, #252526);
+  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #333);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-radius: 6px 6px 0 0;
+  flex-wrap: wrap;
+  gap: 0.5em;
+}
+
+.class-name {
+  color: var(--vscode-symbolIcon-classForeground, #4EC9B0);
+  font-weight: 600;
+  font-size: 1.1em;
+}
+
+.method-count {
+  color: var(--vscode-descriptionForeground, #999);
+  font-size: 0.9em;
+}
+
+.stats-methods {
+  padding: 0.5em;
+}
+
+.stats-method-item {
+  padding: 0.5em 0.8em;
+  margin-bottom: 0.3em;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s;
+  border-left: 3px solid var(--vscode-symbolIcon-methodForeground, #DCDCAA);
+}
+
+.stats-method-item:hover {
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+}
+
+.method-name {
+  color: var(--vscode-symbolIcon-methodForeground, #DCDCAA);
+  font-weight: 500;
+}
+
+.method-path {
+  color: var(--vscode-descriptionForeground, #999);
+  font-size: 0.9em;
+  margin-top: 0.2em;
+}
+
+.stats-functions-section {
+  margin-bottom: 1em;
+  border: 1px solid var(--vscode-sideBarSectionHeader-border, #333);
+  border-radius: 6px;
+  background: var(--vscode-editor-background, #1e1e1e);
+}
+
+.stats-section-header {
+  padding: 0.8em 1em;
+  background: var(--vscode-sideBarSectionHeader-background, #252526);
+  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #333);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-radius: 6px 6px 0 0;
+}
+
+.section-title {
+  color: var(--vscode-symbolIcon-functionForeground, #D19A66);
+  font-weight: 600;
+  font-size: 1.1em;
+}
+
+.function-count {
+  color: var(--vscode-descriptionForeground, #999);
+  font-size: 0.9em;
+}
+
+.stats-functions-list {
+  padding: 0.5em;
+}
+
+.stats-function-item {
+  padding: 0.5em 0.8em;
+  margin-bottom: 0.3em;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s;
+  border-left: 3px solid var(--vscode-symbolIcon-functionForeground, #D19A66);
+}
+
+.stats-function-item:hover {
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+}
+
+.function-name {
+  color: var(--vscode-symbolIcon-functionForeground, #D19A66);
+  font-weight: 500;
+}
+
+.function-path {
+  color: var(--vscode-descriptionForeground, #999);
+  font-size: 0.9em;
+  margin-top: 0.2em;
+}
+
+/* 重み付けスコア表示のスタイル */
+.class-score {
+  color: var(--vscode-textPreformat-foreground, #d7ba7d);
+  font-size: 0.85em;
+  font-family: var(--vscode-editor-font-family, 'Courier New', monospace);
+  background: var(--vscode-textCodeBlock-background, #3c3c3c);
+  padding: 0.2em 0.5em;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.stats-class-header {
+  padding: 0.8em 1em;
+  background: var(--vscode-sideBarSectionHeader-background, #252526);
+  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #333);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-radius: 6px 6px 0 0;
+  flex-wrap: wrap;
+  gap: 0.5em;
+}
+
+/* スマートフォン対応 */
+@media (max-width: 600px) {
+  .stats-class-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .class-score {
+    font-size: 0.8em;
+  }
+}

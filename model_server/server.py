@@ -66,6 +66,12 @@ class FunctionRangeRequest(BaseModel):
     file: str
     func_name: str
 
+# クラス統計表示用のリクエストモデル
+class ClassStatsRequest(BaseModel):
+    directory: str
+    query: str  # 検索クエリ
+    top_k: int = 50  # 上位何件の関数を取得するか
+
 # サーバー全体で1つのインデックスを保持
 index_lock = Lock()
 global_indexer = None
@@ -532,6 +538,112 @@ async def get_function_range(req: FunctionRangeRequest):
                 "end_line": func.get("end_lineno")
             }
     raise HTTPException(status_code=404, detail="Function not found")
+
+@app.post("/get_class_stats")
+async def get_class_stats(request: ClassStatsRequest):
+    try:
+        # まず検索を実行して検索結果を取得
+        search_request = SearchFunctionsSimpleRequest(
+            directory=request.directory, 
+            query=request.query, 
+            top_k=request.top_k
+        )
+        search_response = await search_functions_simple_api(search_request)
+        search_results = search_response["results"]
+        
+        # 全ての関数を抽出
+        all_functions = []
+        directory = request.directory
+        ignore_spec = load_gitignore_spec(directory)
+        
+        files = []
+        for root, dirs, filenames in os.walk(directory):
+            # .gitignoreのパターンでディレクトリをフィルタ
+            dirs[:] = [d for d in dirs if not is_ignored(os.path.join(root, d), ignore_spec, directory)]
+            
+            for filename in filenames:
+                if filename.endswith('.py'):
+                    file_path = os.path.join(root, filename)
+                    if not is_ignored(file_path, ignore_spec, directory):
+                        files.append(file_path)
+        
+        for file_path in files:
+            try:
+                functions = extract_functions(file_path)
+                for func in functions:
+                    func['file_path'] = file_path
+                all_functions.append(func)
+            except Exception as e:
+                print(f"Error processing {file_path}: {e}")
+                continue
+        
+        # クラス別にグループ化
+        classes = {}
+        standalone_functions = []
+        
+        for func in all_functions:
+            if func.get("class_name"):
+                class_name = func["class_name"]
+                if class_name not in classes:
+                    classes[class_name] = {
+                        "name": class_name,
+                        "methods": [],
+                        "method_count": 0
+                    }
+                classes[class_name]["methods"].append(func)
+                classes[class_name]["method_count"] += 1
+            else:
+                standalone_functions.append(func)
+        
+        # 検索結果ベースの重み付けスコア計算
+        for class_name, class_info in classes.items():
+            # このクラスの関数が検索結果に含まれているかチェック
+            search_result_ranks = []
+            
+            for i, result in enumerate(search_results):
+                result_func_name = result["name"]
+                result_file = result.get("file", "")
+                
+                # 検索結果と一致する関数を探す
+                for method in class_info["methods"]:
+                    # 関数名とファイルパスで一致判定
+                    if (method["name"] == result_func_name and 
+                        method.get("file_path", method.get("file", "")) == result_file):
+                        search_result_ranks.append(i + 1)  # 順位は1ベース
+                        break
+            
+            # 重み付けスコア計算
+            if search_result_ranks:
+                # 検索結果に含まれた関数の割合
+                proportion = len(search_result_ranks) / class_info["method_count"]
+                # 最高順位の逆数
+                best_rank = min(search_result_ranks)
+                best_rank_inverse = 1.0 / best_rank
+                weighted_score = proportion * best_rank_inverse
+            else:
+                weighted_score = 0.0
+            
+            class_info["weighted_score"] = weighted_score
+            class_info["search_hits"] = len(search_result_ranks)
+            class_info["best_rank"] = min(search_result_ranks) if search_result_ranks else None
+            class_info["proportion"] = len(search_result_ranks) / class_info["method_count"] if class_info["method_count"] > 0 else 0
+        
+        # 重み付けスコアでソート
+        sorted_classes = sorted(classes.values(), key=lambda x: x["weighted_score"], reverse=True)
+        
+        return {
+            "classes": sorted_classes,
+            "standalone_functions": standalone_functions,
+            "total_classes": len(classes),
+            "total_standalone_functions": len(standalone_functions),
+            "search_query": request.query,
+            "search_results_count": len(search_results),
+            "scoring_method": "search_based_weighted_score",
+            "scoring_description": "Classes ranked by (proportion of class functions in search results) × (inverse of best rank from that class)"
+        }
+    except Exception as e:
+        print(f"Error getting class stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 def get_device():
     # Apple Silicon (M1/M2/M3) などで mps が使える場合は mps を優先
