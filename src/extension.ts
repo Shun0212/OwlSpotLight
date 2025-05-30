@@ -2,6 +2,7 @@
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as os from 'os';
 
 // クラス外にgetNonceを定義
 function getNonce() {
@@ -316,9 +317,16 @@ export function activate(context: vscode.ExtensionContext) {
 			name: 'OwlSpotlight Server',
 			cwd: serverDir // model_serverディレクトリで必ず起動
 		});
-		// venv有効化+uvicorn起動
-		terminal.sendText('source .venv/bin/activate', true);
-		terminal.sendText('uvicorn server:app --host 127.0.0.1 --port 8000 --reload', true);
+		const platform = os.platform();
+		if (platform === 'win32') {
+			// Windows用: venv有効化+uvicorn起動
+			terminal.sendText('.\\.venv\\Scripts\\activate', true);
+			terminal.sendText('uvicorn server:app --host 127.0.0.1 --port 8000 --reload', true);
+		} else {
+			// macOS/Linux用
+			terminal.sendText('source .venv/bin/activate', true);
+			terminal.sendText('uvicorn server:app --host 127.0.0.1 --port 8000 --reload', true);
+		}
 		terminal.show();
 		vscode.window.showInformationMessage('OwlSpotlight server started in a new terminal.');
 	});
@@ -332,17 +340,25 @@ export function activate(context: vscode.ExtensionContext) {
 			cwd: serverDir
 		});
 		terminal.show();
-		// pyenvが入っているかチェックし、なければインストール案内
-		terminal.sendText('if ! command -v pyenv >/dev/null 2>&1; then echo "[OwlSpotlight] pyenv is not installed. Please install pyenv first. For example: brew install pyenv"; exit 1; fi', true);
-		// Python 3.11がpyenvで入っているかチェックし、なければインストール案内
-		terminal.sendText('if ! pyenv versions --bare | grep -q "^3.11"; then echo "[OwlSpotlight] Python 3.11 is not installed in pyenv. Please run: pyenv install 3.11"; exit 1; fi', true);
-		// pyenv local 3.11 & venv作成
-		terminal.sendText('pyenv local 3.11', true);
-		terminal.sendText('python3.11 -m venv .venv', true);
-		terminal.sendText('source .venv/bin/activate', true);
-		terminal.sendText('pip install --upgrade pip', true);
-		terminal.sendText('pip install -r requirements.txt', true);
-		vscode.window.showInformationMessage('OwlSpotlight Python 3.11 environment setup command executed in a new terminal. If pyenv or Python 3.11 is not installed, please follow the instructions. Start the server after setup is complete.');
+		const platform = os.platform();
+		if (platform === 'win32') {
+			// Windows用: pyenvチェックはスキップ
+			terminal.sendText('python -m venv .venv', true);
+			terminal.sendText('.\\.venv\\Scripts\\activate', true);
+			terminal.sendText('python -m pip install --upgrade pip', true);
+			terminal.sendText('pip install -r requirements.txt', true);
+			vscode.window.showInformationMessage('OwlSpotlight Python環境セットアップコマンドをWindows用で実行しました。完了後にサーバーを起動してください。');
+		} else {
+			// macOS/Linux用: pyenvチェックあり
+			terminal.sendText('if ! command -v pyenv >/dev/null 2>&1; then echo "[OwlSpotlight] pyenv is not installed. Please install pyenv first. For example: brew install pyenv"; exit 1; fi', true);
+			terminal.sendText('if ! pyenv versions --bare | grep -q "^3.11"; then echo "[OwlSpotlight] Python 3.11 is not installed in pyenv. Please run: pyenv install 3.11"; exit 1; fi', true);
+			terminal.sendText('pyenv local 3.11', true);
+			terminal.sendText('python3.11 -m venv .venv', true);
+			terminal.sendText('source .venv/bin/activate', true);
+			terminal.sendText('pip install --upgrade pip', true);
+			terminal.sendText('pip install -r requirements.txt', true);
+			vscode.window.showInformationMessage('OwlSpotlight Python 3.11環境セットアップコマンドをmacOS/Linux用で実行しました。pyenvやPython 3.11が無い場合は指示に従ってください。完了後にサーバーを起動してください。');
+		}
 	});
 	context.subscriptions.push(setupEnvDisposable);
 }
