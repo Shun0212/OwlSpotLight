@@ -5,7 +5,7 @@ import * as path from 'path';
 import * as os from 'os';
 
 // インデントベースで関数の範囲を検出する関数
-async function getFunctionRangeByIndent(doc: vscode.TextDocument, startPos: vscode.Position): Promise<vscode.Range[]> {
+async function getFunctionRangeByIndent(doc: vscode.TextDocument, startPos: vscode.Position): Promise<vscode.Range> {
 	const text = doc.getText();
 	const lines = text.split('\n');
 	const startLine = startPos.line;
@@ -14,14 +14,128 @@ async function getFunctionRangeByIndent(doc: vscode.TextDocument, startPos: vsco
 	const defLine = lines[startLine];
 	const defIndent = defLine.length - defLine.trimStart().length;
 	
+	// 実際の関数本体の開始位置を特定
+	let actualBodyStart = startLine;
+	let actualBodyIndent = -1;
+	
+	// Python関数の場合：defで始まり:で終わる完全な定義を探す
+	if (defLine.includes('def ')) {
+		let colonFound = false;
+		
+		// 複数行に渡る関数定義を処理
+		for (let i = startLine; i < lines.length; i++) {
+			const line = lines[i];
+			const trimmed = line.trim();
+			
+			// コロンが見つかった
+			if (trimmed.includes(':')) {
+				colonFound = true;
+				// コロンの後に続く最初の実コード行を探す
+				for (let j = i + 1; j < lines.length; j++) {
+					const bodyLine = lines[j];
+					const bodyTrimmed = bodyLine.trim();
+					
+					// 空行やコメント行はスキップ
+					if (!bodyTrimmed || bodyTrimmed.startsWith('#')) {
+						continue;
+					}
+					
+					// 実際の関数本体を発見
+					const bodyLineIndent = bodyLine.length - bodyLine.trimStart().length;
+					if (bodyLineIndent > defIndent) {
+						actualBodyStart = j;
+						actualBodyIndent = bodyLineIndent;
+						break;
+					}
+				}
+				break;
+			}
+		}
+		
+		// コロンが見つからない場合は、より深いインデントの最初の行を探す
+		if (!colonFound) {
+			for (let i = startLine + 1; i < lines.length; i++) {
+				const line = lines[i];
+				const trimmed = line.trim();
+				
+				if (!trimmed || trimmed.startsWith('#')) {
+					continue;
+				}
+				
+				const lineIndent = line.length - line.trimStart().length;
+				if (lineIndent > defIndent) {
+					actualBodyStart = i;
+					actualBodyIndent = lineIndent;
+					break;
+				}
+			}
+		}
+	}
+	
+	// TypeScript/JavaScript関数の場合
+	else if (defLine.includes('function ') || defLine.includes('=>') || defLine.includes('(')) {
+		let braceFound = false;
+		
+		// 複数行に渡る関数定義を処理
+		for (let i = startLine; i < lines.length; i++) {
+			const line = lines[i];
+			const trimmed = line.trim();
+			
+			// 開きブレースが見つかった
+			if (trimmed.includes('{')) {
+				braceFound = true;
+				// ブレースの後に続く最初の実コード行を探す
+				for (let j = i + 1; j < lines.length; j++) {
+					const bodyLine = lines[j];
+					const bodyTrimmed = bodyLine.trim();
+					
+					// 空行やコメント行はスキップ
+					if (!bodyTrimmed || bodyTrimmed.startsWith('//') || bodyTrimmed.startsWith('*')) {
+						continue;
+					}
+					
+					// 実際の関数本体を発見
+					const bodyLineIndent = bodyLine.length - bodyLine.trimStart().length;
+					if (bodyLineIndent > defIndent) {
+						actualBodyStart = j;
+						actualBodyIndent = bodyLineIndent;
+						break;
+					}
+				}
+				break;
+			}
+		}
+		
+		// ブレースが見つからない場合（アロー関数など）
+		if (!braceFound) {
+			for (let i = startLine + 1; i < lines.length; i++) {
+				const line = lines[i];
+				const trimmed = line.trim();
+				
+				if (!trimmed || trimmed.startsWith('//') || trimmed.startsWith('*')) {
+					continue;
+				}
+				
+				const lineIndent = line.length - line.trimStart().length;
+				if (lineIndent > defIndent) {
+					actualBodyStart = i;
+					actualBodyIndent = lineIndent;
+					break;
+				}
+			}
+		}
+	}
+	
 	// 関数の終了行を見つける
-	let endLine = startLine;
-	for (let i = startLine + 1; i < lines.length; i++) {
+	let endLine = actualBodyStart;
+	const baseIndentForComparison = actualBodyIndent !== -1 ? defIndent : defIndent;
+	
+	for (let i = actualBodyStart + 1; i < lines.length; i++) {
 		const line = lines[i];
 		const trimmed = line.trim();
 		
 		// 空行やコメント行はスキップして続行
-		if (!trimmed || trimmed.startsWith('#')) {
+		if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('//') || trimmed.startsWith('*')) {
 			endLine = i; // 空行も含める
 			continue;
 		}
@@ -30,26 +144,18 @@ async function getFunctionRangeByIndent(doc: vscode.TextDocument, startPos: vsco
 		const currentIndent = line.length - line.trimStart().length;
 		
 		// インデントが関数定義と同じかそれより浅い場合、関数終了
-		if (currentIndent <= defIndent) {
+		if (currentIndent <= baseIndentForComparison) {
 			break;
 		}
 		
 		endLine = i;
 	}
 	
-	// 各行を関数定義のインデント位置から行末までハイライト
-	const ranges: vscode.Range[] = [];
-	for (let i = startLine; i <= endLine; i++) {
-		const line = lines[i];
-		if (line !== undefined) {
-			ranges.push(new vscode.Range(
-				new vscode.Position(i, defIndent),
-				new vscode.Position(i, line.length)
-			));
-		}
-	}
-	
-	return ranges;
+	// 関数定義のインデント位置から開始して、関数全体をカバー
+	return new vscode.Range(
+		new vscode.Position(startLine, defIndent),
+		new vscode.Position(endLine, lines[endLine]?.length || 0)
+	);
 }
 
 // インデントベースでクラスの範囲を検出する関数
@@ -273,9 +379,9 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 						}
 						
 						// インデントベースで関数の終わりを検出
-						const funcRanges = await getFunctionRangeByIndent(doc, target.range.start);
+						const funcRange = await getFunctionRangeByIndent(doc, target.range.start);
 						const funcDeco = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(0,128,255,0.2)' }); // blue highlight, less intense
-						decorations.push({ type: funcDeco, ranges: funcRanges });
+						decorations.push({ type: funcDeco, ranges: [funcRange] });
 						lastClassDeco = funcDeco;
 						lastClassEditor = editor;
 					} else if (target && target.kind === vscode.SymbolKind.Class) {
