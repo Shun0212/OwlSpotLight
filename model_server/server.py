@@ -572,72 +572,75 @@ async def get_class_stats(request: ClassStatsRequest):
                 functions = extract_functions(file_path)
                 for func in functions:
                     func['file_path'] = file_path
-                all_functions.append(func)
+                    all_functions.append(func)
             except Exception as e:
                 print(f"Error processing {file_path}: {e}")
                 continue
         
-        # クラス別にグループ化
+        # クラス別にグループ化（ファイルごとに管理）
         classes = {}
         standalone_functions = []
         
         for func in all_functions:
             if func.get("class_name"):
                 class_name = func["class_name"]
-                if class_name not in classes:
-                    classes[class_name] = {
+                file_path = func.get("file_path", func.get("file", ""))
+                class_key = (class_name, file_path)
+                if class_key not in classes:
+                    classes[class_key] = {
                         "name": class_name,
+                        "file_path": file_path,
                         "methods": [],
                         "method_count": 0
                     }
-                classes[class_name]["methods"].append(func)
-                classes[class_name]["method_count"] += 1
+                classes[class_key]["methods"].append(func)
+                classes[class_key]["method_count"] += 1
             else:
                 standalone_functions.append(func)
         
+        print(f"Found {len(classes)} classes and {len(standalone_functions)} standalone functions")
+        for class_key, class_info in classes.items():
+            print(f"Class {class_info['name']} in {class_info['file_path']}: {class_info['method_count']} methods")
+        
         # 検索結果ベースの重み付けスコア計算
-        for class_name, class_info in classes.items():
-            # このクラスの関数が検索結果に含まれているかチェック
+        for class_key, class_info in classes.items():
             search_result_ranks = []
-            matched_methods = set()  # 既にマッチした関数を記録
-            
+            matched_methods = set()
             for i, result in enumerate(search_results):
                 result_func_name = result["name"]
                 result_file = result.get("file", "")
                 result_lineno = result.get("lineno", result.get("line_number", 0))
                 
-                # 検索結果と一致する関数を探す
+                # ファイルパスを正規化して比較
+                result_file_abs = os.path.abspath(result_file) if result_file else ""
+                
                 for method in class_info["methods"]:
-                    # 関数名、ファイルパス、行番号で厳密に一致判定
                     method_file = method.get("file_path", method.get("file", ""))
+                    method_file_abs = os.path.abspath(method_file) if method_file else ""
                     method_lineno = method.get("lineno", method.get("line_number", 0))
-                    method_key = (method["name"], method_file, method_lineno)
+                    method_key = (method["name"], method_file_abs, method_lineno)
                     
                     if (method["name"] == result_func_name and 
-                        method_file == result_file and
+                        method_file_abs == result_file_abs and
                         method_lineno == result_lineno and
                         method_key not in matched_methods):
-                        search_result_ranks.append(i + 1)  # 順位は1ベース
-                        matched_methods.add(method_key)  # マッチした関数を記録
+                        search_result_ranks.append(i + 1)
+                        matched_methods.add(method_key)
+                        print(f"Matched method {method['name']} in class {class_info['name']} at rank {i + 1}")
                         break
-            
-            # 重み付けスコア計算
             if search_result_ranks:
-                # 検索結果に含まれた関数の割合
-                proportion = len(search_result_ranks) / class_info["method_count"]
-                # 最高順位の逆数
-                best_rank = min(search_result_ranks)
-                best_rank_inverse = 1.0 / best_rank
-                weighted_score = proportion * best_rank_inverse
+                sum_inverse_ranks = sum(1.0 / rank for rank in search_result_ranks)
+                weighted_score = sum_inverse_ranks
+                best_rank = min(search_result_ranks)  # 最高順位（最小のランク値）
             else:
                 weighted_score = 0.0
-            
+                best_rank = None
             class_info["weighted_score"] = weighted_score
             class_info["search_hits"] = len(search_result_ranks)
-            class_info["best_rank"] = min(search_result_ranks) if search_result_ranks else None
+            class_info["all_ranks"] = search_result_ranks
+            class_info["best_rank"] = best_rank
             class_info["proportion"] = len(search_result_ranks) / class_info["method_count"] if class_info["method_count"] > 0 else 0
         
-        # 重み付けスコアでソート
         sorted_classes = sorted(classes.values(), key=lambda x: x["weighted_score"], reverse=True)
         
         return {
@@ -647,8 +650,8 @@ async def get_class_stats(request: ClassStatsRequest):
             "total_standalone_functions": len(standalone_functions),
             "search_query": request.query,
             "search_results_count": len(search_results),
-            "scoring_method": "search_based_weighted_score",
-            "scoring_description": "Classes ranked by (proportion of class functions in search results) × (inverse of best rank from that class)"
+            "scoring_method": "sum_inverse_ranks",
+            "scoring_description": "Classes (per file) ranked by the sum of the inverse of all matched result ranks (∑(1/rank)). Each class includes best_rank (highest ranking position) and other statistics."
         }
     except Exception as e:
         print(f"Error getting class stats: {e}")
