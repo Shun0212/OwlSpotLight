@@ -38,12 +38,32 @@ window.onload = function() {
 				}
 				
 				const resultDiv = document.createElement('div');
-				resultDiv.className = 'result-item';
 				resultDiv.setAttribute('data-file', r.file_path || r.file);
 				resultDiv.setAttribute('data-line', r.lineno || r.line_number || 1);
 				
+				// クラス内の関数かどうかを判定
+				const functionName = r.function_name || r.name || 'unknown';
+				const className = r.class_name;
+				let displayTitle = '';
+				let titleClass = 'result-title';
+				let itemClass = 'result-item';
+				
+				if (className) {
+					// クラス内の関数の場合
+					displayTitle = '<span class="class-name">' + className + '</span>.<span class="method-name">' + functionName + '</span>';
+					titleClass += ' method-title';
+					itemClass += ' method-item';
+				} else {
+					// トップレベル関数の場合
+					displayTitle = '<span class="function-name">' + functionName + '</span>';
+					titleClass += ' function-title';
+					itemClass += ' function-item';
+				}
+				
+				resultDiv.className = itemClass;
+				
 				resultDiv.innerHTML = 
-					'<div class="result-title">' + (r.function_name || r.name || 'unknown') + '</div>' +
+					'<div class="' + titleClass + '">' + displayTitle + '</div>' +
 					'<div class="result-path">' + relPath + ':' + (r.lineno || r.line_number || 1) + '</div>' +
 					'<div class="result-snippet">' + (r.code ? r.code.split('\n').slice(0,2).join(' ') : '') + '</div>';
 				

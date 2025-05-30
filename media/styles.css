@@ -70,3 +70,38 @@ input[type=text] { flex: 1; padding: 0.4em; border-radius: 4px; border: 1px soli
   -webkit-box-orient: vertical; 
   box-sizing: border-box; 
 }
+
+/* クラス内関数とトップレベル関数のスタイル */
+.method-title .class-name {
+  color: var(--vscode-symbolIcon-classForeground, #4EC9B0);
+  font-weight: 600;
+}
+
+.method-title .method-name {
+  color: var(--vscode-symbolIcon-methodForeground, #DCDCAA);
+  font-weight: 500;
+}
+
+.function-title .function-name {
+  color: var(--vscode-symbolIcon-functionForeground, #D19A66);
+  font-weight: 500;
+}
+
+/* クラス内関数の result-item に異なる背景色を適用 */
+.result-item.method-item {
+  border-left: 3px solid var(--vscode-symbolIcon-classForeground, #4EC9B0);
+}
+
+.result-item.method-item:hover {
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+  border-left: 3px solid var(--vscode-symbolIcon-classForeground, #4EC9B0);
+}
+
+.result-item.function-item {
+  border-left: 3px solid var(--vscode-symbolIcon-functionForeground, #D19A66);
+}
+
+.result-item.function-item:hover {
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+  border-left: 3px solid var(--vscode-symbolIcon-functionForeground, #D19A66);
+}
