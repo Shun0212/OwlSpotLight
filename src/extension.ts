@@ -288,32 +288,12 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					const pos = new vscode.Position(lineNum > 0 ? lineNum : 0, 0);
 					editor.selection = new vscode.Selection(pos, pos);
 					editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+					
 					// --- 既存のデコレーションをクリア ---
-					if (lastClassDeco && lastClassEditor) {
-						lastClassEditor.setDecorations(lastClassDeco, []);
-						lastClassDeco.dispose();
-						lastClassDeco = null;
-						lastClassEditor = null;
-					}
-
-					// --- エディタ切り替え時のみデコレーションを消す ---
-					vscode.window.onDidChangeActiveTextEditor(() => {
-						if (lastClassDeco && lastClassEditor) {
-							lastClassEditor.setDecorations(lastClassDeco, []);
-							lastClassDeco.dispose();
-							lastClassDeco = null;
-							lastClassEditor = null;
-						}
-					});
-					vscode.window.onDidChangeTextEditorSelection((e) => {
-						// クリック時のみ消す（カーソル移動は残す）
-						if (e.kind === vscode.TextEditorSelectionChangeKind.Mouse && lastClassDeco && lastClassEditor) {
-							lastClassEditor.setDecorations(lastClassDeco, []);
-							lastClassDeco.dispose();
-							lastClassDeco = null;
-							lastClassEditor = null;
-						}
-					});
+					clearAllDecorations();
+					
+					// --- イベントリスナーをセットアップ ---
+					setupDecorationListeners();
 
 					// --- ASTベースの関数 & クラス範囲ハイライト ---
 					const decorations: { type: vscode.TextEditorDecorationType, ranges: vscode.Range[] }[] = [];
@@ -367,8 +347,6 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 						if (parent && parent.kind === vscode.SymbolKind.Class) {
 							const selfClassDeco = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(0,200,100,0.10)' }); // green highlight, subtle, no border
 							decorations.push({ type: selfClassDeco, ranges: [parent.range] });
-							lastClassDeco = selfClassDeco;
-							lastClassEditor = editor;
 							// さらに外側のクラス（入れ子の場合）
 							let outerCls = (parent as any).parent;
 							while (outerCls && outerCls.kind !== vscode.SymbolKind.Class) { outerCls = outerCls.parent; }
@@ -382,15 +360,11 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 						const funcRange = await getFunctionRangeByIndent(doc, target.range.start);
 						const funcDeco = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(0,128,255,0.2)' }); // blue highlight, less intense
 						decorations.push({ type: funcDeco, ranges: [funcRange] });
-						lastClassDeco = funcDeco;
-						lastClassEditor = editor;
 					} else if (target && target.kind === vscode.SymbolKind.Class) {
 						// クラス自体を選択している場合 - インデントベースで範囲を検出
 						const classRange = await getClassRangeByIndent(doc, target.range.start);
 						const selfClassDeco = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(0,200,100,0.10)' }); // green highlight, subtle, no border
 						decorations.push({ type: selfClassDeco, ranges: [classRange] });
-						lastClassDeco = selfClassDeco;
-						lastClassEditor = editor;
 						// さらに外側のクラス（入れ子の場合）
 						let outerCls = parentSymbol;
 						while (outerCls && outerCls.kind !== vscode.SymbolKind.Class) { outerCls = (outerCls as any).parent; }
@@ -399,9 +373,12 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 							decorations.push({ type: outerClassDeco, ranges: [outerCls.range] });
 						}
 					}
-					// --- まとめて適用 ---
+					
+					// --- デコレーションを適用し、グローバル変数に保存 ---
+					lastEditor = editor;
 					for (const deco of decorations) {
 						editor.setDecorations(deco.type, deco.ranges);
+						activeDecorations.push(deco.type);
 					}
 				} catch (e) {
 					vscode.window.showErrorMessage('Could not open file: ' + file);
@@ -482,9 +459,46 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 	}
 }
 
-// クラス範囲ハイライト用のグローバル変数
-let lastClassDeco: vscode.TextEditorDecorationType | null = null;
-let lastClassEditor: vscode.TextEditor | null = null;
+// ハイライト用のグローバル変数（複数のデコレーションを管理）
+let activeDecorations: vscode.TextEditorDecorationType[] = [];
+let lastEditor: vscode.TextEditor | null = null;
+let editorChangeListener: vscode.Disposable | null = null;
+let selectionChangeListener: vscode.Disposable | null = null;
+
+// デコレーション管理用のヘルパー関数
+function clearAllDecorations() {
+	if (activeDecorations.length > 0 && lastEditor) {
+		for (const decoration of activeDecorations) {
+			lastEditor.setDecorations(decoration, []);
+			decoration.dispose();
+		}
+		activeDecorations = [];
+	}
+}
+
+function setupDecorationListeners() {
+	// 既存のリスナーを削除
+	if (editorChangeListener) {
+		editorChangeListener.dispose();
+	}
+	if (selectionChangeListener) {
+		selectionChangeListener.dispose();
+	}
+
+	// エディタ切り替え時のデコレーションクリア
+	editorChangeListener = vscode.window.onDidChangeActiveTextEditor(() => {
+		clearAllDecorations();
+		lastEditor = null;
+	});
+
+	// マウスクリック時のデコレーションクリア（スクロールは無視）
+	selectionChangeListener = vscode.window.onDidChangeTextEditorSelection((e) => {
+		if (e.kind === vscode.TextEditorSelectionChangeKind.Mouse) {
+			clearAllDecorations();
+			lastEditor = null;
+		}
+	});
+}
 
 export function activate(context: vscode.ExtensionContext) {
 	console.log('Congratulations, your extension "owlspotlight" is now active!');
@@ -558,6 +572,9 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	});
 	context.subscriptions.push(setupEnvDisposable);
+
+	// デコレーションリスナーのセットアップ
+	setupDecorationListeners();
 }
 
 export function deactivate() {}
