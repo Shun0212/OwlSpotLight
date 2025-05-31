@@ -1,15 +1,23 @@
 # 🦉 OwlSpotlight
 
-**Instantly discover code with semantic search. A VS Code extension for searching Python functions and classes using natural language.**
+**Instantly discover code with semantic search. A VS Code extension for searching Python functions, classes, and methods using natural language.**
+
+---
+
+## 📝 Prerequisites
+
+- **You must clone this repository locally** to use OwlSpotlight. The extension works on your local codebase and does not support remote repositories or online browsing.
+
+---
 
 ![Demo](screenshot/result.png)
 
 ## ✨ Key Features
 
-- 🔍 **Natural language code search** – Find functions and classes with intuitive queries
+- 🔍 **Natural language code search** – Find Python functions, classes, and methods with intuitive queries
 - ⚡ **Instant jump** – Jump directly to results in your editor
-- 🎯 **Function & class support** – Search both functions and class methods
-- 📊 **Class ranking view** – See class relevance based on function scores
+- 🎯 **Function, class & method support** – Search both standalone functions and class methods, as well as class definitions
+- 📊 **Class ranking view** – See class relevance based on function/method scores
 - 🚀 **Fast incremental updates** – Only changed files are re-indexed
 - 🎨 **Intuitive UI** – Simple sidebar interface
 
@@ -40,10 +48,10 @@
 ## 🎬 Usage Examples
 
 ### 1. Natural Language & Function/Class Search
-Search functions and class methods across your project using natural language queries.
+Search Python functions, class methods, and class definitions across your project using natural language queries and semantic (contextual) search. **Note:** The search engine works by extracting and indexing Python functions (including class methods). Class definitions are included for navigation and ranking, but the search itself is function-based.
 
 ### 2. Class Ranking View
-Classes are ranked by a score: (proportion of top-ranked functions in the class) × (inverse of the highest function rank). You can also choose to show only standalone functions (not belonging to any class).
+Classes are ranked by a score: (proportion of top-ranked functions/methods in the class) × (inverse of the highest function/method rank). You can also choose to show only standalone functions (not belonging to any class).
 
 ![Class Statistics](screenshot/show_class_stats.png)
 
@@ -53,8 +61,8 @@ Display only functions that do not belong to any class.
 ![Function Only](screenshot/show_only_function.png)
 
 ### 4. Powerful Result Highlighting
-OwlSpotlight instantly highlights all matching functions and classes in the editor:
-- **Multi-location highlighting:** All relevant functions/classes are color-coded and emphasized.
+OwlSpotlight instantly highlights all matching functions, classes, and methods in the editor:
+- **Multi-location highlighting:** All relevant functions, classes, and methods are color-coded and emphasized.
 - **Jump integration:** Click to jump directly to highlighted locations.
 - **Dynamic updates:** Highlights update instantly as you change your search query.
 - **Scales to large files:** Even files with thousands of lines are highlighted smoothly.
@@ -66,14 +74,14 @@ This makes it easy to find, refactor, and review code with confidence.
 ## 💡 Why Choose OwlSpotlight
 
 ### 🎯 Semantic Search Accuracy
-- **Natural language queries** – Search for functions by intent
+- **Natural language queries** – Search for functions, classes, and methods by intent and context (semantic search)
 - **Code fragment search** – Find code by example
-- **Function & class support** – Comprehensive search across your codebase
+- **Comprehensive support** – Functions, classes, and class methods are all searchable
 
 ### ⚡ Performance
 - **Fast incremental updates** – Only changed files are re-indexed
 - **Clustered indexing** – Fast even for large projects
-- **FAISS-powered** – Instant search for tens of thousands of functions
+- **FAISS-powered** – Instant search for tens of thousands of functions and classes
 
 ### 🛠 Developer Experience
 - **Intuitive UI** – Simple sidebar interface
@@ -90,9 +98,11 @@ This makes it easy to find, refactor, and review code with confidence.
 
 ## ⚠️ Important Notes
 
-- **Initial indexing may take time** depending on the number of extracted functions, especially for large projects.
-- **Only functions are searchable.** Class definitions, variables, and constants are not indexed. If important information is only in class definitions or outside functions, it may not be found.
-- **Class ranking is based on function scores.** Class docstrings and attributes do not affect ranking.
+- **Search is performed on Python functions only.** While you can search using natural language and semantic context, the underlying search and indexing are based on Python function definitions (including class methods). Class definitions themselves are indexed for navigation and ranking, but the core search is function-centric.
+- **Initial indexing may take time** depending on the number of extracted functions and classes, especially for large projects.
+- **Only Python code is searchable.** Variables and constants are not indexed. If important information is only in variables/constants, it may not be found.
+- **Class ranking is based on function/method scores.** Class docstrings and attributes do not affect ranking.
+- **OwlSpotlight uses semantic (contextual) search, not simple keyword matching.**
 
 ---
 
@@ -111,12 +121,18 @@ If automatic setup does not work (or on Windows):
    cd model_server
    pyenv local 3.11
    python3 -m venv .venv
+   # On macOS/Linux:
    source .venv/bin/activate
+   # On Windows (Command Prompt):
+   .venv\Scripts\activate
+   # On Windows (PowerShell):
+   .venv\Scripts\Activate.ps1
    pip install -r requirements.txt
    cd ..
    ```
+   > If you see an error with `source .venv/bin/activate`, make sure you are using a POSIX shell (like bash or zsh). On Windows, use the appropriate command above. If you still have trouble, check your Python installation and permissions.
 3. Launch the extension in VS Code (F5) and click "Start Server" in the OwlSpotlight sidebar.
-4. Search for functions or keywords from the sidebar.
+4. Search for functions, classes, or keywords from the sidebar.
 
 ---
 
@@ -142,7 +158,7 @@ If automatic setup does not work (or on Windows):
 ## 🚧 Development Status & Roadmap
 
 ### Current Status
-- ✅ Python function & class search
+- ✅ Python function, class & method search
 - ✅ Natural language & code fragment search
 - ✅ Apple Silicon optimization
 - ✅ Incremental indexing updates
@@ -158,7 +174,7 @@ If automatic setup does not work (or on Windows):
 
 ### Limitations
 - Python only (multi-language support planned)
-- Only functions & class methods are indexed (variables/constants are not)
+- Only functions, classes, and class methods are indexed (variables/constants are not)
 - CUDA environments untested (support planned)
 
 ---
@@ -179,16 +195,25 @@ Bug reports and feature requests are welcome in Issues.
 
 # 🦉 OwlSpotlight（日本語版）
 
-**意味的検索でコードを瞬時に発見。Pythonプロジェクトの関数・クラスを自然言語で検索できるVS Code拡張機能**
+**意味的検索でコードを瞬時に発見。Pythonプロジェクトの関数・クラス・メソッドを自然言語で検索できるVS Code拡張機能**
+
+---
+
+## 📝 ご利用前に
+
+- **まず最初に、このリポジトリをローカル環境にクローンしてください。**
+  - OwlSpotlightはローカルのコードベース上で動作します。リモートリポジトリやオンライン上での利用には対応していません。
+
+---
 
 ![Demo](screenshot/result.png)
 
 ## ✨ 主な機能
 
-- 🔍 **自然言語でコード検索** - 「データを処理する関数」のような検索が可能
+- 🔍 **自然言語でコード検索** - Pythonの関数・クラス・メソッドを直感的なクエリで検索
 - ⚡ **瞬時のジャンプ** - 検索結果から該当コードに即座に移動
-- 🎯 **関数・クラス両対応** - 関数とクラスメソッドの両方を検索対象
-- 📊 **クラス統計表示** - プロジェクト内のクラス構造を一覧表示
+- 🎯 **関数・クラス・メソッド両対応** - スタンドアロン関数、クラス定義、クラスメソッドすべてを検索対象
+- 📊 **クラス統計表示** - プロジェクト内のクラス構造をスコア付きで一覧表示
 - 🚀 **高速インクリメンタル更新** - ファイル変更時も差分のみ更新
 - 🎨 **直感的なUI** - サイドバーから簡単操作
 
@@ -219,10 +244,11 @@ Bug reports and feature requests are welcome in Issues.
 ## 🎬 使用例
 
 ### 1. 自然言語・関数/クラス検索
-自然言語で関数やクラスメソッドを横断的に検索できます。
+Pythonの関数・クラス・クラスメソッドを「文脈」や「意味」に基づいて自然言語で横断的に検索できます（単なるキーワード一致ではなく意味的検索）。
+**注意：** 検索エンジンはPythonの関数（クラスメソッド含む）を抽出・インデックス化して動作します。クラス定義もナビゲーションやランキングのために扱われますが、検索の本質は関数ベースです。
 
 ### 2. クラスランキング表示
-関連度の高いクラスは「上位に含まれる関数の割合 × 最上位関数の順位の逆数」でスコア化され、ランキング表示されます。
+関連度の高いクラスは「上位に含まれる関数・メソッドの割合 × 最上位関数・メソッドの順位の逆数」でスコア化され、ランキング表示されます。
 また、オプションで「関数のみ（クラスに属さないもの）」の表示も可能です。
 
 ![Class Statistics](screenshot/show_class_stats.png)
@@ -233,8 +259,8 @@ Bug reports and feature requests are welcome in Issues.
 ![Function Only](screenshot/show_only_function.png)
 
 ### 4. 検索結果のハイライト
-OwlSpotlightは、検索結果の関数やクラスをエディタ上で即座にハイライト表示します。
-- **複数箇所同時ハイライト**：関連する関数・クラスがすべて色分けされて強調表示されます。
+OwlSpotlightは、検索結果の関数・クラス・メソッドをエディタ上で即座にハイライト表示します。
+- **複数箇所同時ハイライト**：関連する関数・クラス・メソッドがすべて色分けされて強調表示されます。
 - **ジャンプ機能と連動**：ハイライトされた箇所へワンクリックでジャンプ可能。
 - **動的なハイライト更新**：検索ワードを変更するたびに、ハイライトも即座に切り替わります。
 - **大規模ファイルでも快適**：数千行規模のファイルでもストレスなくハイライト。
@@ -246,14 +272,14 @@ OwlSpotlightは、検索結果の関数やクラスをエディタ上で即座�
 ## 💡 OwlSpotlightの特長
 
 ### 🎯 高精度な意味的検索
-- **自然言語クエリ対応** - 「データを処理する関数」のような検索が可能
+- **自然言語クエリ対応** - 関数・クラス・メソッドを意図や文脈で検索（意味的検索）
 - **コード断片検索** - 実際のコード片でも検索できる
-- **関数・クラス両対応** - 関数とクラスメソッドを包括的に検索
+- **包括的な検索対象** - 関数・クラス・クラスメソッドすべてをカバー
 
 ### ⚡ パフォーマンス
 - **高速インクリメンタル更新** - 変更部分のみを効率的に更新
 - **クラスタ分割インデックス** - 大規模プロジェクトでも高速検索
-- **FAISS最適化** - 数万関数規模でも瞬時に検索
+- **FAISS最適化** - 数万関数・クラス規模でも瞬時に検索
 
 ### 🛠 開発体験
 - **直感的UI** - サイドバーから簡単操作
@@ -270,91 +296,14 @@ OwlSpotlightは、検索結果の関数やクラスをエディタ上で即座�
 
 ## ⚠️ 注意事項
 
+- **検索の対象はあくまでPythonの関数です。** 自然言語や文脈で検索できますが、実際にインデックス・検索されるのはPythonの関数（クラスメソッド含む）です。クラス定義自体もナビゲーションやランキングのために扱われますが、検索の本質は関数ベースです。
 - **初回インデックス作成には時間がかかる場合があります。**
-  - 関数の抽出数が多い大規模プロジェクトほど、初回セットアップやインデックス作成に時間を要します。
-- **検索対象は「関数」のみです。**
-  - クラス定義自体やクラス外の変数・定数は検索対象外です。
-  - クラス内の関数（メソッド）以外に重要な情報が含まれている場合、意図した検索結果が得られないことがあります。
-- **クラスランキングは関数のスコアに基づきます。**
+  - 関数・クラスの抽出数が多い大規模プロジェクトほど、初回セットアップやインデックス作成に時間を要します。
+- **検索対象はPythonコードのみです。**
+  - 変数・定数は検索対象外です。
+  - 重要な情報が変数・定数のみの場合、検索で見つからないことがあります。
+- **クラスランキングは関数・メソッドのスコアに基づきます。**
   - クラス自体の説明や属性はランキングに直接影響しません。
+- **OwlSpotlightはキーワード一致ではなく文脈・意味に基づく検索（意味的検索）を行います。**
 
 ---
-
-## 🔧 手動セットアップ
-
-自動セットアップがうまくいかない場合（またはWindowsの場合）は、以下の手順でセットアップしてください：
-
-1. 必要なツールをインストール：
-   ```zsh
-   brew install npm
-   brew install pyenv
-   pyenv install 3.11
-   ```
-2. Python環境をセットアップ：
-   ```zsh
-   cd model_server
-   pyenv local 3.11
-   python3 -m venv .venv
-   source .venv/bin/activate
-   pip install -r requirements.txt
-   cd ..
-   ```
-3. VS Codeで拡張機能を起動（F5）し、サイドバーの「Start Server」ボタンを押してください。
-4. サイドバーから関数名やキーワードで検索できます。
-
----
-
-## ⚙️ システム要件・環境
-
-- **Python**: 3.9以上（推奨: 3.11）
-- **メモリ**: 4GB以上（大規模プロジェクトでは8GB以上推奨）
-- **ストレージ**: 仮想環境・依存パッケージ用に数GB
-- **Apple Silicon (M1/M2/M3/M4)**: 完全対応
-- **Windows/Linux**: 手動セットアップ必須・動作未検証
-- **CUDA/GPU**: 未検証（今後対応予定）
-
-### パフォーマンスのヒント
-- メモリが多いほど快適（Transformerモデル）
-- 高速CPU/GPUほどインデックス作成・検索が高速
-- SSD推奨
-- 仮想環境は必ずPython 3.11で作成
-- `.gitignore`で不要ファイル（例：`.venv/`）を除外
-- CUDA環境では`flash-attn`の追加インストールも可能
-
----
-
-## 🚧 開発状況・今後の予定
-
-### 現在の状況
-- ✅ Python関数・クラス検索
-- ✅ 自然言語・コード断片検索
-- ✅ Apple Silicon最適化
-- ✅ インクリメンタル更新
-- ✅ クラス統計表示
-- ✅ 関数のみ絞り込み
-
-### 今後の予定
-- 🔄 CUDA/flash-attention対応（GPU高速化）
-- 🔄 多言語対応（JavaScript, TypeScript, Java等）
-- 🔄 クラス継承関係の可視化
-- 🔄 VS Code Marketplace公開
-- 🔄 コード変更のリアルタイム検知（自動更新）
-
-### 制限事項
-- Python専用（多言語対応予定）
-- 関数・クラスメソッドのみインデックス対象（変数・定数は対象外）
-- CUDA環境未検証（今後対応予定）
-
----
-
-## 📄 ライセンス
-
-MIT License – 詳細は`LICENSE`ファイルを参照してください。
-
----
-
-**注意：**
-*この拡張機能は現在開発中です。仕様や挙動は今後予告なく変更される可能性があります。*
-
-**貢献：**
-バグ報告や機能要望はIssuesでお知らせください。
