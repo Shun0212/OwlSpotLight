@@ -652,6 +652,34 @@ async def get_class_stats(request: ClassStatsRequest):
         
         sorted_classes = sorted(classes.values(), key=lambda x: x["composite_score"], reverse=True)
         
+        # --- ここから standalone_functions をランキング順にソート ---
+        # 検索結果の (name, file_path, lineno) で一致するものを先頭に並べる
+        def func_key(func):
+            name = func.get("name")
+            file_path = os.path.abspath(func.get("file_path", func.get("file", "")))
+            lineno = func.get("lineno", func.get("line_number", 0))
+            return (name, file_path, lineno)
+        # 検索結果のキー順リスト
+        search_func_keys = [
+            (r["name"], os.path.abspath(r.get("file", "")), r.get("lineno", r.get("line_number", 0)))
+            for r in search_results
+        ]
+        # standalone_functions を検索結果の順に並べる
+        func_key_to_func = {func_key(f): f for f in standalone_functions}
+        sorted_funcs = []
+        used_keys = set()
+        for k in search_func_keys:
+            if k in func_key_to_func and k not in used_keys:
+                sorted_funcs.append(func_key_to_func[k])
+                used_keys.add(k)
+        # 残り（検索結果に出てこないもの）
+        for f in standalone_functions:
+            k = func_key(f)
+            if k not in used_keys:
+                sorted_funcs.append(f)
+        standalone_functions = sorted_funcs
+        # --- ここまで追加 ---
+        
         return {
             "classes": sorted_classes,
             "standalone_functions": standalone_functions,
