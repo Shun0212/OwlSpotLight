@@ -641,7 +641,7 @@ async def get_class_stats(request: ClassStatsRequest):
             # 複合スコア: weighted_score * (1 + proportion_bonus)
             # proportion_bonusは割合に基づくボーナス（0.0～1.0の範囲で最大100%のボーナス）
             proportion_bonus = proportion * 1.0  # 100%ヒットなら100%ボーナス
-            composite_score = weighted_score * (1 + proportion_bonus)
+            composite_score = (weighted_score * (1 + proportion_bonus))/2
             
             class_info["weighted_score"] = weighted_score
             class_info["search_hits"] = len(search_result_ranks)
