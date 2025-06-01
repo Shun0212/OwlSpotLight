@@ -40,15 +40,18 @@ window.onload = function() {
 	}
 	
 	// 既存のボタンイベント
-	document.getElementById('startServerBtn').onclick = () => {
-		console.log('startServerBtn clicked');
-		vscode.postMessage({ command: 'startServer' });
-	};
-
-	document.getElementById('clearCacheBtn').onclick = () => {
-		console.log('clearCacheBtn clicked');
-		vscode.postMessage({ command: 'clearCache' });
-	};
+	if (document.getElementById('startServerBtn')) {
+	  document.getElementById('startServerBtn').onclick = () => {
+	    console.log('startServerBtn clicked');
+	    vscode.postMessage({ command: 'startServer' });
+	  };
+	}
+	if (document.getElementById('clearCacheBtn')) {
+	  document.getElementById('clearCacheBtn').onclick = () => {
+	    console.log('clearCacheBtn clicked');
+	    vscode.postMessage({ command: 'clearCache' });
+	  };
+	}
 	
 	document.getElementById('searchBtn').onclick = () => {
 		const text = (document.getElementById('searchInput')).value;
@@ -305,4 +308,34 @@ window.onload = function() {
 			});
 		}
 	});
+	
+	// ヘルプボタンの処理
+	const helpBtn = document.getElementById('helpBtn');
+	const helpModal = document.getElementById('helpModal');
+	const helpContent = document.getElementById('helpContent');
+	const closeHelpModal = document.getElementById('closeHelpModal');
+	if (helpBtn && helpModal && helpContent && closeHelpModal) {
+	  helpBtn.onclick = async () => {
+	    helpModal.style.display = 'flex';
+	    helpContent.innerHTML = 'Loading...';
+	    try {
+	      const res = await fetch(window.HELP_HTML_URI);
+	      const html = await res.text();
+	      helpContent.innerHTML = html;
+	    } catch (e) {
+	      helpContent.innerHTML = 'Failed to load help.';
+	    }
+	  };
+	  closeHelpModal.onclick = () => {
+	    helpModal.style.display = 'none';
+	  };
+	  helpModal.onclick = (e) => {
+	    if (e.target === helpModal) { helpModal.style.display = 'none'; }
+	  };
+	  document.addEventListener('keydown', (e) => {
+	    if (helpModal.style.display === 'flex' && (e.key === 'Escape' || e.key === 'Esc')) {
+	      helpModal.style.display = 'none';
+	    }
+	  });
+	}
 };

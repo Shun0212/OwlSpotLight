@@ -411,6 +411,15 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					webviewView.webview.postMessage({ type: 'error', message: 'Failed to clear cache. Make sure the server is running.' });
 				}
 			}
+			if (msg.command === 'removeVenv') {
+				webviewView.webview.postMessage({ type: 'status', message: 'Removing virtual environment...' });
+				try {
+					await vscode.commands.executeCommand('owlspotlight.removeVenv');
+					webviewView.webview.postMessage({ type: 'status', message: 'Virtual environment removal completed.' });
+				} catch (error) {
+					webviewView.webview.postMessage({ type: 'error', message: 'Failed to remove virtual environment.' });
+				}
+			}
 		});
 	}
 
@@ -422,36 +431,37 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 		const styleUri = webview.asWebviewUri(
 			vscode.Uri.joinPath(this._context.extensionUri, 'media', 'styles.css')
 		);
+		const helpUri = webview.asWebviewUri(
+			vscode.Uri.joinPath(this._context.extensionUri, 'media', 'help.html')
+		);
 		return `<!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta
-    http-equiv="Content-Security-Policy"
-    content="
-      default-src 'none';
-      img-src ${webview.cspSource} https:;
-      style-src ${webview.cspSource} 'unsafe-inline';
-      script-src 'nonce-${nonce}';
-      connect-src http://127.0.0.1:8000 ${webview.cspSource};
-    ">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>OwlSpotlight</title>
   <link rel="stylesheet" href="${styleUri}">
 </head>
 <body>
-  <div class="header">🦉 OwlSpotLight</div>
+  <div class="header">🦉 OwlSpotLight
+    <button class="help-btn" id="helpBtn" title="Help"><span aria-label="help" role="img">💡</span></button>
+  </div>
   <div class="actions">
     <button id="startServerBtn">Start Server</button>
     <button id="clearCacheBtn">Clear Cache</button>
   </div>
-  
+  <!-- ヘルプモーダル -->
+  <div id="helpModal">
+    <div class="modal-content">
+      <span class="close" id="closeHelpModal">&times;</span>
+      <div id="helpContent">Loading...</div>
+    </div>
+  </div>
   <!-- タブナビゲーション -->
   <div class="tabs">
     <button class="tab-btn active" data-tab="search">Search</button>
     <button class="tab-btn" data-tab="stats">Class Stats</button>
   </div>
-  
   <!-- 検索タブ -->
   <div class="tab-content active" id="search-tab">
     <div class="searchbar">
@@ -461,7 +471,6 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
     <div class="status" id="status"></div>
     <div class="results" id="results"></div>
   </div>
-  
   <!-- クラス統計タブ -->
   <div class="tab-content" id="stats-tab">
     <div class="stats-filter">
@@ -475,7 +484,9 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
     <div class="status" id="stats-status"></div>
     <div class="stats-results" id="stats-results"></div>
   </div>
-  
+  <script nonce="${nonce}">
+    window.HELP_HTML_URI = "${helpUri}";
+  </script>
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
@@ -527,6 +538,9 @@ function setupDecorationListeners() {
 function updatePythonServerConfig() {
 	const config = vscode.workspace.getConfiguration('owlspotlight');
 	const batchSize = config.get<number>('batchSize', 32);
+	const cacheSettings = config.get<any>('cacheSettings', {});
+	const envSettings = config.get<any>('environmentSettings', {});
+	
 	// .envファイルに書き込む
 	const fs = require('fs');
 	const path = require('path');
@@ -536,8 +550,18 @@ function updatePythonServerConfig() {
 	if (fs.existsSync(envPath)) {
 		envContent = fs.readFileSync(envPath, 'utf8');
 	}
-	const lines = envContent.split(/\r?\n/).filter((l: string) => !l.startsWith('OWLSETTINGS_BATCH_SIZE='));
+	const lines = envContent.split(/\r?\n/).filter((l: string) => 
+		!l.startsWith('OWLSETTINGS_BATCH_SIZE=') &&
+		!l.startsWith('OWLSETTINGS_AUTO_CLEAR_CACHE=') &&
+		!l.startsWith('OWLSETTINGS_AUTO_CLEAR_LOCAL_CACHE=') &&
+		!l.startsWith('OWLSETTINGS_CACHE_PATH=') &&
+		!l.startsWith('OWLSETTINGS_PYTHON_VERSION=')
+	);
 	lines.push(`OWLSETTINGS_BATCH_SIZE=${batchSize}`);
+	lines.push(`OWLSETTINGS_AUTO_CLEAR_CACHE=${cacheSettings.autoClearCache || false}`);
+	lines.push(`OWLSETTINGS_AUTO_CLEAR_LOCAL_CACHE=${cacheSettings.autoClearLocalCache || false}`);
+	lines.push(`OWLSETTINGS_CACHE_PATH=${cacheSettings.cachePath || ''}`);
+	lines.push(`OWLSETTINGS_PYTHON_VERSION=${envSettings.pythonVersion || '3.11'}`);
 	fs.writeFileSync(envPath, lines.join('\n'));
 }
 
@@ -564,6 +588,20 @@ export function activate(context: vscode.ExtensionContext) {
 
 	// サーバー起動コマンドはそのまま
 	const startServerDisposable = vscode.commands.registerCommand('owlspotlight.startServer', async () => {
+		const config = vscode.workspace.getConfiguration('owlspotlight');
+		const cacheSettings = config.get<any>('cacheSettings', {});
+		const autoClearCache = cacheSettings.autoClearCache || false;
+		
+		// 自動キャッシュクリアが有効な場合
+		if (autoClearCache) {
+			try {
+				await vscode.commands.executeCommand('owlspotlight.clearCache');
+				vscode.window.showInformationMessage('Cache cleared automatically before starting server.');
+			} catch (error) {
+				vscode.window.showWarningMessage(`Failed to auto-clear cache: ${error}`);
+			}
+		}
+		
 		const serverDir = path.join(context.extensionPath, 'model_server');
 		const terminal = vscode.window.createTerminal({
 			name: 'OwlSpotlight Server',
@@ -586,7 +624,25 @@ export function activate(context: vscode.ExtensionContext) {
 
 	// --- 環境セットアップコマンドを追加 ---
 	const setupEnvDisposable = vscode.commands.registerCommand('owlspotlight.setupEnv', async () => {
+		const config = vscode.workspace.getConfiguration('owlspotlight');
+		const envSettings = config.get<any>('environmentSettings', {});
+		const autoRemoveVenv = envSettings.autoRemoveVenv || false;
+		const pythonVersion = envSettings.pythonVersion || '3.11';
+		
 		const serverDir = path.join(context.extensionPath, 'model_server');
+		const venvDir = path.join(serverDir, '.venv');
+		const fs = require('fs');
+		
+		// 自動削除設定がオンの場合、既存の仮想環境を削除
+		if (autoRemoveVenv && fs.existsSync(venvDir)) {
+			try {
+				fs.rmSync(venvDir, { recursive: true, force: true });
+				vscode.window.showInformationMessage('Existing virtual environment removed automatically.');
+			} catch (error) {
+				vscode.window.showWarningMessage(`Failed to remove existing virtual environment: ${error}`);
+			}
+		}
+		
 		const terminal = vscode.window.createTerminal({
 			name: 'OwlSpotlight Setup',
 			cwd: serverDir
@@ -603,21 +659,111 @@ export function activate(context: vscode.ExtensionContext) {
 		} else {
 			// macOS/Linux用: pyenvチェックあり
 			terminal.sendText('if ! command -v pyenv >/dev/null 2>&1; then echo "[OwlSpotlight] pyenv is not installed. Please install pyenv first. For example: brew install pyenv"; exit 1; fi', true);
-			terminal.sendText('if ! pyenv versions --bare | grep -q "^3.11"; then echo "[OwlSpotlight] Python 3.11 is not installed in pyenv. Please run: pyenv install 3.11"; exit 1; fi', true);
-			terminal.sendText('pyenv local 3.11', true);
-			terminal.sendText('python3.11 -m venv .venv', true);
+			terminal.sendText(`if ! pyenv versions --bare | grep -q "^${pythonVersion}"; then echo "[OwlSpotlight] Python ${pythonVersion} is not installed in pyenv. Please run: pyenv install ${pythonVersion}"; exit 1; fi`, true);
+			terminal.sendText(`pyenv local ${pythonVersion}`, true);
+			terminal.sendText(`python${pythonVersion} -m venv .venv`, true);
 			terminal.sendText('source .venv/bin/activate', true);
 			terminal.sendText('pip install --upgrade pip', true);
 			terminal.sendText('pip install -r requirements.txt', true);
-			vscode.window.showInformationMessage('OwlSpotlight Python 3.11環境セットアップコマンドをmacOS/Linux用で実行しました。pyenvやPython 3.11が無い場合は指示に従ってください。完了後にサーバーを起動してください。');
+			vscode.window.showInformationMessage(`OwlSpotlight Python ${pythonVersion}環境セットアップコマンドをmacOS/Linux用で実行しました。pyenvやPython ${pythonVersion}が無い場合は指示に従ってください。完了後にサーバーを起動してください。`);
 		}
 	});
 	context.subscriptions.push(setupEnvDisposable);
 
+	// --- キャッシュクリアコマンドを追加 ---
+	const clearCacheDisposable = vscode.commands.registerCommand('owlspotlight.clearCache', async () => {
+		const config = vscode.workspace.getConfiguration('owlspotlight');
+		const cacheSettings = config.get<any>('cacheSettings', {});
+		const customCachePath = cacheSettings.cachePath || '';
+		
+		const serverDir = path.join(context.extensionPath, 'model_server');
+		const fs = require('fs');
+		
+		try {
+			// メインのキャッシュディレクトリ
+			const mainCacheDir = path.join(serverDir, '__pycache__');
+			if (fs.existsSync(mainCacheDir)) {
+				fs.rmSync(mainCacheDir, { recursive: true, force: true });
+			}
+			
+			// .owl_index ディレクトリの内容を削除 (server-side cache)
+			const owlIndexDir = path.join(serverDir, '.owl_index');
+			if (fs.existsSync(owlIndexDir)) {
+				// ディレクトリの中身だけを削除し、ディレクトリ自体は残す
+				const items = fs.readdirSync(owlIndexDir);
+				for (const item of items) {
+					const itemPath = path.join(owlIndexDir, item);
+					fs.rmSync(itemPath, { recursive: true, force: true });
+				}
+				console.log('Cleared .owl_index directory contents');
+			}
+			
+			// カスタムキャッシュパスが指定されている場合
+			if (customCachePath && fs.existsSync(customCachePath)) {
+				const customCacheFiles = ['index_cache.pkl', 'embeddings_cache.pkl', 'cluster_cache.pkl'];
+				for (const file of customCacheFiles) {
+					const filePath = path.join(customCachePath, file);
+					if (fs.existsSync(filePath)) {
+						fs.unlinkSync(filePath);
+					}
+				}
+			}
+			
+			// デフォルトのキャッシュファイルを削除
+			const cacheFiles = [
+				'index_cache.pkl',
+				'embeddings_cache.pkl',
+				'cluster_cache.pkl'
+			];
+			
+			for (const file of cacheFiles) {
+				const filePath = path.join(serverDir, file);
+				if (fs.existsSync(filePath)) {
+					fs.unlinkSync(filePath);
+				}
+			}
+			
+			vscode.window.showInformationMessage('OwlSpotlight cache cleared successfully (including .owl_index directory contents).');
+		} catch (error) {
+			vscode.window.showErrorMessage(`Failed to clear cache: ${error}`);
+		}
+	});
+	context.subscriptions.push(clearCacheDisposable);
+
+	// --- 仮想環境削除コマンドを追加 ---
+	const removeVenvDisposable = vscode.commands.registerCommand('owlspotlight.removeVenv', async () => {
+		const serverDir = path.join(context.extensionPath, 'model_server');
+		const venvDir = path.join(serverDir, '.venv');
+		const fs = require('fs');
+		
+		try {
+			if (fs.existsSync(venvDir)) {
+				const result = await vscode.window.showWarningMessage(
+					'Are you sure you want to remove the virtual environment? This will delete all installed packages.',
+					{ modal: true },
+					'Yes, Remove',
+					'Cancel'
+				);
+				
+				if (result === 'Yes, Remove') {
+					fs.rmSync(venvDir, { recursive: true, force: true });
+					vscode.window.showInformationMessage('Virtual environment removed successfully. Run "Setup Python Environment" to recreate it.');
+				}
+			} else {
+				vscode.window.showInformationMessage('No virtual environment found to remove.');
+			}
+		} catch (error) {
+			vscode.window.showErrorMessage(`Failed to remove virtual environment: ${error}`);
+		}
+	});
+	context.subscriptions.push(removeVenvDisposable);
+
 	// 設定変更時にPythonサーバーの設定を更新
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeConfiguration(e => {
-			if (e.affectsConfiguration('owlspotlight.batchSize')) {
+			if (e.affectsConfiguration('owlspotlight.batchSize') || 
+				e.affectsConfiguration('owlspotlight.cacheSettings') ||
+				e.affectsConfiguration('owlspotlight.environmentSettings')) {
 				updatePythonServerConfig();
 			}
 		})

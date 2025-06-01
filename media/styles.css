@@ -8,6 +8,10 @@ body {
 }
 
 .header { 
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 0.8em 1em 0.5em 1em; 
   font-size: 1.15em; 
   font-weight: bold; 
@@ -18,25 +22,40 @@ body {
 }
 
 .actions { 
-  display: flex; 
-  gap: 0.5em; 
-  align-items: center; 
-  padding: 0.7em 1em 0.5em 1em; 
+  display: flex;
+  flex-direction: column;
+  gap: 0.7em;
+  align-items: stretch;
+  padding: 1.2em 1em 1em 1em; 
   border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #e0e0e0); 
   background: var(--vscode-sideBarSectionHeader-background, var(--vscode-sideBar-background, #f8f8f8)); 
   margin-bottom: 1em;
 }
+.actions button {
+  width: 100%;
+  font-size: 1em;
+  padding: 0.7em 0;
+  border-radius: 6px;
+  margin: 0;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
 button { 
-  padding: 0.25em 1.1em; 
+  padding: 0.2em 0.8em; 
   border-radius: 4px; 
   border: 1px solid var(--vscode-button-border, transparent); 
   background: var(--vscode-button-background, #0078d4); 
   color: var(--vscode-button-foreground, #ffffff); 
   font-weight: 500; 
-  font-size: 1em; 
+  font-size: 0.85em; 
   cursor: pointer; 
   transition: background 0.2s, border 0.2s, box-shadow 0.2s; 
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  min-width: 0;
+  white-space: nowrap;
+  flex-shrink: 1;
 }
 
 button:hover { 
@@ -47,6 +66,66 @@ button:hover {
 button:focus {
   outline: 1px solid var(--vscode-focusBorder, #0078d4);
   outline-offset: 2px;
+}
+
+/* Special button styles */
+#clearCacheBtn, #clearCacheLocalBtn {
+  background: var(--vscode-button-secondaryBackground, #5a5d5e);
+  color: var(--vscode-button-secondaryForeground, #ffffff);
+}
+
+#clearCacheBtn:hover, #clearCacheLocalBtn:hover {
+  background: var(--vscode-button-secondaryHoverBackground, #6c7172);
+}
+
+/* ヘルプボタン */
+.help-btn {
+  position: static;
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  font-size: 1.3em;
+  color: var(--vscode-editor-foreground, #888);
+  cursor: pointer;
+  transition: color 0.2s;
+  z-index: 10;
+  padding: 0 0.2em;
+  align-self: center;
+}
+.help-btn:hover {
+  color: var(--vscode-editor-foreground, #0078d4);
+}
+
+/* ヘルプモーダル */
+#helpModal {
+  display: none;
+  position: fixed;
+  z-index: 1000;
+  left: 0; top: 0; width: 100vw; height: 100vh;
+  background: rgba(0,0,0,0.25);
+  justify-content: center;
+  align-items: center;
+}
+#helpModal .modal-content {
+  background: var(--vscode-editor-background, #fff);
+  color: var(--vscode-editor-foreground, #222);
+  padding: 2em 2.5em;
+  border-radius: 12px;
+  max-width: 480px;
+  width: 90vw;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+  position: relative;
+}
+#helpModal .close {
+  position: absolute;
+  top: 0.7em;
+  right: 1.2em;
+  font-size: 1.5em;
+  color: #888;
+  cursor: pointer;
+}
+#helpModal .close:hover {
+  color: #d73a49;
 }
 
 .searchbar { 
@@ -387,19 +466,4 @@ input[type=text]:focus {
   .class-score {
     font-size: 0.8em;
   }
-}
-
-#clearCacheBtn {
-  background: var(--vscode-button-background, #007acc);
-  color: var(--vscode-button-foreground, #fff);
-  border: none;
-  border-radius: 4px;
-  padding: 0.5em 1.2em;
-  font-size: 1em;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-#clearCacheBtn:hover {
-  background: var(--vscode-button-hoverBackground, #005a9e);
 }

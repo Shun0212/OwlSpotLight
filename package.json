@@ -42,6 +42,14 @@
       {
         "command": "owlspotlight.setupEnv",
         "title": "OwlSpotlight: Setup Python Environment"
+      },
+      {
+        "command": "owlspotlight.clearCache",
+        "title": "OwlSpotlight: Clear Cache"
+      },
+      {
+        "command": "owlspotlight.removeVenv",
+        "title": "OwlSpotlight: Remove Virtual Environment"
       }
     ],
     "configuration": {
@@ -53,6 +61,50 @@
           "default": 32,
           "minimum": 1,
           "description": "Batch size for code embedding (Python server). Larger values may speed up indexing but use more memory."
+        },
+        "owlspotlight.cacheSettings": {
+          "type": "object",
+          "title": "Cache Settings",
+          "description": "Configure cache behavior for better performance",
+          "properties": {
+            "autoClearCache": {
+              "type": "boolean",
+              "default": false,
+              "description": "Automatically clear server cache when starting the server (clears .owl_index directory)"
+            },
+            "autoClearLocalCache": {
+              "type": "boolean",
+              "default": false,
+              "description": "Automatically clear local cache files when starting the server"
+            },
+            "cachePath": {
+              "type": "string",
+              "default": "",
+              "description": "Custom cache directory path (leave empty to use default model_server directory)"
+            },
+            "clearCacheOnCommand": {
+              "type": "boolean",
+              "default": false,
+              "description": "Manual cache clear trigger - Check this box to clear cache immediately (.owl_index directory and local cache files). Setting will automatically return to unchecked after execution."
+            }
+          }
+        },
+        "owlspotlight.environmentSettings": {
+          "type": "object",
+          "title": "Environment Settings",
+          "description": "Configure Python environment setup behavior",
+          "properties": {
+            "autoRemoveVenv": {
+              "type": "boolean",
+              "default": false,
+              "description": "Automatically remove existing virtual environment before setup. WARNING: This will delete all installed packages!"
+            },
+            "pythonVersion": {
+              "type": "string",
+              "default": "3.11",
+              "description": "Python version to use for virtual environment (requires pyenv on macOS/Linux)"
+            }
+          }
         }
       }
     }
@@ -85,12 +137,6 @@
     "@vscode/test-cli": "^0.0.10",
     "@vscode/test-electron": "^2.5.2"
   },
-  "activationEvents": [
-    "onCommand:owlspotlight.startServer",
-    "onCommand:owlspotlight.searchCode",
-    "onCommand:owlspotlight.setupEnv",
-    "onView:owlspotlight.sidebar"
-  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/Shun0212/owlspotlight.git"
