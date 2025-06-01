@@ -3,17 +3,35 @@
   "displayName": "owlspotlight",
   "description": "Highlight similar code snippets using semantic search.",
   "publisher": "Shun0212",
-  "version": "0.0.1",
+  "version": "0.0.2",
+  "keywords": [
+    "semantic search",
+    "code search",
+    "python",
+    "function",
+    "class",
+    "method",
+    "highlight",
+    "embedding",
+    "bert",
+    "natural language",
+    "similar code",
+    "code navigation",
+    "AI",
+    "machine learning",
+    "VSCode"
+  ],
   "engines": {
     "vscode": "^1.100.0"
   },
   "categories": [
+    "Programming Languages",
+    "AI",
+    "Machine Learning",
     "Other"
   ],
   "main": "./out/extension.js",
-  "activationEvents": [
-    "onView:owlspotlight.sidebar"
-  ],
+  "activationEvents": [],
   "icon": "media/owl.png",
   "contributes": {
     "viewsContainers": {
