@@ -10,6 +10,7 @@
     "Other"
   ],
   "main": "./out/extension.js",
+  "icon": "media/owl.png",
   "contributes": {
     "viewsContainers": {
       "activitybar": [

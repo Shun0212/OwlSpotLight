@@ -44,6 +44,11 @@ window.onload = function() {
 		console.log('startServerBtn clicked');
 		vscode.postMessage({ command: 'startServer' });
 	};
+
+	document.getElementById('clearCacheBtn').onclick = () => {
+		console.log('clearCacheBtn clicked');
+		vscode.postMessage({ command: 'clearCache' });
+	};
 	
 	document.getElementById('searchBtn').onclick = () => {
 		const text = (document.getElementById('searchInput')).value;

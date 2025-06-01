@@ -390,6 +390,27 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				// Webviewからのサーバー起動要求はコマンド経由で実行
 				void vscode.commands.executeCommand('owlspotlight.startServer');
 			}
+			if (msg.command === 'clearCache') {
+				const workspaceFolders = vscode.workspace.workspaceFolders;
+				if (!workspaceFolders || workspaceFolders.length === 0) {
+					webviewView.webview.postMessage({ type: 'error', message: 'No workspace folder found' });
+					return;
+				}
+				const folderPath = workspaceFolders[0].uri.fsPath;
+				webviewView.webview.postMessage({ type: 'status', message: 'Clearing cache and rebuilding index...' });
+				try {
+					const res = await fetch('http://localhost:8000/force_rebuild_index', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ directory: folderPath, file_ext: '.py' })
+					});
+					const data = await res.json();
+					const msg = typeof data === 'object' && data && 'message' in data ? (data as any).message : undefined;
+					webviewView.webview.postMessage({ type: 'status', message: msg || 'Cache cleared and index rebuilt.' });
+				} catch (error) {
+					webviewView.webview.postMessage({ type: 'error', message: 'Failed to clear cache. Make sure the server is running.' });
+				}
+			}
 		});
 	}
 
@@ -422,6 +443,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
   <div class="header">🦉 OwlSpotLight</div>
   <div class="actions">
     <button id="startServerBtn">Start Server</button>
+    <button id="clearCacheBtn">Clear Cache</button>
   </div>
   
   <!-- タブナビゲーション -->

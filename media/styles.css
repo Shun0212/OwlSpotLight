@@ -24,6 +24,7 @@ body {
   padding: 0.7em 1em 0.5em 1em; 
   border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #e0e0e0); 
   background: var(--vscode-sideBarSectionHeader-background, var(--vscode-sideBar-background, #f8f8f8)); 
+  margin-bottom: 1em;
 }
 button { 
   padding: 0.25em 1.1em; 
@@ -386,4 +387,19 @@ input[type=text]:focus {
   .class-score {
     font-size: 0.8em;
   }
+}
+
+#clearCacheBtn {
+  background: var(--vscode-button-background, #007acc);
+  color: var(--vscode-button-foreground, #fff);
+  border: none;
+  border-radius: 4px;
+  padding: 0.5em 1.2em;
+  font-size: 1em;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+#clearCacheBtn:hover {
+  background: var(--vscode-button-hoverBackground, #005a9e);
 }

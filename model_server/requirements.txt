@@ -21,7 +21,8 @@ packaging==25.0
 pathspec==0.12.1
 pillow==11.2.1
 pydantic==2.11.5
-pydantic_core==2.33.2
+pydantic-core==2.33.2
+pydantic-settings
 PyYAML==6.0.2
 regex==2024.11.6
 requests==2.32.3

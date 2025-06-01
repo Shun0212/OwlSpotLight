@@ -17,6 +17,7 @@ from functools import partial
 from pathlib import Path
 import json
 import hashlib
+from pydantic_settings import BaseSettings
 
 OWL_INDEX_DIR = ".owl_index"
 
@@ -38,8 +39,6 @@ model = SentenceTransformer("Shuu12121/CodeSearch-ModernBERT-Owl-2.0-Plus")
 model_device = None  # 現在のデバイスを記録
 
 # === 設定: バッチサイズなど ===
-from pydantic import BaseSettings
-
 class OwlSettings(BaseSettings):
     batch_size: int = 32
 
