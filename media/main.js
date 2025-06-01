@@ -82,7 +82,7 @@ window.onload = function() {
 		// ステータスメッセージを表示
 		const statsStatus = document.getElementById('stats-status');
 		if (statsStatus) {
-			statsStatus.textContent = `フィルター: ${filterValue === 'all' ? 'すべて' : filterValue === 'classes' ? 'クラスのみ' : '関数のみ'}`;
+			statsStatus.textContent = `Filter: ${filterValue === 'all' ? 'All' : filterValue === 'classes' ? 'Classes Only' : 'Standalone Functions Only'}`;
 		}
 		
 		applyStatsFilter();
@@ -215,14 +215,14 @@ window.onload = function() {
 		
 		// ステータス更新
 		if (statsStatus) {
-			const filterText = filter === 'all' ? 'すべて' : filter === 'classes' ? 'クラスのみ' : '関数のみ';
-			let statusText = `フィルター: ${filterText}`;
+			const filterText = filter === 'all' ? 'All' : filter === 'classes' ? 'Classes Only' : 'Standalone Functions Only';
+			let statusText = `Filter: ${filterText}`;
 			if (filter === 'all') {
-				statusText += ` - ${classCount}クラス, ${functionCount}関数`;
+				statusText += ` - ${classCount} classes, ${functionCount} functions`;
 			} else if (filter === 'classes') {
-				statusText += ` - ${classCount}クラス`;
+				statusText += ` - ${classCount} classes`;
 			} else if (filter === 'functions') {
-				statusText += ` - ${functionCount}関数`;
+				statusText += ` - ${functionCount} functions`;
 			}
 			statsStatus.textContent = statusText;
 		}
@@ -249,13 +249,13 @@ window.onload = function() {
 				const queryInfo = currentStatsData.search_query ? 
 					` (based on search: "${currentStatsData.search_query}")` : 
 					' (no search query)';
-				statsStatus.textContent = `クラス統計を読み込みました${queryInfo}`;
+				statsStatus.textContent = `Class statistics loaded${queryInfo}`;
 			}
 			
 			applyStatsFilter();
 		}
 		if (msg.type === 'results') {
-			document.getElementById('status').textContent = msg.results.length ? '検索結果:' : '該当する関数が見つかりませんでした';
+			document.getElementById('status').textContent = msg.results.length ? 'Search Results:' : 'No matching functions found';
 			const folderPath = msg.folderPath;
 			// 結果コンテナをクリアしてから新しい結果を追加
 			const resultsContainer = document.getElementById('results');

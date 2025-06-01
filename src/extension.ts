@@ -637,6 +637,19 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 		terminal.show();
 		vscode.window.showInformationMessage('OwlSpotlight server started in a new terminal.');
+		
+		// サーバー起動後に接続確認
+		setTimeout(async () => {
+			try {
+				// 簡単なヘルスチェックリクエスト
+				const res = await fetch('http://localhost:8000/health');
+				if (!res.ok) {
+					throw new Error('Server not responding');
+				}
+			} catch (error) {
+				vscode.window.showErrorMessage('Failed to start the OwlSpotlight server. Please make sure you have created the Python virtual environment (e.g., run "OwlSpotlight: Setup Python Environment") and installed all dependencies.');
+			}
+		}, 5000); // 5秒後にチェック
 	});
 	context.subscriptions.push(startServerDisposable);
 
@@ -673,7 +686,7 @@ export function activate(context: vscode.ExtensionContext) {
 			terminal.sendText('.\\.venv\\Scripts\\activate', true);
 			terminal.sendText('python -m pip install --upgrade pip', true);
 			terminal.sendText('pip install -r requirements.txt', true);
-			vscode.window.showInformationMessage('OwlSpotlight Python環境セットアップコマンドをWindows用で実行しました。完了後にサーバーを起動してください。');
+			vscode.window.showInformationMessage('OwlSpotlight Python environment setup command executed for Windows. Please start the server after setup completes.');
 		} else {
 			// macOS/Linux用: pyenvチェックあり
 			terminal.sendText('if ! command -v pyenv >/dev/null 2>&1; then echo "[OwlSpotlight] pyenv is not installed. Please install pyenv first. For example: brew install pyenv"; exit 1; fi', true);
@@ -683,7 +696,7 @@ export function activate(context: vscode.ExtensionContext) {
 			terminal.sendText('source .venv/bin/activate', true);
 			terminal.sendText('pip install --upgrade pip', true);
 			terminal.sendText('pip install -r requirements.txt', true);
-			vscode.window.showInformationMessage(`OwlSpotlight Python ${pythonVersion}環境セットアップコマンドをmacOS/Linux用で実行しました。pyenvやPython ${pythonVersion}が無い場合は指示に従ってください。完了後にサーバーを起動してください。`);
+			vscode.window.showInformationMessage(`OwlSpotlight Python ${pythonVersion} environment setup command executed for macOS/Linux. Please ensure pyenv and Python ${pythonVersion} are installed. Start the server after setup completes.`);
 		}
 	});
 	context.subscriptions.push(setupEnvDisposable);
