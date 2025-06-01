@@ -666,18 +666,6 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 		});
 		context.subscriptions.push(disposable);
-		// サーバー起動後に接続確認
-		setTimeout(async () => {
-			try {
-				const res = await fetch('http://localhost:8000/health');
-				if (!res.ok) {
-					throw new Error('Server not responding');
-				}
-			} catch (error) {
-				serverStartFailed = true;
-				vscode.window.showErrorMessage('Failed to start the OwlSpotlight server. Please make sure you have created the Python virtual environment (e.g., run "OwlSpotlight: Setup Python Environment") and installed all dependencies.');
-			}
-		}, 5000);
 	});
 	context.subscriptions.push(startServerDisposable);
 
