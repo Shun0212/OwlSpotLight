@@ -230,6 +230,14 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 
 		// Webviewからのメッセージ受信
 		webviewView.webview.onDidReceiveMessage(async (msg) => {
+			if (msg.command === 'openExternal' && msg.url) {
+				try {
+					await vscode.env.openExternal(vscode.Uri.parse(msg.url));
+				} catch (e) {
+					vscode.window.showErrorMessage('Failed to open URL: ' + msg.url);
+				}
+				return;
+			}
 			if (msg.command === 'search') {
 				const query = msg.text;
 				const workspaceFolders = vscode.workspace.workspaceFolders;
@@ -434,6 +442,9 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 		const helpUri = webview.asWebviewUri(
 			vscode.Uri.joinPath(this._context.extensionUri, 'media', 'help.html')
 		);
+		const owlPngUri = webview.asWebviewUri(
+			vscode.Uri.joinPath(this._context.extensionUri, 'media', 'owl.png')
+		);
 		return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -443,8 +454,14 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
   <link rel="stylesheet" href="${styleUri}">
 </head>
 <body>
-  <div class="header">🦉 OwlSpotLight
-    <button class="help-btn" id="helpBtn" title="Help"><span aria-label="help" role="img">💡</span></button>
+  <div class="header">
+    OwlSpotLight
+    <div class="header-btns">
+      <button class="owl-btn" id="repoBtn" title="Open GitHub Repository">
+        <img src="${owlPngUri}" alt="GitHub" style="height:1.6em;width:1.6em;vertical-align:middle;" />
+      </button>
+      <button class="help-btn" id="helpBtn" title="Help"><span aria-label="help" role="img">💡</span></button>
+    </div>
   </div>
   <div class="actions">
     <button id="startServerBtn">Start Server</button>
@@ -486,6 +503,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
   </div>
   <script nonce="${nonce}">
     window.HELP_HTML_URI = "${helpUri}";
+    window.OWL_REPO_URL = "https://github.com/Shun0212/owlspotlight";
   </script>
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>

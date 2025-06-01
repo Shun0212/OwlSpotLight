@@ -20,6 +20,34 @@ body {
   color: var(--vscode-sideBarTitle-foreground, var(--vscode-foreground, #333333));
   letter-spacing: 0.05em; 
 }
+.header-btns {
+  display: flex;
+  align-items: center;
+  gap: 0.15em;
+  margin-left: 0.7em;
+}
+.owl-btn {
+  background: transparent;
+  border: none;
+  padding: 0 0.1em;
+  cursor: pointer;
+  transition: filter 0.2s;
+  height: 1.6em;
+  width: 1.6em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.owl-btn img {
+  height: 1.45em;
+  width: 1.45em;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.08));
+  display: block;
+  margin: auto;
+}
+.owl-btn:hover img {
+  filter: brightness(1.2) drop-shadow(0 2px 6px rgba(0,120,212,0.18));
+}
 
 .actions { 
   display: flex;
@@ -81,16 +109,27 @@ button:focus {
 /* ヘルプボタン */
 .help-btn {
   position: static;
-  margin-left: auto;
+  margin-left: 0.1em;
   background: transparent;
   border: none;
-  font-size: 1.3em;
+  font-size: 1.15em;
   color: var(--vscode-editor-foreground, #888);
   cursor: pointer;
   transition: color 0.2s;
   z-index: 10;
-  padding: 0 0.2em;
+  padding: 0 0.1em;
   align-self: center;
+  height: 1.45em;
+  width: 1.45em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.help-btn span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1em;
 }
 .help-btn:hover {
   color: var(--vscode-editor-foreground, #0078d4);
@@ -115,6 +154,13 @@ button:focus {
   width: 90vw;
   box-shadow: 0 8px 32px rgba(0,0,0,0.18);
   position: relative;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+#helpModal #helpContent {
+  overflow-y: auto;
+  max-height: 60vh;
 }
 #helpModal .close {
   position: absolute;

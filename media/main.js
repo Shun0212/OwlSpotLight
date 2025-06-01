@@ -314,6 +314,7 @@ window.onload = function() {
 	const helpModal = document.getElementById('helpModal');
 	const helpContent = document.getElementById('helpContent');
 	const closeHelpModal = document.getElementById('closeHelpModal');
+	const repoBtn = document.getElementById('repoBtn');
 	if (helpBtn && helpModal && helpContent && closeHelpModal) {
 	  helpBtn.onclick = async () => {
 	    helpModal.style.display = 'flex';
@@ -337,5 +338,12 @@ window.onload = function() {
 	      helpModal.style.display = 'none';
 	    }
 	  });
+	}
+	if (repoBtn) {
+	  repoBtn.onclick = () => {
+	    if (window.OWL_REPO_URL) {
+	      vscode.postMessage({ command: 'openExternal', url: window.OWL_REPO_URL });
+	    }
+	  };
 	}
 };
