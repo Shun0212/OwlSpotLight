@@ -379,9 +379,13 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 							decorations.push({ type: classBackgroundDeco, ranges: [classRange] });
 							
 							// クラス定義行のみを強調
+							const classDefLineStart = parent.range.start;
+							const classDefLineText = doc.lineAt(classDefLineStart.line).text;
 							const classDefLine = new vscode.Range(
-								parent.range.start, 
-								new vscode.Position(parent.range.start.line, parent.range.end.character)
+								classDefLineStart.line,
+								0,
+								classDefLineStart.line,
+								classDefLineText.length
 							);
 							const classHeaderDeco = vscode.window.createTextEditorDecorationType({ 
 								backgroundColor: 'rgba(0,200,100,0.12)',
@@ -402,7 +406,6 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 						const funcRange = await getFunctionRangeByIndent(doc, target.range.start);
 						const funcDeco = vscode.window.createTextEditorDecorationType({ 
 							backgroundColor: 'rgba(0,128,255,0.10)', // stronger blue highlight for function
-							border: '1px solid rgba(0,128,255,0.4)',  // blue border for function
 						});
 						decorations.push({ type: funcDeco, ranges: [funcRange] });
 					} else if (target && target.kind === vscode.SymbolKind.Class) {
@@ -412,7 +415,6 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 						// クラス全体に薄い背景色
 						const selfClassDeco = vscode.window.createTextEditorDecorationType({ 
 							backgroundColor: 'rgba(0,200,100,0.10)',
-							border: '1px solid rgba(0,200,100,0.2)'
 						}); // very light green highlight for class body
 						decorations.push({ type: selfClassDeco, ranges: [classRange] });
 						
@@ -422,12 +424,16 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 							border: '2px solid rgba(0,200,100,0.4)'
 						}); // stronger green highlight for class header
 						
-						// クラス定義行のみをハイライト
-						const classDefLine = new vscode.Range(
-							target.range.start, 
-							new vscode.Position(target.range.start.line, target.range.end.character)
+						// クラス定義行のみをハイライト（行全体をカバー）
+						const targetClassDefLineStart = target.range.start;
+						const targetClassDefLineText = doc.lineAt(targetClassDefLineStart.line).text;
+						const targetClassDefLine = new vscode.Range(
+							targetClassDefLineStart.line,
+							0,
+							targetClassDefLineStart.line,
+							targetClassDefLineText.length
 						);
-						decorations.push({ type: classHeaderDeco, ranges: [classDefLine] });
+						decorations.push({ type: classHeaderDeco, ranges: [targetClassDefLine] });
 						
 						// さらに外側のクラス（入れ子の場合）
 						let outerCls = parentSymbol;

@@ -2,36 +2,46 @@
 
 **Instantly discover code with semantic search. A VS Code extension for searching Python functions, classes, and methods using natural language.**
 
----
-
-## 📝 Prerequisites
-
-- **You must clone this repository locally** to use OwlSpotlight. The extension works on your local codebase and does not support remote repositories or online browsing.
+**意味的検索でPython関数・クラス・メソッドを瞬時に発見できるVS Code拡張機能。**
 
 ---
 
-![Demo](screenshot/result.png)
+## 📝 Prerequisites / 前提条件
 
-## ✨ Key Features
+- **Clone this repository locally.** OwlSpotlight works on your local codebase only. Remote repositories and online browsing are not supported.
+- **このリポジトリをローカルにクローンしてください。OwlSpotlightはローカルのコードベースでのみ動作します。リモートリポジトリやオンライン利用は非対応です。**
 
-- 🔍 **Natural language code search** – Find Python functions, classes, and methods with intuitive queries
-- ⚡ **Instant jump** – Jump directly to results in your editor
-- 🎯 **Function, class & method support** – Search both standalone functions and class methods, as well as class definitions
-- 📊 **Class ranking view** – See class relevance based on function/method scores
-- 🚀 **Fast incremental updates** – Only changed files are re-indexed
-- 🎨 **Intuitive UI** – Simple sidebar interface
+---
+
+![Function Detection Demo](screenshot/detect_function.png)
+
+> **All screenshots have been updated! See below for the latest UI and features.**
+> **スクリーンショット画像を一新しました。最新のUIや機能は下記のデモ画像をご覧ください。**
+
+## ✨ Key Features / 主な機能
+
+- 🔍 **Natural language code search / 自然言語コード検索** – Find Python functions, classes, and methods with intuitive queries / 直感的なクエリでPythonの関数・クラス・メソッドを検索
+- ⚡ **Instant jump / 即ジャンプ** – Jump directly to results in your editor / 検索結果から該当箇所に即座に移動
+- 🎯 **Function, class & method support / 関数・クラス・メソッド対応** – Search both standalone functions and class methods, as well as class definitions / スタンドアロン関数、クラス定義、クラスメソッドすべてを検索
+- 📊 **Class ranking view / クラスランキング表示** – See class relevance based on function/method scores / 関数・メソッドのスコアでクラスの関連度を可視化
+- 🚀 **Fast incremental updates / 高速インクリメンタル更新** – Only changed files are re-indexed / 変更ファイルのみ再インデックス
+- 🎨 **Intuitive UI / 直感的UI** – Simple sidebar interface / サイドバーから簡単操作
+- 🧹 **Cache clear & environment management / キャッシュクリア・環境管理** – Clear cache and manage Python virtual environment directly from the sidebar / サイドバーからキャッシュクリアや仮想環境の管理が可能
+- 🆕 **Class statistics & filtering / クラス統計・フィルタリング** – View class statistics and filter by classes or standalone functions / クラス統計表示や関数のみ・クラスのみの絞り込みが可能
+- 🆕 **Automatic configuration sync / 自動設定同期** – Extension settings are automatically reflected in the Python server / 拡張機能の設定がPythonサーバーに自動反映
+- 🆕 **Help modal & GitHub link / ヘルプモーダル・GitHubリンク** – Access help and repository directly from the sidebar / サイドバーからヘルプやGitHubリポジトリに直接アクセス
 
 ---
 
 ## 🚀 Quick Start
 
 > **Note for Windows users:**
-> Automatic setup (Quick Start) is not supported on Windows. Please follow the manual setup instructions below to create the Python environment and install dependencies yourself.
+> Quick start (automatic setup) is not available on Windows. Please follow the manual setup instructions below.
 
 ### Automatic Setup (macOS/Linux recommended)
 
-1. Open this project in VS Code.
-2. Open the Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`) and run:
+1. Open this project in VS Code
+2. Run the following in the Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`):
    ```
    OwlSpotlight: Setup Python Environment
    ```
@@ -41,98 +51,102 @@
    ```
 4. Start searching from the sidebar!
 
-![Quick Setup](screenshot/startserver.png)
+![Server Start](screenshot/init_server.png)
 
 ---
 
-## 🎬 Usage Examples
+## 🎬 Demo (New Screenshots)
 
-### 1. Natural Language & Function/Class Search
-Search Python functions, class methods, and class definitions across your project using natural language queries and semantic (contextual) search. **Note:** The search engine works by extracting and indexing Python functions (including class methods). Class definitions are included for navigation and ranking, but the search itself is function-based.
+### 1. Function Detection & Semantic Search
 
-### 2. Class Ranking View
-Classes are ranked by a score: (proportion of top-ranked functions/methods in the class) × (inverse of the highest function/method rank). You can also choose to show only standalone functions (not belonging to any class).
+![Function Detection Demo](screenshot/detect_function.png)
 
-![Class Statistics](screenshot/show_class_stats.png)
+- Automatically extracts Python functions in the project and discovers them instantly with semantic search.
+- Functions are highlighted based on the search terms.
 
-### 3. Function-Only Filtering
-Display only functions that do not belong to any class.
+### 2. Method Detection within Classes
 
-![Function Only](screenshot/show_only_function.png)
+![Method Detection in Class Demo](screenshot/detect_method_in_class.png)
 
-### 4. Powerful Result Highlighting
-OwlSpotlight instantly highlights all matching functions, classes, and methods in the editor:
-- **Multi-location highlighting:** All relevant functions, classes, and methods are color-coded and emphasized.
-- **Jump integration:** Click to jump directly to highlighted locations.
-- **Dynamic updates:** Highlights update instantly as you change your search query.
-- **Scales to large files:** Even files with thousands of lines are highlighted smoothly.
+- Class definitions and their methods are also automatically extracted and included in the search.
+- Enables search and ranking with class structure in mind.
 
-This makes it easy to find, refactor, and review code with confidence.
+### 3. Class Ranking View
+
+![Class Statistics View](screenshot/class_stats_mode.png)
+
+- Ranks classes based on the relevance of their functions and methods.
+- Easily see the number of functions per class and their scores.
+
+### 4. Alert for Server Not Running
+
+![Server Not Running Alert](screenshot/alart_No_venv.png)
+
+- Clear alerts are shown when the Python environment or server is not running.
 
 ---
 
 ## 💡 Why Choose OwlSpotlight
 
 ### 🎯 Semantic Search Accuracy
-- **Natural language queries** – Search for functions, classes, and methods by intent and context (semantic search)
-- **Code fragment search** – Find code by example
-- **Comprehensive support** – Functions, classes, and class methods are all searchable
+- **Natural language queries** – Search for functions, classes, and methods by intent and context
+- **Code snippet search** – Search is also possible with actual code snippets
+- **Comprehensive support** – Covers functions, classes, and class methods
 
 ### ⚡ Performance
-- **Fast incremental updates** – Only changed files are re-indexed
-- **Clustered indexing** – Fast even for large projects
-- **FAISS-powered** – Instant search for tens of thousands of functions and classes
+- **Fast incremental updates** – Efficiently updates only the changed parts
+- **Clustered index** – Fast search even in large projects
+- **FAISS optimization** – Instant search even with tens of thousands of functions and classes
 
 ### 🛠 Developer Experience
-- **Intuitive UI** – Simple sidebar interface
-- **Instant highlighting** – See results in your editor immediately
-- **.gitignore aware** – Unnecessary files are excluded
-- **Apple Silicon optimized** – Fast on M1/M2/M3/M4 chips
+- **Intuitive UI** – Easy operation from the sidebar
+- **Instant highlights** – Immediate display of search results in the editor
+- **.gitignore compliant** – Automatically excludes unnecessary files
+- **Apple Silicon optimization** – Fast operation on M1/M2/M3/M4 chips
 
 ### 🔄 Smart Updates
-- **Automatic change detection** – Index updates on file add/change/delete
-- **Function-level management** – Precise, up-to-date search
-- **Real-time sync** – Always current with your codebase
+- **Diff detection** – Automatically detects additions, changes, and deletions of files
+- **Function-level management** – Precise index management at the function level
+- **Real-time synchronization** – Instant response to code changes
 
 ---
 
-## ⚠️ Important Notes
+## ⚠️ Notes
 
-- **Search is performed on Python functions only.** While you can search using natural language and semantic context, the underlying search and indexing are based on Python function definitions (including class methods). Class definitions themselves are indexed for navigation and ranking, but the core search is function-centric.
-- **Initial indexing may take time** depending on the number of extracted functions and classes, especially for large projects.
-- **Only Python code is searchable.** Variables and constants are not indexed. If important information is only in variables/constants, it may not be found.
-- **Class ranking is based on function/method scores.** Class docstrings and attributes do not affect ranking.
-- **OwlSpotlight uses semantic (contextual) search, not simple keyword matching.**
+- **The search target is Python functions.** Class definitions are also used for navigation and ranking, but the essence of the search is function-based.
+- **The initial index creation may take time.**
+- **Only Python code is the search target. Variables and constants are excluded.**
+- **Class ranking is based on the scores of functions and methods.**
+- **OwlSpotlight is semantic search (context and meaning-based).**
 
 ---
 
-## 🛠️ インストール方法（VSIXファイルからの手動インストール）
+## 🛠️ Installation Instructions (Manual Installation from VSIX File)
 
-1. このリポジトリで以下のコマンドを実行し、VSIXファイルを作成します。
+1. Run the following commands in this repository to create the VSIX file.
    ```sh
    npm install
    npm run compile
    npx vsce package
    ```
-   生成された `owlspotlight-*.vsix` ファイルが拡張機能パッケージです。
+   The generated `owlspotlight-*.vsix` file is the extension package.
 
-2. VS Code を開き、コマンドパレット（`Cmd+Shift+P` または `Ctrl+Shift+P`）で
-   `Extensions: Install from VSIX...`（VSIX からインストール）を選択します。
+2. Open VS Code and select `Extensions: Install from VSIX...` from the Command Palette (`Cmd+Shift+P` or `Ctrl+Shift+P`).
 
-3. 先ほど生成した `.vsix` ファイルを選択し、インストールします。
+3. Select the generated `.vsix` file and install it.
 
-4. サイドバーに「OwlSpotlight」が表示されます。
+4. The "OwlSpotlight" icon will appear in the sidebar.
 
-5. コマンドパレットから
+5. From the Command Palette, run:
    - `OwlSpotlight: Setup Python Environment`
    - `OwlSpotlight: Start Server`
-   を順に実行してください。
+   in order.
 
-6. サイドバーから自然言語でコード検索が利用できます。
+6. You can now use natural language to search code from the sidebar.
 
-> **アンインストール方法**
+> **To uninstall:**
 >
-> 拡張機能ビューで「OwlSpotlight」を右クリックし「アンインストール」を選択してください。
+> Open the Extensions view, right-click "OwlSpotlight", and select "Uninstall".
 
 ---
 
@@ -250,120 +264,5 @@ MIT License – See the `LICENSE` file for details.
 
 **Contributing:**
 Bug reports and feature requests are welcome in Issues.
-
----
-
-# 🦉 OwlSpotlight（日本語版）
-
-**意味的検索でコードを瞬時に発見。Pythonプロジェクトの関数・クラス・メソッドを自然言語で検索できるVS Code拡張機能**
-
----
-
-## 📝 ご利用前に
-
-- **まず最初に、このリポジトリをローカル環境にクローンしてください。**
-  - OwlSpotlightはローカルのコードベース上で動作します。リモートリポジトリやオンライン上での利用には対応していません。
-
----
-
-![Demo](screenshot/result.png)
-
-## ✨ 主な機能
-
-- 🔍 **自然言語でコード検索** - Pythonの関数・クラス・メソッドを直感的なクエリで検索
-- ⚡ **瞬時のジャンプ** - 検索結果から該当コードに即座に移動
-- 🎯 **関数・クラス・メソッド両対応** - スタンドアロン関数、クラス定義、クラスメソッドすべてを検索対象
-- 📊 **クラス統計表示** - プロジェクト内のクラス構造をスコア付きで一覧表示
-- 🚀 **高速インクリメンタル更新** - ファイル変更時も差分のみ更新
-- 🎨 **直感的なUI** - サイドバーから簡単操作
-
----
-
-## 🚀 クイックスタート
-
-> **Windowsユーザーへの注意：**
-> クイックスタート（自動セットアップ）はWindowsでは利用できません。下記の手動セットアップ手順に従ってPython環境の作成と依存パッケージのインストールを行ってください。
-
-### 自動セットアップ（macOS/Linux推奨）
-
-1. VS Codeで本プロジェクトを開く
-2. コマンドパレット（`Cmd+Shift+P` / `Ctrl+Shift+P`）で以下を実行：
-   ```
-   OwlSpotlight: Setup Python Environment
-   ```
-3. サーバー起動：
-   ```
-   OwlSpotlight: Start Server
-   ```
-4. サイドバーから検索開始！
-
-![Quick Setup](screenshot/startserver.png)
-
----
-
-## 🎬 使用例
-
-### 1. 自然言語・関数/クラス検索
-Pythonの関数・クラス・クラスメソッドを「文脈」や「意味」に基づいて自然言語で横断的に検索できます（単なるキーワード一致ではなく意味的検索）。
-**注意：** 検索エンジンはPythonの関数（クラスメソッド含む）を抽出・インデックス化して動作します。クラス定義もナビゲーションやランキングのために扱われますが、検索の本質は関数ベースです。
-
-### 2. クラスランキング表示
-関連度の高いクラスは「上位に含まれる関数・メソッドの割合 × 最上位関数・メソッドの順位の逆数」でスコア化され、ランキング表示されます。
-また、オプションで「関数のみ（クラスに属さないもの）」の表示も可能です。
-
-![Class Statistics](screenshot/show_class_stats.png)
-
-### 3. 関数のみの絞り込み
-クラスに属さない関数のみを表示することもできます。
-
-![Function Only](screenshot/show_only_function.png)
-
-### 4. 検索結果のハイライト
-OwlSpotlightは、検索結果の関数・クラス・メソッドをエディタ上で即座にハイライト表示します。
-- **複数箇所同時ハイライト**：関連する関数・クラス・メソッドがすべて色分けされて強調表示されます。
-- **ジャンプ機能と連動**：ハイライトされた箇所へワンクリックでジャンプ可能。
-- **動的なハイライト更新**：検索ワードを変更するたびに、ハイライトも即座に切り替わります。
-- **大規模ファイルでも快適**：数千行規模のファイルでもストレスなくハイライト。
-
-これにより、目的のコードがどこにあるかを瞬時に把握でき、リファクタリングやレビューも圧倒的に効率化されます。
-
----
-
-## 💡 OwlSpotlightの特長
-
-### 🎯 高精度な意味的検索
-- **自然言語クエリ対応** - 関数・クラス・メソッドを意図や文脈で検索（意味的検索）
-- **コード断片検索** - 実際のコード片でも検索できる
-- **包括的な検索対象** - 関数・クラス・クラスメソッドすべてをカバー
-
-### ⚡ パフォーマンス
-- **高速インクリメンタル更新** - 変更部分のみを効率的に更新
-- **クラスタ分割インデックス** - 大規模プロジェクトでも高速検索
-- **FAISS最適化** - 数万関数・クラス規模でも瞬時に検索
-
-### 🛠 開発体験
-- **直感的UI** - サイドバーから簡単操作
-- **即座のハイライト** - 検索結果をエディタで即座に表示
-- **.gitignore準拠** - 不要ファイルを自動除外
-- **Apple Silicon最適化** - M1/M2/M3/M4チップで高速動作
-
-### 🔄 スマートな更新
-- **差分検出** - ファイルの追加・変更・削除を自動検知
-- **関数レベル管理** - 関数単位での精密なインデックス管理
-- **リアルタイム同期** - コード変更に即座に対応
-
----
-
-## ⚠️ 注意事項
-
-- **検索の対象はあくまでPythonの関数です。** 自然言語や文脈で検索できますが、実際にインデックス・検索されるのはPythonの関数（クラスメソッド含む）です。クラス定義自体もナビゲーションやランキングのために扱われますが、検索の本質は関数ベースです。
-- **初回インデックス作成には時間がかかる場合があります。**
-  - 関数・クラスの抽出数が多い大規模プロジェクトほど、初回セットアップやインデックス作成に時間を要します。
-- **検索対象はPythonコードのみです。**
-  - 変数・定数は検索対象外です。
-  - 重要な情報が変数・定数のみの場合、検索で見つからないことがあります。
-- **クラスランキングは関数・メソッドのスコアに基づきます。**
-  - クラス自体の説明や属性はランキングに直接影響しません。
-- **OwlSpotlightはキーワード一致ではなく文脈・意味に基づく検索（意味的検索）を行います。**
 
 ---
