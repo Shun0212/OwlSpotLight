@@ -239,6 +239,22 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				return;
 			}
 			if (msg.command === 'search') {
+				// サーバー起動チェック
+				let serverUp = true;
+				try {
+					const statusRes = await fetch('http://localhost:8000/index_status');
+					if (!statusRes.ok) { serverUp = false; }
+				} catch (e) {
+					serverUp = false;
+				}
+				if (!serverUp) {
+					await vscode.window.showWarningMessage(
+						'The search server is not running. Please start the server from the sidebar or command palette.',
+						{ modal: true },
+						'OK'
+					);
+					return;
+				}
 				const query = msg.text;
 				const workspaceFolders = vscode.workspace.workspaceFolders;
 				if (!workspaceFolders || workspaceFolders.length === 0) {
