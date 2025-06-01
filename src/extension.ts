@@ -3,6 +3,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as os from 'os';
+import * as cp from 'child_process';
 
 // インデントベースで関数の範囲を検出する関数
 async function getFunctionRangeByIndent(doc: vscode.TextDocument, startPos: vscode.Position): Promise<vscode.Range> {
@@ -500,6 +501,24 @@ function setupDecorationListeners() {
 	});
 }
 
+// 拡張機能設定の監視とPythonサーバーへの反映
+function updatePythonServerConfig() {
+	const config = vscode.workspace.getConfiguration('owlspotlight');
+	const batchSize = config.get<number>('batchSize', 32);
+	// .envファイルに書き込む
+	const fs = require('fs');
+	const path = require('path');
+	const serverDir = path.join(__dirname, '..', 'model_server');
+	const envPath = path.join(serverDir, '.env');
+	let envContent = '';
+	if (fs.existsSync(envPath)) {
+		envContent = fs.readFileSync(envPath, 'utf8');
+	}
+	const lines = envContent.split(/\r?\n/).filter((l: string) => !l.startsWith('OWLSETTINGS_BATCH_SIZE='));
+	lines.push(`OWLSETTINGS_BATCH_SIZE=${batchSize}`);
+	fs.writeFileSync(envPath, lines.join('\n'));
+}
+
 export function activate(context: vscode.ExtensionContext) {
 	console.log('Congratulations, your extension "owlspotlight" is now active!');
 
@@ -572,6 +591,17 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	});
 	context.subscriptions.push(setupEnvDisposable);
+
+	// 設定変更時にPythonサーバーの設定を更新
+	context.subscriptions.push(
+		vscode.workspace.onDidChangeConfiguration(e => {
+			if (e.affectsConfiguration('owlspotlight.batchSize')) {
+				updatePythonServerConfig();
+			}
+		})
+	);
+	// 拡張機能起動時にも反映
+	updatePythonServerConfig();
 
 	// デコレーションリスナーのセットアップ
 	setupDecorationListeners();

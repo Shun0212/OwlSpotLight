@@ -37,6 +37,14 @@ app = FastAPI()
 model = SentenceTransformer("Shuu12121/CodeSearch-ModernBERT-Owl-2.0-Plus")
 model_device = None  # 現在のデバイスを記録
 
+# === 設定: バッチサイズなど ===
+from pydantic import BaseSettings
+
+class OwlSettings(BaseSettings):
+    batch_size: int = 32
+
+settings = OwlSettings()
+
 def get_device():
     # Apple Silicon (M1/M2/M3) などで mps が使える場合は mps を優先
     if torch.backends.mps.is_available() and torch.backends.mps.is_built():
@@ -344,7 +352,7 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
                 get_device_and_prepare()
                 encode = partial(model.encode, show_progress_bar=True)
                 new_codes = [func["code"] for func in added_modified_funcs]
-                new_embeddings = encode(new_codes, batch_size=32, convert_to_numpy=True)
+                new_embeddings = encode(new_codes, batch_size=settings.batch_size, convert_to_numpy=True)
                 embeddings = np.vstack([kept_embeddings, new_embeddings]) if kept_embeddings.shape[0] > 0 else new_embeddings
             else:
                 embeddings = kept_embeddings
@@ -363,7 +371,7 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
             if codes:
                 get_device_and_prepare()
                 encode = partial(model.encode, show_progress_bar=True)
-                embeddings = encode(codes, batch_size=32, convert_to_numpy=True)
+                embeddings = encode(codes, batch_size=settings.batch_size, convert_to_numpy=True)
                 faiss_index = faiss.IndexFlatL2(embeddings.shape[1])
                 faiss_index.add(embeddings)
                 global_index_state.embeddings = embeddings
@@ -840,7 +848,7 @@ class ClusterManager:
             if codes:
                 get_device_and_prepare()
                 encode = partial(model.encode, show_progress_bar=True)
-                embeddings = encode(codes, batch_size=32, convert_to_numpy=True)
+                embeddings = encode(codes, batch_size=settings.batch_size, convert_to_numpy=True)
         
         # クラスタインデックスを更新
         cluster.update_files(added_funcs, deleted_files, embeddings)
@@ -869,7 +877,7 @@ class ClusterManager:
             if codes:
                 get_device_and_prepare()
                 encode = partial(model.encode, show_progress_bar=True)
-                embeddings = encode(codes, batch_size=32, convert_to_numpy=True)
+                embeddings = encode(codes, batch_size=settings.batch_size, convert_to_numpy=True)
         
         # インデックス再構築
         cluster.rebuild_from_functions(funcs, embeddings)
@@ -920,7 +928,7 @@ class ClusterManager:
             if codes:
                 get_device_and_prepare()
                 encode = partial(model.encode, show_progress_bar=True)
-                embeddings = encode(codes, batch_size=32, convert_to_numpy=True)
+                embeddings = encode(codes, batch_size=settings.batch_size, convert_to_numpy=True)
                 # FAISSインデックス再構築
                 faiss_index = faiss.IndexFlatL2(embeddings.shape[1])
                 faiss_index.add(embeddings)
@@ -950,7 +958,7 @@ class ClusterManager:
                 if codes:
                     get_device_and_prepare()
                     encode = partial(model.encode, show_progress_bar=True)
-                    embeddings = encode(codes, batch_size=32, convert_to_numpy=True)
+                    embeddings = encode(codes, batch_size=settings.batch_size, convert_to_numpy=True)
                     faiss_index = faiss.IndexFlatL2(embeddings.shape[1])
                     faiss_index.add(embeddings)
                     cluster.meta = funcs
@@ -973,7 +981,7 @@ class ClusterManager:
                     codes = [func["code"] for func in add_funcs]
                     get_device_and_prepare()
                     encode = partial(model.encode, show_progress_bar=True)
-                    embeddings = encode(codes, batch_size=32, convert_to_numpy=True)
+                    embeddings = encode(codes, batch_size=settings.batch_size, convert_to_numpy=True)
                     if cluster.index is None and len(embeddings) > 0:
                         faiss_index = faiss.IndexFlatL2(embeddings.shape[1])
                         faiss_index.add(embeddings)

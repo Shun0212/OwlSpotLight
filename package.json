@@ -42,7 +42,19 @@
         "command": "owlspotlight.setupEnv",
         "title": "OwlSpotlight: Setup Python Environment"
       }
-    ]
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "OwlSpotlight Settings",
+      "properties": {
+        "owlspotlight.batchSize": {
+          "type": "number",
+          "default": 32,
+          "minimum": 1,
+          "description": "Batch size for code embedding (Python server). Larger values may speed up indexing but use more memory."
+        }
+      }
+    }
   },
   "menus": {
     "view/item/context": [
