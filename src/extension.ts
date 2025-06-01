@@ -649,7 +649,7 @@ export function activate(context: vscode.ExtensionContext) {
 			} catch (error) {
 				vscode.window.showErrorMessage('Failed to start the OwlSpotlight server. Please make sure you have created the Python virtual environment (e.g., run "OwlSpotlight: Setup Python Environment") and installed all dependencies.');
 			}
-		}, 5000); // 5秒後にチェック
+		}, 10000); // 10秒後にチェック
 	});
 	context.subscriptions.push(startServerDisposable);
 
