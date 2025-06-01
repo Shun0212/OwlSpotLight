@@ -71,5 +71,15 @@
     "typescript": "^5.8.3",
     "@vscode/test-cli": "^0.0.10",
     "@vscode/test-electron": "^2.5.2"
+  },
+  "activationEvents": [
+    "onCommand:owlspotlight.startServer",
+    "onCommand:owlspotlight.searchCode",
+    "onCommand:owlspotlight.setupEnv",
+    "onView:owlspotlight.sidebar"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Shun0212/owlspotlight.git"
   }
 }
