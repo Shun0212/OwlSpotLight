@@ -609,8 +609,27 @@ export function activate(context: vscode.ExtensionContext) {
 		const config = vscode.workspace.getConfiguration('owlspotlight');
 		const cacheSettings = config.get<any>('cacheSettings', {});
 		const autoClearCache = cacheSettings.autoClearCache || false;
-		
-		// 自動キャッシュクリアが有効な場合
+		const serverDir = path.join(context.extensionPath, 'model_server');
+		const venvDir = path.join(serverDir, '.venv');
+		const fs = require('fs');
+
+		// 仮想環境がなければ作成を促す
+		if (!fs.existsSync(venvDir)) {
+			const result = await vscode.window.showWarningMessage(
+				'No Python virtual environment (.venv) found. Would you like to set it up now?',
+				{ modal: true },
+				'Yes, Setup',
+				'Cancel'
+			);
+			if (result === 'Yes, Setup') {
+				await vscode.commands.executeCommand('owlspotlight.setupEnv');
+				return;
+			} else {
+				vscode.window.showInformationMessage('Server start cancelled. Please set up the Python virtual environment before starting the server.');
+				return;
+			}
+		}
+
 		if (autoClearCache) {
 			try {
 				await vscode.commands.executeCommand('owlspotlight.clearCache');
@@ -619,37 +638,46 @@ export function activate(context: vscode.ExtensionContext) {
 				vscode.window.showWarningMessage(`Failed to auto-clear cache: ${error}`);
 			}
 		}
-		
-		const serverDir = path.join(context.extensionPath, 'model_server');
-		const terminal = vscode.window.createTerminal({
-			name: 'OwlSpotlight Server',
-			cwd: serverDir // model_serverディレクトリで必ず起動
-		});
-		const platform = os.platform();
-		if (platform === 'win32') {
-			// Windows用: venv有効化+uvicorn起動
-			terminal.sendText('.\\.venv\\Scripts\\activate', true);
-			terminal.sendText('uvicorn server:app --host 127.0.0.1 --port 8000 --reload', true);
-		} else {
-			// macOS/Linux用
-			terminal.sendText('source .venv/bin/activate', true);
-			terminal.sendText('uvicorn server:app --host 127.0.0.1 --port 8000 --reload', true);
+		let terminal: vscode.Terminal | undefined;
+		let serverStartFailed = false;
+		try {
+			terminal = vscode.window.createTerminal({
+				name: 'OwlSpotlight Server',
+				cwd: serverDir
+			});
+			const platform = os.platform();
+			if (platform === 'win32') {
+				terminal.sendText('.\\.venv\\Scripts\\activate', true);
+				terminal.sendText('uvicorn server:app --host 127.0.0.1 --port 8000 --reload', true);
+			} else {
+				terminal.sendText('source .venv/bin/activate', true);
+				terminal.sendText('uvicorn server:app --host 127.0.0.1 --port 8000 --reload', true);
+			}
+			terminal.show();
+			vscode.window.showInformationMessage('OwlSpotlight server started in a new terminal.');
+		} catch (err) {
+			vscode.window.showErrorMessage('Failed to launch the OwlSpotlight server terminal. Please make sure you have created the Python virtual environment (e.g., run "OwlSpotlight: Setup Python Environment") and installed all dependencies.');
+			return;
 		}
-		terminal.show();
-		vscode.window.showInformationMessage('OwlSpotlight server started in a new terminal.');
-		
+		// Listen for terminal exit (failure to start)
+		const disposable = vscode.window.onDidCloseTerminal((closedTerminal) => {
+			if (closedTerminal === terminal && !serverStartFailed) {
+				vscode.window.showErrorMessage('OwlSpotlight server terminal was closed before startup completed. Please make sure you have created the Python virtual environment (e.g., run "OwlSpotlight: Setup Python Environment") and installed all dependencies.');
+			}
+		});
+		context.subscriptions.push(disposable);
 		// サーバー起動後に接続確認
 		setTimeout(async () => {
 			try {
-				// 簡単なヘルスチェックリクエスト
 				const res = await fetch('http://localhost:8000/health');
 				if (!res.ok) {
 					throw new Error('Server not responding');
 				}
 			} catch (error) {
+				serverStartFailed = true;
 				vscode.window.showErrorMessage('Failed to start the OwlSpotlight server. Please make sure you have created the Python virtual environment (e.g., run "OwlSpotlight: Setup Python Environment") and installed all dependencies.');
 			}
-		}, 10000); // 10秒後にチェック
+		}, 5000);
 	});
 	context.subscriptions.push(startServerDisposable);
 
