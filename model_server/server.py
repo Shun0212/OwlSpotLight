@@ -18,6 +18,9 @@ from pathlib import Path
 import json
 import hashlib
 from pydantic_settings import BaseSettings
+from dotenv import load_dotenv
+
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
 
 OWL_INDEX_DIR = ".owl_index"
 
@@ -41,6 +44,9 @@ model_device = None  # 現在のデバイスを記録
 # === 設定: バッチサイズなど ===
 class OwlSettings(BaseSettings):
     batch_size: int = 32
+    
+    class Config:
+        env_prefix = "OWL_"  # 環境変数はOWL_BATCH_SIZEで設定可能
 
 settings = OwlSettings()
 
@@ -396,7 +402,7 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
 async def embed(req: EmbedRequest):
     print("/embed called")
     get_device_and_prepare()
-    embeddings = model.encode(req.texts, convert_to_numpy=True).tolist()
+    embeddings = model.encode(req.texts, batch_size=settings.batch_size, convert_to_numpy=True).tolist()
     return {"embeddings": embeddings}
 
 @app.post("/index_and_search")
@@ -544,7 +550,7 @@ def build_index_and_search(directory: str, query: str, file_ext: str = ".py", to
     if not results or embeddings is None or faiss_index is None:
         return {"results": [], "message": "No functions found."}
     get_device_and_prepare()
-    query_emb = model.encode([query], convert_to_numpy=True)
+    query_emb = model.encode([query], batch_size=settings.batch_size, convert_to_numpy=True)
     D, I = faiss_index.search(query_emb, top_k)
     found = []
     for idx in I[0]:
@@ -581,7 +587,7 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
         if not results or embeddings is None or faiss_index is None:
             return {"results": [], "message": "No functions found."}
         get_device_and_prepare()
-        query_emb = model.encode([req.query], convert_to_numpy=True)
+        query_emb = model.encode([req.query], batch_size=settings.batch_size, convert_to_numpy=True)
         D, I = faiss_index.search(query_emb, req.top_k)
         found = []
         for idx in I[0]:
@@ -901,7 +907,7 @@ class ClusterManager:
     def search_in_clusters(self, query: str, top_k: int = 5) -> List[Dict]:
         """全クラスタで検索を実行"""
         get_device_and_prepare()
-        query_emb = model.encode([query], convert_to_numpy=True)
+        query_emb = model.encode([query], batch_size=settings.batch_size, convert_to_numpy=True)
         
         all_results = []
         for cluster in self.cluster_indexes.values():
@@ -990,3 +996,33 @@ class ClusterManager:
                         cluster.index.add(embeddings)
                         cluster.meta.extend(add_funcs)
                     cluster.save()
+
+@app.get("/settings")
+async def get_settings():
+    """現在の設定値を返すAPI"""
+    return {
+        "batch_size": settings.batch_size,
+        "device": get_device(),
+        "model_device": model_device
+    }
+
+class UpdateSettingsRequest(BaseModel):
+    batch_size: Optional[int] = None
+
+@app.post("/update_settings")
+async def update_settings(req: UpdateSettingsRequest):
+    """設定値を動的に更新するAPI"""
+    if req.batch_size is not None:
+        settings.batch_size = req.batch_size
+    return {
+        "message": "Settings updated",
+        "batch_size": settings.batch_size
+    }
+
+@app.post("/set_batch_size")
+async def set_batch_size(batch_size: int):
+    """
+    埋め込みバッチサイズを動的に変更するAPI
+    """
+    settings.batch_size = batch_size
+    return {"batch_size": settings.batch_size}

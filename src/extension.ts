@@ -353,9 +353,26 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 						while (parent && parent.kind !== vscode.SymbolKind.Class) {
 							parent = (parent as any).parent;
 						}
+						
+						// クラス部分を先に薄くハイライト（関数が上書きするため）
 						if (parent && parent.kind === vscode.SymbolKind.Class) {
-							const selfClassDeco = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(0,200,100,0.10)' }); // green highlight, subtle, no border
-							decorations.push({ type: selfClassDeco, ranges: [parent.range] });
+							const classRange = await getClassRangeByIndent(doc, parent.range.start);
+							const classBackgroundDeco = vscode.window.createTextEditorDecorationType({ 
+								backgroundColor: 'rgba(0,200,100,0.10)' // very light green background for class
+							});
+							decorations.push({ type: classBackgroundDeco, ranges: [classRange] });
+							
+							// クラス定義行のみを強調
+							const classDefLine = new vscode.Range(
+								parent.range.start, 
+								new vscode.Position(parent.range.start.line, parent.range.end.character)
+							);
+							const classHeaderDeco = vscode.window.createTextEditorDecorationType({ 
+								backgroundColor: 'rgba(0,200,100,0.12)',
+								border: '1px solid rgba(0,200,100,0.4)'
+							});
+							decorations.push({ type: classHeaderDeco, ranges: [classDefLine] });
+							
 							// さらに外側のクラス（入れ子の場合）
 							let outerCls = (parent as any).parent;
 							while (outerCls && outerCls.kind !== vscode.SymbolKind.Class) { outerCls = outerCls.parent; }
@@ -365,15 +382,37 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 							}
 						}
 						
-						// インデントベースで関数の終わりを検出
+						// 関数・メソッド自体を最後にハイライト（優先表示のため）
 						const funcRange = await getFunctionRangeByIndent(doc, target.range.start);
-						const funcDeco = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(0,128,255,0.2)' }); // blue highlight, less intense
+						const funcDeco = vscode.window.createTextEditorDecorationType({ 
+							backgroundColor: 'rgba(0,128,255,0.10)', // stronger blue highlight for function
+							border: '1px solid rgba(0,128,255,0.4)',  // blue border for function
+						});
 						decorations.push({ type: funcDeco, ranges: [funcRange] });
 					} else if (target && target.kind === vscode.SymbolKind.Class) {
-						// クラス自体を選択している場合 - インデントベースで範囲を検出
+						// クラス自体を選択している場合 - クラス構造を可視化
 						const classRange = await getClassRangeByIndent(doc, target.range.start);
-						const selfClassDeco = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(0,200,100,0.10)' }); // green highlight, subtle, no border
+						
+						// クラス全体に薄い背景色
+						const selfClassDeco = vscode.window.createTextEditorDecorationType({ 
+							backgroundColor: 'rgba(0,200,100,0.10)',
+							border: '1px solid rgba(0,200,100,0.2)'
+						}); // very light green highlight for class body
 						decorations.push({ type: selfClassDeco, ranges: [classRange] });
+						
+						// クラスのヘッダー部分（定義行）を強調
+						const classHeaderDeco = vscode.window.createTextEditorDecorationType({ 
+							backgroundColor: 'rgba(0,200,100,0.15)',
+							border: '2px solid rgba(0,200,100,0.4)'
+						}); // stronger green highlight for class header
+						
+						// クラス定義行のみをハイライト
+						const classDefLine = new vscode.Range(
+							target.range.start, 
+							new vscode.Position(target.range.start.line, target.range.end.character)
+						);
+						decorations.push({ type: classHeaderDeco, ranges: [classDefLine] });
+						
 						// さらに外側のクラス（入れ子の場合）
 						let outerCls = parentSymbol;
 						while (outerCls && outerCls.kind !== vscode.SymbolKind.Class) { outerCls = (outerCls as any).parent; }
@@ -569,13 +608,14 @@ function updatePythonServerConfig() {
 		envContent = fs.readFileSync(envPath, 'utf8');
 	}
 	const lines = envContent.split(/\r?\n/).filter((l: string) => 
+		!l.startsWith('OWL_BATCH_SIZE=') &&
 		!l.startsWith('OWLSETTINGS_BATCH_SIZE=') &&
 		!l.startsWith('OWLSETTINGS_AUTO_CLEAR_CACHE=') &&
 		!l.startsWith('OWLSETTINGS_AUTO_CLEAR_LOCAL_CACHE=') &&
 		!l.startsWith('OWLSETTINGS_CACHE_PATH=') &&
 		!l.startsWith('OWLSETTINGS_PYTHON_VERSION=')
 	);
-	lines.push(`OWLSETTINGS_BATCH_SIZE=${batchSize}`);
+	lines.push(`OWL_BATCH_SIZE=${batchSize}`);
 	lines.push(`OWLSETTINGS_AUTO_CLEAR_CACHE=${cacheSettings.autoClearCache || false}`);
 	lines.push(`OWLSETTINGS_AUTO_CLEAR_LOCAL_CACHE=${cacheSettings.autoClearLocalCache || false}`);
 	lines.push(`OWLSETTINGS_CACHE_PATH=${cacheSettings.cachePath || ''}`);
