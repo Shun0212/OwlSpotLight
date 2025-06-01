@@ -106,6 +106,66 @@ This makes it easy to find, refactor, and review code with confidence.
 
 ---
 
+## 🛠️ インストール方法（VSIXファイルからの手動インストール）
+
+1. このリポジトリで以下のコマンドを実行し、VSIXファイルを作成します。
+   ```sh
+   npm install
+   npm run compile
+   npx vsce package
+   ```
+   生成された `owlspotlight-*.vsix` ファイルが拡張機能パッケージです。
+
+2. VS Code を開き、コマンドパレット（`Cmd+Shift+P` または `Ctrl+Shift+P`）で
+   `Extensions: Install from VSIX...`（VSIX からインストール）を選択します。
+
+3. 先ほど生成した `.vsix` ファイルを選択し、インストールします。
+
+4. サイドバーに「OwlSpotlight」が表示されます。
+
+5. コマンドパレットから
+   - `OwlSpotlight: Setup Python Environment`
+   - `OwlSpotlight: Start Server`
+   を順に実行してください。
+
+6. サイドバーから自然言語でコード検索が利用できます。
+
+> **アンインストール方法**
+>
+> 拡張機能ビューで「OwlSpotlight」を右クリックし「アンインストール」を選択してください。
+
+---
+
+## 🛠️ Installation (Manual VSIX Install)
+
+1. In this repository, run the following commands to build the VSIX file:
+   ```sh
+   npm install
+   npm run compile
+   npx vsce package
+   ```
+   This will generate a file like `owlspotlight-*.vsix` (the extension package).
+
+2. Open VS Code and open the Command Palette (`Cmd+Shift+P` or `Ctrl+Shift+P`).
+   Select `Extensions: Install from VSIX...`.
+
+3. Choose the generated `.vsix` file and install it.
+
+4. The "OwlSpotlight" icon will appear in the sidebar.
+
+5. From the Command Palette, run:
+   - `OwlSpotlight: Setup Python Environment`
+   - `OwlSpotlight: Start Server`
+   in order.
+
+6. You can now search code using natural language from the sidebar.
+
+> **To uninstall:**
+>
+> Open the Extensions view, right-click "OwlSpotlight", and select "Uninstall".
+
+---
+
 ## 🔧 Manual Setup
 
 If automatic setup does not work (or on Windows):
