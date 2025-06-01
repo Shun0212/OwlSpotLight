@@ -491,12 +491,12 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
   <!-- クラス統計タブ -->
   <div class="tab-content" id="stats-tab">
     <div class="stats-filter">
-      <button id="loadStatsBtn">Load Class Statistics</button>
       <select id="statsFilter">
         <option value="all">All Classes & Functions</option>
         <option value="classes">Classes Only</option>
         <option value="functions">Standalone Functions Only</option>
       </select>
+      <button id="loadStatsBtn">Load</button>
     </div>
     <div class="status" id="stats-status"></div>
     <div class="stats-results" id="stats-results"></div>

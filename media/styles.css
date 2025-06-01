@@ -358,6 +358,20 @@ input[type=text]:focus {
   background: var(--vscode-input-background, #ffffff);
   color: var(--vscode-input-foreground, #333333);
   font-size: 0.95em;
+  height: 2.2em;
+}
+
+#loadStatsBtn {
+  font-size: 1.05em;
+  padding: 0.4em 1.4em;
+  min-width: 3.5em;
+  height: 2.2em;
+  margin-left: 0.6em;
+  vertical-align: middle;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .stats-results {
