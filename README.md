@@ -31,15 +31,6 @@ OwlSpotlight transforms code navigation by bringing **semantic understanding** t
 
 ---
 
-## 📝 Prerequisites / 前提条件
-
-- **Clone this repository locally.** OwlSpotlight works on your local codebase only. Remote repositories and online browsing are not supported.
-- **このリポジトリをローカルにクローンしてください。OwlSpotlightはローカルのコードベースでのみ動作します。リモートリポジトリやオンライン利用は非対応です。**
-
----
-
-![Function Detection Demo](screenshot/detect_method_in_classpng)
-
 ### Key Features
 
 - AI-powered semantic search – Find code by intent, not just keywords
