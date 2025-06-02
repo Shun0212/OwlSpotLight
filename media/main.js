@@ -150,7 +150,12 @@ window.onload = function() {
 						vscode.postMessage({ 
 							command: 'jump', 
 							file: this.getAttribute('data-file'), 
-							line: this.getAttribute('data-line') 
+							line: this.getAttribute('data-line'),
+							functionName: method.name,
+							className: classInfo.name,
+							// サーバーから取得した正確な範囲情報を追加
+							startLine: method.lineno,
+							endLine: method.end_lineno || null
 						});
 					};
 					
@@ -202,7 +207,12 @@ window.onload = function() {
 						vscode.postMessage({ 
 							command: 'jump', 
 							file: this.getAttribute('data-file'), 
-							line: this.getAttribute('data-line') 
+							line: this.getAttribute('data-line'),
+							functionName: func.name,
+							className: null, // standalone function
+							// サーバーから取得した正確な範囲情報を追加
+							startLine: func.lineno,
+							endLine: func.end_lineno || null
 						});
 					};
 					
@@ -301,7 +311,19 @@ window.onload = function() {
 					'<div class="result-snippet">' + (r.code ? r.code.split('\n').slice(0,2).join(' ') : '') + '</div>';
 				
 				resultDiv.onclick = function() {
-					vscode.postMessage({ command: 'jump', file: this.getAttribute('data-file'), line: this.getAttribute('data-line') });
+					// サーバーから返された正確な関数範囲情報を含めて送信
+					const jumpData = {
+						command: 'jump', 
+						file: this.getAttribute('data-file'), 
+						line: this.getAttribute('data-line'),
+						functionName: functionName,
+						className: className || null,
+						// サーバーから取得した正確な範囲情報を追加
+						startLine: r.lineno || r.line_number || 1,
+						endLine: r.end_lineno || null
+					};
+					console.log('Jump with range info:', jumpData);
+					vscode.postMessage(jumpData);
 				};
 				
 				resultsContainer.appendChild(resultDiv);

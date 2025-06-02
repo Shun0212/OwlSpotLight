@@ -305,6 +305,11 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 			if (msg.command === 'jump') {
 				const file = msg.file;
 				const line = msg.line;
+				const functionName = msg.functionName;
+				const className = msg.className;
+				const startLine = msg.startLine;
+				const endLine = msg.endLine;
+				
 				try {
 					const uri = vscode.Uri.file(file);
 					const doc = await vscode.workspace.openTextDocument(uri);
@@ -320,127 +325,121 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					// --- イベントリスナーをセットアップ ---
 					setupDecorationListeners();
 
-					// --- ASTベースの関数 & クラス範囲ハイライト ---
+					// --- サーバー提供の正確な範囲情報を使用したハイライト ---
 					const decorations: { type: vscode.TextEditorDecorationType, ranges: vscode.Range[] }[] = [];
-					// 行（ジャンプ先1行）
-					const decorationType = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(255,255,0,0.5)' }); // yellow highlight
+					
+					// ジャンプ先行の黄色ハイライト
+					const decorationType = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(255,255,0,0.5)' });
 					const lineRange = new vscode.Range(pos, pos.translate(1, 0));
 					decorations.push({ type: decorationType, ranges: [lineRange] });
 
-					let symbols: vscode.DocumentSymbol[] | undefined = [];
-					try {
-						symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
-							'vscode.executeDocumentSymbolProvider',
-							doc.uri
-						) ?? [];
-					} catch (e) {
-						symbols = [];
-					}
-					function findSymbol(list: vscode.DocumentSymbol[], pos: vscode.Position): vscode.DocumentSymbol | undefined {
-						for (const s of list) {
-							if (s.range.contains(pos)) {
-								// 子を優先（入れ子対応）
-								return findSymbol(s.children, pos) ?? s;
-							}
-						}
-						return undefined;
-					}
-					function findSymbolWithParent(list: vscode.DocumentSymbol[], pos: vscode.Position, parent: vscode.DocumentSymbol | null = null): { symbol: vscode.DocumentSymbol, parent: vscode.DocumentSymbol | null } | undefined {
-						for (const s of list) {
-							if (s.range.contains(pos)) {
-								// 子を優先（入れ子対応）
-								const found = findSymbolWithParent(s.children, pos, s);
-								return found ?? { symbol: s, parent };
-							}
-						}
-						return undefined;
-					}
-					const found = findSymbolWithParent(symbols, pos);
-					let target: vscode.DocumentSymbol | undefined = undefined;
-					let parentSymbol: vscode.DocumentSymbol | null = null;
-					if (found) {
-						target = found.symbol;
-						parentSymbol = found.parent;
-					}
-					// 関数・メソッド
-					if (target && (target.kind === vscode.SymbolKind.Function || target.kind === vscode.SymbolKind.Method)) {
-						// 親をたどって所属クラスを取得
-						let parent = parentSymbol;
-						while (parent && parent.kind !== vscode.SymbolKind.Class) {
-							parent = (parent as any).parent;
-						}
+					// サーバーから提供された範囲情報を使用
+					if (startLine && endLine && functionName) {
+						const funcStartLine = Math.max(0, Number(startLine) - 1); // 0-based index
+						const funcEndLine = Math.max(0, Number(endLine) - 1);
 						
-						// クラス部分を先に薄くハイライト（関数が上書きするため）
-						if (parent && parent.kind === vscode.SymbolKind.Class) {
-							const classRange = await getClassRangeByIndent(doc, parent.range.start);
-							const classBackgroundDeco = vscode.window.createTextEditorDecorationType({ 
-								backgroundColor: 'rgba(0,200,100,0.10)' // very light green background for class
-							});
-							decorations.push({ type: classBackgroundDeco, ranges: [classRange] });
-							
-							// クラス定義行のみを強調
-							const classDefLineStart = parent.range.start;
-							const classDefLineText = doc.lineAt(classDefLineStart.line).text;
-							const classDefLine = new vscode.Range(
-								classDefLineStart.line,
-								0,
-								classDefLineStart.line,
-								classDefLineText.length
-							);
-							const classHeaderDeco = vscode.window.createTextEditorDecorationType({ 
-								backgroundColor: 'rgba(0,200,100,0.12)',
-								border: '1px solid rgba(0,200,100,0.4)'
-							});
-							decorations.push({ type: classHeaderDeco, ranges: [classDefLine] });
-							
-							// さらに外側のクラス（入れ子の場合）
-							let outerCls = (parent as any).parent;
-							while (outerCls && outerCls.kind !== vscode.SymbolKind.Class) { outerCls = outerCls.parent; }
-							if (outerCls && outerCls.kind === vscode.SymbolKind.Class) {
-								const outerClassDeco = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(255,0,128,0.07)' }); // pink for outer class, very subtle
-								decorations.push({ type: outerClassDeco, ranges: [outerCls.range] });
-							}
-						}
-						
-						// 関数・メソッド自体を最後にハイライト（優先表示のため）
-						const funcRange = await getFunctionRangeByIndent(doc, target.range.start);
-						const funcDeco = vscode.window.createTextEditorDecorationType({ 
-							backgroundColor: 'rgba(0,128,255,0.10)', // stronger blue highlight for function
-						});
-						decorations.push({ type: funcDeco, ranges: [funcRange] });
-					} else if (target && target.kind === vscode.SymbolKind.Class) {
-						// クラス自体を選択している場合 - クラス構造を可視化
-						const classRange = await getClassRangeByIndent(doc, target.range.start);
-						
-						// クラス全体に薄い背景色
-						const selfClassDeco = vscode.window.createTextEditorDecorationType({ 
-							backgroundColor: 'rgba(0,200,100,0.10)',
-						}); // very light green highlight for class body
-						decorations.push({ type: selfClassDeco, ranges: [classRange] });
-						
-						// クラスのヘッダー部分（定義行）を強調
-						const classHeaderDeco = vscode.window.createTextEditorDecorationType({ 
-							backgroundColor: 'rgba(0,200,100,0.15)',
-							border: '2px solid rgba(0,200,100,0.4)'
-						}); // stronger green highlight for class header
-						
-						// クラス定義行のみをハイライト（行全体をカバー）
-						const targetClassDefLineStart = target.range.start;
-						const targetClassDefLineText = doc.lineAt(targetClassDefLineStart.line).text;
-						const targetClassDefLine = new vscode.Range(
-							targetClassDefLineStart.line,
-							0,
-							targetClassDefLineStart.line,
-							targetClassDefLineText.length
+						// 関数/メソッドの範囲をハイライト（サーバー提供の正確な範囲）
+						const serverFuncRange = new vscode.Range(
+							new vscode.Position(funcStartLine, 0),
+							new vscode.Position(funcEndLine, doc.lineAt(Math.min(funcEndLine, doc.lineCount - 1)).text.length)
 						);
-						decorations.push({ type: classHeaderDeco, ranges: [targetClassDefLine] });
 						
-						// さらに外側のクラス（入れ子の場合）
-						let outerCls = parentSymbol;
-						while (outerCls && outerCls.kind !== vscode.SymbolKind.Class) { outerCls = (outerCls as any).parent; }
-						if (outerCls && outerCls.kind === vscode.SymbolKind.Class) {
-							const outerClassDeco = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(255,0,128,0.07)' }); // pink for outer class, very subtle
-							decorations.push({ type: outerClassDeco, ranges: [outerCls.range] });
+						// クラスメソッドかスタンドアロン関数かで色を分ける
+						if (className) {
+							// クラスメソッドの場合（緑系の色）
+							const methodDeco = vscode.window.createTextEditorDecorationType({ 
+								backgroundColor: 'rgba(0,128,255,0.12)', // blue background for method
+								border: '1px solid rgba(0,128,255,0.3)'
+							});
+							decorations.push({ type: methodDeco, ranges: [serverFuncRange] });
+							
+							// クラス全体の範囲も取得してハイライト（VS Code ASTを補完的に使用）
+							let symbols: vscode.DocumentSymbol[] = [];
+							try {
+								symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
+									'vscode.executeDocumentSymbolProvider',
+									doc.uri
+								) ?? [];
+							} catch (e) {
+								symbols = [];
+							}
+							
+							// クラス範囲をVS Code ASTで検索（補完的使用）
+							function findClassSymbol(list: vscode.DocumentSymbol[], name: string): vscode.DocumentSymbol | undefined {
+								for (const s of list) {
+									if (s.kind === vscode.SymbolKind.Class && s.name === name) {
+										return s;
+									}
+									// 子要素も再帰的に検索
+									const found = findClassSymbol(s.children, name);
+									if (found) {
+										return found;
+									}
+								}
+								return undefined;
+							}
+							
+							const classSymbol = findClassSymbol(symbols, className);
+							if (classSymbol) {
+								// クラス範囲の薄いハイライト
+								const classRange = await getClassRangeByIndent(doc, classSymbol.range.start);
+								const classBackgroundDeco = vscode.window.createTextEditorDecorationType({ 
+									backgroundColor: 'rgba(0,200,100,0.08)' // very light green background for class
+								});
+								decorations.push({ type: classBackgroundDeco, ranges: [classRange] });
+								
+								// クラス定義行のハイライト
+								const classDefLineText = doc.lineAt(classSymbol.range.start.line).text;
+								const classDefLine = new vscode.Range(
+									classSymbol.range.start.line,
+									0,
+									classSymbol.range.start.line,
+									classDefLineText.length
+								);
+								const classHeaderDeco = vscode.window.createTextEditorDecorationType({ 
+									backgroundColor: 'rgba(0,200,100,0.12)',
+									border: '1px solid rgba(0,200,100,0.4)'
+								});
+								decorations.push({ type: classHeaderDeco, ranges: [classDefLine] });
+							}
+						} else {
+							// スタンドアロン関数の場合（オレンジ系の色）
+							const funcDeco = vscode.window.createTextEditorDecorationType({ 
+								backgroundColor: 'rgba(255,140,0,0.12)', // orange background for standalone function
+								border: '1px solid rgba(255,140,0,0.3)'
+							});
+							decorations.push({ type: funcDeco, ranges: [serverFuncRange] });
+						}
+					} else {
+						// 範囲情報がない場合は従来のVS Code ASTベースの処理にフォールバック
+						console.log('[OwlSpotlight] No server range info, falling back to VS Code AST');
+						let symbols: vscode.DocumentSymbol[] = [];
+						try {
+							symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
+								'vscode.executeDocumentSymbolProvider',
+								doc.uri
+							) ?? [];
+						} catch (e) {
+							symbols = [];
+						}
+						
+						function findSymbolWithParent(list: vscode.DocumentSymbol[], pos: vscode.Position, parent: vscode.DocumentSymbol | null = null): { symbol: vscode.DocumentSymbol, parent: vscode.DocumentSymbol | null } | undefined {
+							for (const s of list) {
+								if (s.range.contains(pos)) {
+									const found = findSymbolWithParent(s.children, pos, s);
+									return found ?? { symbol: s, parent };
+								}
+							}
+							return undefined;
+						}
+						
+						const found = findSymbolWithParent(symbols, pos);
+						if (found && found.symbol && (found.symbol.kind === vscode.SymbolKind.Function || found.symbol.kind === vscode.SymbolKind.Method)) {
+							const funcRange = await getFunctionRangeByIndent(doc, found.symbol.range.start);
+							const funcDeco = vscode.window.createTextEditorDecorationType({ 
+								backgroundColor: 'rgba(0,128,255,0.10)',
+							});
+							decorations.push({ type: funcDeco, ranges: [funcRange] });
 						}
 					}
 					
