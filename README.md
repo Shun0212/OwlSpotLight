@@ -23,7 +23,7 @@
 
 OwlSpotlight transforms code navigation by bringing **semantic understanding** to your VS Code workspace. Instead of searching for exact matches, ask questions like *"function that validates email"* or *"class for handling database connections"* and instantly find relevant code across your entire Python project.
 
-![Demo Preview](screenshot/detect_method_in_class.png)t
+![Demo Preview](screenshot/detect_method_in_class.png)
 
 **Instantly discover code with semantic search. A VS Code extension for searching Python functions, classes, and methods using natural language.**
 
