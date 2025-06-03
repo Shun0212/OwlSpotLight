@@ -37,8 +37,23 @@ import numpy as np
 
 app = FastAPI()
 
+# Flash-Attentionが利用可能か確認
+def supports_flash_attention() -> bool:
+    if sys.platform == "darwin":
+        return False
+    try:
+        import flash_attn_2  # type: ignore
+        return True
+    except Exception:
+        try:
+            import flash_attn  # type: ignore
+            return True
+        except Exception:
+            return False
+
 # モデルロード
-model = SentenceTransformer("Shuu12121/CodeSearch-ModernBERT-Owl-2.0-Plus")
+_model_kwargs = {"attn_implementation": "flash_attention_2"} if supports_flash_attention() else {}
+model = SentenceTransformer("Shuu12121/CodeSearch-ModernBERT-Owl-2.0-Plus", **_model_kwargs)
 model_device = None  # 現在のデバイスを記録
 
 # === 設定: バッチサイズなど ===

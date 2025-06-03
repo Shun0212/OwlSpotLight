@@ -140,7 +140,7 @@ pip install -r requirements.txt
 - Use SSD storage for faster indexing
 - Allocate more RAM for large projects
 - Exclude unnecessary files via `.gitignore`
-- Consider `flash-attn` for CUDA environments
+- Install optional `flash-attn` (CUDA on Linux/Windows). OwlSpotlight automatically uses it for faster embeddings when available.
 
 ### 🚧 Development Roadmap
 

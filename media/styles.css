@@ -197,10 +197,27 @@ input[type=text]:focus {
   border-color: var(--vscode-focusBorder, #0078d4);
   box-shadow: 0 0 0 1px var(--vscode-focusBorder, #0078d4);
 }
-.status { 
-  padding: 0.5em 1em 0.2em 1em; 
-  color: var(--vscode-descriptionForeground, #666666); 
-  font-size: 0.97em; 
+.status {
+  padding: 0.5em 1em 0.2em 1em;
+  color: var(--vscode-descriptionForeground, #666666);
+  font-size: 0.97em;
+}
+
+.loader {
+  display: none;
+  border: 2px solid rgba(0,0,0,0.1);
+  border-top: 2px solid var(--vscode-progressBar-background, #0078d4);
+  border-radius: 50%;
+  width: 14px;
+  height: 14px;
+  animation: spin 1s linear infinite;
+  margin-left: 0.5em;
+  vertical-align: middle;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 .results {
   padding: 0.2em 0.5em 0.5em 0.5em;

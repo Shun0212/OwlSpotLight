@@ -2,10 +2,11 @@
 window.onload = function() {
 	const vscode = acquireVsCodeApi();
 	
-	// グローバル変数で現在の検索クエリと統計データを保持
-	let currentSearchQuery = '';
-	let currentStatsData = null;
-	let currentFolderPath = null;
+        // グローバル変数で現在の検索クエリと統計データを保持
+        let currentSearchQuery = '';
+        let currentStatsData = null;
+        let currentFolderPath = null;
+        const spinner = document.getElementById('loadingSpinner');
 	
 	// タブ切り替え機能
 	const tabButtons = document.querySelectorAll('.tab-btn');
@@ -47,19 +48,21 @@ window.onload = function() {
 	  };
 	}
 	if (document.getElementById('clearCacheBtn')) {
-	  document.getElementById('clearCacheBtn').onclick = () => {
-	    console.log('clearCacheBtn clicked');
-	    vscode.postMessage({ command: 'clearCache' });
-	  };
-	}
+          document.getElementById('clearCacheBtn').onclick = () => {
+            console.log('clearCacheBtn clicked');
+            if (spinner) { spinner.style.display = 'inline-block'; }
+            vscode.postMessage({ command: 'clearCache' });
+          };
+        }
 	
-	document.getElementById('searchBtn').onclick = () => {
-		const text = (document.getElementById('searchInput')).value;
-		if (text) {
-			currentSearchQuery = text; // 現在の検索クエリを保存
-			vscode.postMessage({ command: 'search', text });
-		}
-	};
+        document.getElementById('searchBtn').onclick = () => {
+                const text = (document.getElementById('searchInput')).value;
+                if (text) {
+                        currentSearchQuery = text; // 現在の検索クエリを保存
+                        if (spinner) { spinner.style.display = 'inline-block'; }
+                        vscode.postMessage({ command: 'search', text });
+                }
+        };
 	
 	document.getElementById('searchInput').addEventListener('keydown', (e) => {
 		if (e.key === 'Enter') {
@@ -68,11 +71,12 @@ window.onload = function() {
 	});
 	
 	// クラス統計関連のイベント
-	document.getElementById('loadStatsBtn').onclick = () => {
-		const query = currentSearchQuery || document.getElementById('searchInput').value || '';
-		console.log('Loading class stats with query:', query);
-		vscode.postMessage({ command: 'getClassStats', query: query });
-	};
+        document.getElementById('loadStatsBtn').onclick = () => {
+                const query = currentSearchQuery || document.getElementById('searchInput').value || '';
+                console.log('Loading class stats with query:', query);
+                if (spinner) { spinner.style.display = 'inline-block'; }
+                vscode.postMessage({ command: 'getClassStats', query: query });
+        };
 	
 	// フィルター変更時の処理
 	document.getElementById('statsFilter').addEventListener('change', (e) => {
@@ -239,17 +243,22 @@ window.onload = function() {
 	}
 
 	// メッセージハンドラー
-	window.addEventListener('message', event => {
-		const msg = event.data;
-		if (msg.type === 'status') {
-			document.getElementById('status').textContent = msg.message;
-		}
-		if (msg.type === 'error') {
-			document.getElementById('status').textContent = msg.message;
-			document.getElementById('results').innerHTML = '';
-		}
-		if (msg.type === 'classStats') {
-			currentStatsData = msg.data;
+        window.addEventListener('message', event => {
+                const msg = event.data;
+                if (msg.type === 'status') {
+                        document.getElementById('status').textContent = msg.message;
+                        if (spinner) {
+                                spinner.style.display = msg.message && msg.message.endsWith('...') ? 'inline-block' : 'none';
+                        }
+                }
+                if (msg.type === 'error') {
+                        if (spinner) { spinner.style.display = 'none'; }
+                        document.getElementById('status').textContent = msg.message;
+                        document.getElementById('results').innerHTML = '';
+                }
+                if (msg.type === 'classStats') {
+                        if (spinner) { spinner.style.display = 'none'; }
+                        currentStatsData = msg.data;
 			currentFolderPath = msg.folderPath;
 			console.log('Class stats received:', currentStatsData);
 			
@@ -264,8 +273,9 @@ window.onload = function() {
 			
 			applyStatsFilter();
 		}
-		if (msg.type === 'results') {
-			document.getElementById('status').textContent = msg.results.length ? 'Search Results:' : 'No matching functions found';
+                if (msg.type === 'results') {
+                        if (spinner) { spinner.style.display = 'none'; }
+                        document.getElementById('status').textContent = msg.results.length ? 'Search Results:' : 'No matching functions found';
 			const folderPath = msg.folderPath;
 			// 結果コンテナをクリアしてから新しい結果を追加
 			const resultsContainer = document.getElementById('results');

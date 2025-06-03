@@ -545,7 +545,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
       <input id="searchInput" type="text" placeholder="Search by function name or code snippet..." />
       <button id="searchBtn">Search</button>
     </div>
-    <div class="status" id="status"></div>
+    <div class="status"><span id="status"></span><div id="loadingSpinner" class="loader"></div></div>
     <div class="results" id="results"></div>
   </div>
   <!-- クラス統計タブ -->
