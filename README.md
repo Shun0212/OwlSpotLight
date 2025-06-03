@@ -21,13 +21,13 @@
 
 ### 🚀 What is OwlSpotlight?
 
-OwlSpotlight transforms code navigation by bringing **semantic understanding** to your VS Code workspace. Instead of searching for exact matches, ask questions like *"function that validates email"* or *"class for handling database connections"* and instantly find relevant code across your entire Python project.
+OwlSpotlight transforms code navigation by bringing **semantic understanding** to your VS Code workspace. Instead of searching for exact matches, ask questions like *"function that validates email"* or *"class for handling database connections"* and instantly find relevant code across your entire Python or JavaScript project.
 
 ![Demo Preview](screenshot/detect_method_in_class.png)t
 
-**Instantly discover code with semantic search. A VS Code extension for searching Python functions, classes, and methods using natural language.**
+**Instantly discover code with semantic search. A VS Code extension for searching Python and JavaScript functions, classes, and methods using natural language.**
 
-**意味的検索でPython関数・クラス・メソッドを瞬時に発見できるVS Code拡張機能。**
+**意味的検索でPythonやJavaScriptの関数・クラス・メソッドを瞬時に発見できるVS Code拡張機能。**
 
 ---
 
@@ -145,14 +145,14 @@ pip install -r requirements.txt
 ### 🚧 Development Roadmap
 
 #### ✅ Current Features
-- [x] Natural language search for Python functions/classes/methods
+- [x] Natural language search for Python and JavaScript functions/classes/methods
 - [x] Real-time incremental indexing
 - [x] Apple Silicon optimization
 - [x] Class relationship visualization
 - [x] Advanced filtering and statistics
 
 #### 🔄 Coming Soon
-- [ ] **Multi-language support** (JavaScript, TypeScript, Java, C++)
+- [ ] **Additional language support** (TypeScript, Java, C++)
 - [ ] **CUDA/GPU acceleration** with flash-attention
 - [ ] **VS Code Marketplace** release
 - [ ] **Real-time file watching** (auto-update on save)
@@ -177,7 +177,7 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ### OwlSpotlightとは？
 
-OwlSpotlightは、VS CodeでPythonコードを自然言語で検索できる拡張機能です。
+OwlSpotlightは、VS CodeでPythonやJavaScriptコードを自然言語で検索できる拡張機能です。
 現在[Visual Studio Code Marketplace](https://marketplace.visualstudio.com/items?itemName=Shun0212.owlspotlight)でも公開・配布しています。
 従来のキーワード検索とは異なり、「メールを検証する関数」や「データベース接続を処理するクラス」など、意図を表現したクエリで関連するコードを素早く見つけることができます。
 
@@ -254,14 +254,14 @@ pip install -r requirements.txt
 ### 開発ロードマップ
 
 #### 現在の機能
-- Python関数・クラス・メソッドの自然言語検索
+- PythonおよびJavaScriptの関数・クラス・メソッドを自然言語で検索
 - インクリメンタルインデックス更新
 - Apple Silicon対応
 - クラス構造の可視化
 - フィルタ・統計表示
 
 #### 今後の予定
-- 多言語対応（JavaScript, TypeScript, Java, C++など）
+- 追加言語サポート（TypeScript, Java, C++など）
 - CUDA/GPU対応
 - VS Code Marketplace公開
 - ファイル保存時の自動更新

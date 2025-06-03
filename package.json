@@ -85,6 +85,11 @@
           "minimum": 1,
           "description": "Batch size for code embedding (Python server). Larger values may speed up indexing but use more memory."
         },
+        "owlspotlight.fileExt": {
+          "type": "string",
+          "default": ".py",
+          "description": "File extension to index and search (e.g., .py, .js, .ts)"
+        },
         "owlspotlight.cacheSettings": {
           "type": "object",
           "title": "Cache Settings",

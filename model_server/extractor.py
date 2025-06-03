@@ -1,12 +1,13 @@
 from tree_sitter import Language, Parser
 import tree_sitter_python
+import re
 
 # --- クラス変数として一度だけ初期化 ---
-_LANGUAGE = Language(tree_sitter_python.language())
-_PARSER = Parser(_LANGUAGE)
+_PY_LANGUAGE = Language(tree_sitter_python.language())
+_PY_PARSER = Parser(_PY_LANGUAGE)
 # ------------------------------------
 
-def extract_functions(file_path):
+def extract_functions_python(file_path):
     file_path_str = str(file_path)
     try:
         with open(file_path_str, 'r', encoding='utf-8', errors='replace') as f:
@@ -16,11 +17,11 @@ def extract_functions(file_path):
         return []
 
     source_bytes = source_code_as_text.encode("utf-8")
-    tree = _PARSER.parse(source_bytes)
+    tree = _PY_PARSER.parse(source_bytes)
     root_node = tree.root_node
     
     # クラス情報を抽出
-    class_query = _LANGUAGE.query("""
+    class_query = _PY_LANGUAGE.query("""
     (class_definition
       name: (identifier) @class.name
       body: (block) @class.body) @class.def
@@ -42,7 +43,7 @@ def extract_functions(file_path):
             }
     
     # 関数情報を抽出
-    func_query = _LANGUAGE.query("""
+    func_query = _PY_LANGUAGE.query("""
     (function_definition
       name: (identifier) @func.name
       body: (block) @func.body) @func.def
@@ -76,3 +77,69 @@ def extract_functions(file_path):
             'class_name': belonging_class  # クラス名を追加（Noneの場合はトップレベル関数）
         })
     return results
+
+
+def extract_functions_javascript(file_path):
+    file_path_str = str(file_path)
+    try:
+        with open(file_path_str, 'r', encoding='utf-8', errors='replace') as f:
+            lines = f.readlines()
+    except Exception as e:
+        print(f"Error reading {file_path_str}: {e}")
+        return []
+
+    results = []
+    class_stack = []  # [{'name': str, 'brace': int}]
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+
+        if class_stack:
+            class_stack[-1]['brace'] += line.count('{') - line.count('}')
+            if class_stack[-1]['brace'] <= 0:
+                class_stack.pop()
+
+        class_match = re.match(r'\s*class\s+([A-Za-z_$][\w$]*)', line)
+        if class_match:
+            class_name = class_match.group(1)
+            brace = line.count('{') - line.count('}')
+            class_stack.append({'name': class_name, 'brace': brace if brace > 0 else 0})
+            i += 1
+            continue
+
+        func_match = re.match(r'\s*(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(', line)
+        arrow_match = re.match(r'\s*(?:const|let|var)?\s*([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>', line)
+        method_match = None
+        if class_stack:
+            method_match = re.match(r'\s*(?:async\s+)?([A-Za-z_$][\w$]*)\s*\(', line)
+
+        match = func_match or arrow_match or method_match
+        if match:
+            func_name = match.group(1)
+            brace = line.count('{') - line.count('}')
+            start = i
+            i += 1
+            while i < len(lines) and brace > 0:
+                brace += lines[i].count('{') - lines[i].count('}')
+                i += 1
+            end = i - 1
+            code = ''.join(lines[start:end+1])
+            class_name = class_stack[-1]['name'] if method_match and class_stack else None
+            results.append({
+                'name': func_name,
+                'code': code,
+                'lineno': start + 1,
+                'end_lineno': end + 1,
+                'class_name': class_name
+            })
+            continue
+
+        i += 1
+    return results
+
+
+def extract_functions(file_path):
+    path_str = str(file_path)
+    if path_str.endswith(('.js', '.jsx', '.ts', '.tsx')):
+        return extract_functions_javascript(file_path)
+    return extract_functions_python(file_path)

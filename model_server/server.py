@@ -90,6 +90,7 @@ class SearchFunctionsSimpleRequest(BaseModel):
     directory: str
     query: str
     top_k: int = 5
+    file_ext: str = ".py"
 
 class FunctionRangeRequest(BaseModel):
     file: str
@@ -100,6 +101,7 @@ class ClassStatsRequest(BaseModel):
     directory: str
     query: str  # 検索クエリ
     top_k: int = 50  # 上位何件の関数を取得するか
+    file_ext: str = ".py"
 
 # サーバー全体で1つのインデックスを保持
 index_lock = Lock()
@@ -569,7 +571,7 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
         if (
             global_index_state.indexer is not None and
             global_index_state.directory == req.directory and
-            global_index_state.file_ext == ".py" and
+            global_index_state.file_ext == req.file_ext and
             global_index_state.is_up_to_date(directory=req.directory) and
             global_index_state.embeddings is not None and
             global_index_state.faiss_index is not None
@@ -581,7 +583,7 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
             file_count = len(global_index_state.file_info)
         else:
             print("[search_functions_simple] インデックス再構築")
-            results, file_count, indexer = build_index(req.directory, ".py", update_state=True)
+            results, file_count, indexer = build_index(req.directory, req.file_ext, update_state=True)
             embeddings = global_index_state.embeddings
             faiss_index = global_index_state.faiss_index
         if not results or embeddings is None or faiss_index is None:
@@ -617,9 +619,10 @@ async def get_class_stats(request: ClassStatsRequest):
     try:
         # まず検索を実行して検索結果を取得
         search_request = SearchFunctionsSimpleRequest(
-            directory=request.directory, 
-            query=request.query, 
-            top_k=request.top_k
+            directory=request.directory,
+            query=request.query,
+            top_k=request.top_k,
+            file_ext=request.file_ext
         )
         search_response = await search_functions_simple_api(search_request)
         search_results = search_response["results"]
@@ -635,7 +638,7 @@ async def get_class_stats(request: ClassStatsRequest):
             dirs[:] = [d for d in dirs if not is_ignored(os.path.join(root, d), ignore_spec, directory)]
             
             for filename in filenames:
-                if filename.endswith('.py'):
+                if filename.endswith(request.file_ext):
                     file_path = os.path.join(root, filename)
                     if not is_ignored(file_path, ignore_spec, directory):
                         files.append(file_path)
