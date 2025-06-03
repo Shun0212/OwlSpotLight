@@ -129,7 +129,9 @@ async function getFunctionRangeByIndent(doc: vscode.TextDocument, startPos: vsco
 	
 	// 関数の終了行を見つける
 	let endLine = actualBodyStart;
-	const baseIndentForComparison = actualBodyIndent !== -1 ? defIndent : defIndent;
+        // Use the detected body indent when available for a more accurate
+        // comparison; fall back to the definition indent otherwise.
+        const baseIndentForComparison = actualBodyIndent !== -1 ? actualBodyIndent : defIndent;
 	
 	for (let i = actualBodyStart + 1; i < lines.length; i++) {
 		const line = lines[i];
