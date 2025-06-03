@@ -126,6 +126,11 @@
               "type": "string",
               "default": "3.11",
               "description": "Python version to use for virtual environment (requires pyenv on macOS/Linux)"
+            },
+            "venvPath": {
+              "type": "string",
+              "default": "",
+              "description": "Custom path for Python virtual environment. Leave empty to use a persistent directory in VS Code global storage"
             }
           }
         }

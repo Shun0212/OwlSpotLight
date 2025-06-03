@@ -94,6 +94,11 @@ OwlSpotlight transforms code navigation by bringing **semantic understanding** t
    pip install -r requirements.txt
    ```
 
+   The extension now stores the virtual environment outside of its own folder so
+   it won't be removed when OwlSpotlight is updated. By default it is created in
+   VS Code's global storage directory. You can override this location with the
+   `owlspotlight.environmentSettings.venvPath` setting.
+
 4. **Launch**: Run the commands from Option 1, steps 2-4
 
 ### 💡 Why OwlSpotlight?
@@ -135,6 +140,8 @@ source .venv/bin/activate          # macOS/Linux
 
 pip install -r requirements.txt
 ```
+
+The created environment will be kept outside the extension's directory (under VS Code's global storage) so it persists after updates. You can change the location via `owlspotlight.environmentSettings.venvPath`.
 
 **Performance Tips**:
 - Use SSD storage for faster indexing
@@ -227,6 +234,8 @@ OwlSpotlightは、VS CodeでPythonコードを自然言語で検索できる拡�
    source .venv/bin/activate  # Windows: .venv\Scripts\activate
    pip install -r requirements.txt
    ```
+
+   仮想環境は拡張機能の更新で削除されないよう、既定でVS Codeのグローバルストレージに作成されます。`owlspotlight.environmentSettings.venvPath` 設定で任意の場所に変更できます。
 
 ### OwlSpotlightを選ぶ理由
 
