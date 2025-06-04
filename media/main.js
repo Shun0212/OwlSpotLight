@@ -47,19 +47,21 @@ window.onload = function() {
 	  };
 	}
 	if (document.getElementById('clearCacheBtn')) {
-	  document.getElementById('clearCacheBtn').onclick = () => {
-	    console.log('clearCacheBtn clicked');
-	    vscode.postMessage({ command: 'clearCache' });
-	  };
-	}
+          document.getElementById('clearCacheBtn').onclick = () => {
+            console.log('clearCacheBtn clicked');
+            const lang = document.getElementById('languageSelect')?.value || '.py';
+            vscode.postMessage({ command: 'clearCache', lang });
+          };
+        }
 	
 	document.getElementById('searchBtn').onclick = () => {
-		const text = (document.getElementById('searchInput')).value;
-		if (text) {
-			currentSearchQuery = text; // 現在の検索クエリを保存
-			vscode.postMessage({ command: 'search', text });
-		}
-	};
+                const text = (document.getElementById('searchInput')).value;
+                if (text) {
+                        currentSearchQuery = text; // 現在の検索クエリを保存
+                        const lang = document.getElementById('languageSelect')?.value || '.py';
+                        vscode.postMessage({ command: 'search', text, lang });
+                }
+        };
 	
 	document.getElementById('searchInput').addEventListener('keydown', (e) => {
 		if (e.key === 'Enter') {
@@ -69,10 +71,11 @@ window.onload = function() {
 	
 	// クラス統計関連のイベント
 	document.getElementById('loadStatsBtn').onclick = () => {
-		const query = currentSearchQuery || document.getElementById('searchInput').value || '';
-		console.log('Loading class stats with query:', query);
-		vscode.postMessage({ command: 'getClassStats', query: query });
-	};
+                const query = currentSearchQuery || document.getElementById('searchInput').value || '';
+                console.log('Loading class stats with query:', query);
+                const lang = document.getElementById('languageSelect')?.value || '.py';
+                vscode.postMessage({ command: 'getClassStats', query: query, lang });
+        };
 	
 	// フィルター変更時の処理
 	document.getElementById('statsFilter').addEventListener('change', (e) => {

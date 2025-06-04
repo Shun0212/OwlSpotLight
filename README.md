@@ -150,6 +150,7 @@ pip install -r requirements.txt
 - [x] Apple Silicon optimization
 - [x] Class relationship visualization
 - [x] Advanced filtering and statistics
+- [x] Experimental Java support
 
 #### 🔄 Coming Soon
 - [ ] **Multi-language support** (JavaScript, TypeScript, Java, C++)
@@ -259,6 +260,7 @@ pip install -r requirements.txt
 - Apple Silicon対応
 - クラス構造の可視化
 - フィルタ・統計表示
+- Java対応（実験的）
 
 #### 今後の予定
 - 多言語対応（JavaScript, TypeScript, Java, C++など）

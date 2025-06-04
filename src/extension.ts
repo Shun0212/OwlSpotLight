@@ -255,7 +255,8 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					);
 					return;
 				}
-				const query = msg.text;
+                                const query = msg.text;
+                                const fileExt = msg.lang || '.py';
 				const workspaceFolders = vscode.workspace.workspaceFolders;
 				if (!workspaceFolders || workspaceFolders.length === 0) {
 					webviewView.webview.postMessage({ type: 'error', message: 'No workspace folder found' });
@@ -266,13 +267,13 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				await fetch('http://localhost:8000/build_index', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ directory: folderPath, file_ext: '.py' })
+                                        body: JSON.stringify({ directory: folderPath, file_ext: fileExt })
 				});
 				webviewView.webview.postMessage({ type: 'status', message: 'Searching...' });
 				const res = await fetch('http://localhost:8000/search_functions_simple', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ directory: folderPath, query, top_k: 10 })
+                                        body: JSON.stringify({ directory: folderPath, query, top_k: 10, file_ext: fileExt })
 				});
 				const data: any = await res.json();
 				if (data && data.results && Array.isArray(data.results) && data.results.length > 0) {
@@ -287,14 +288,15 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					webviewView.webview.postMessage({ type: 'error', message: 'No workspace folder found' });
 					return;
 				}
-				const folderPath = workspaceFolders[0].uri.fsPath;
-				const query = msg.query || ''; // クエリパラメータを受け取る
+                                const folderPath = workspaceFolders[0].uri.fsPath;
+                                const query = msg.query || ''; // クエリパラメータを受け取る
+                                const fileExt = msg.lang || '.py';
 				webviewView.webview.postMessage({ type: 'status', message: 'Loading class statistics...' });
 				try {
 					const res = await fetch('http://localhost:8000/get_class_stats', {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({ directory: folderPath, query: query, top_k: 50 })
+                                                body: JSON.stringify({ directory: folderPath, query: query, top_k: 50, file_ext: fileExt })
 					});
 					const data: any = await res.json();
 					webviewView.webview.postMessage({ type: 'classStats', data, folderPath });
@@ -464,13 +466,14 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					webviewView.webview.postMessage({ type: 'error', message: 'No workspace folder found' });
 					return;
 				}
-				const folderPath = workspaceFolders[0].uri.fsPath;
-				webviewView.webview.postMessage({ type: 'status', message: 'Clearing cache and rebuilding index...' });
+                                const folderPath = workspaceFolders[0].uri.fsPath;
+                                const fileExt = msg.lang || '.py';
+                                webviewView.webview.postMessage({ type: 'status', message: 'Clearing cache and rebuilding index...' });
 				try {
 					const res = await fetch('http://localhost:8000/force_rebuild_index', {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({ directory: folderPath, file_ext: '.py' })
+                                                body: JSON.stringify({ directory: folderPath, file_ext: fileExt })
 					});
 					const data = await res.json();
 					const msg = typeof data === 'object' && data && 'message' in data ? (data as any).message : undefined;
@@ -542,6 +545,10 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
   <!-- 検索タブ -->
   <div class="tab-content active" id="search-tab">
     <div class="searchbar">
+      <select id="languageSelect">
+        <option value=".py">Python</option>
+        <option value=".java">Java</option>
+      </select>
       <input id="searchInput" type="text" placeholder="Search by function name or code snippet..." />
       <button id="searchBtn">Search</button>
     </div>
