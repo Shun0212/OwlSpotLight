@@ -130,11 +130,11 @@ window.onload = function() {
 				// メソッド一覧
 				const methodsDiv = document.createElement('div');
 				methodsDiv.className = 'stats-methods';
-				classInfo.methods.forEach(method => {
-					const methodDiv = document.createElement('div');
-					methodDiv.className = 'stats-method-item';
-					methodDiv.setAttribute('data-file', method.file_path);
-					methodDiv.setAttribute('data-line', method.lineno);
+                                classInfo.methods.forEach(method => {
+                                        const methodDiv = document.createElement('div');
+                                        methodDiv.className = 'stats-method-item';
+                                        methodDiv.setAttribute('data-file', method.file_path);
+                                        methodDiv.setAttribute('data-line', method.lineno);
 					
 					let relPath = method.file_path || '';
 					if (relPath && relPath.startsWith(currentFolderPath)) {
@@ -144,10 +144,11 @@ window.onload = function() {
 						}
 					}
 					
-					methodDiv.innerHTML = `
-						<div class="method-name">${method.name}</div>
-						<div class="method-path">${relPath}:${method.lineno}</div>
-					`;
+                                        const rankInfo = method.search_rank ? ` (rank: ${method.search_rank})` : '';
+                                        methodDiv.innerHTML = `
+                                                <div class="method-name">${method.name}${rankInfo}</div>
+                                                <div class="method-path">${relPath}:${method.lineno}</div>
+                                        `;
 					
 					methodDiv.onclick = function() {
 						vscode.postMessage({ 

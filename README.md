@@ -48,7 +48,7 @@ OwlSpotlight transforms code navigation by bringing **semantic understanding** t
 |---------|-------------|---------|
 | **🔍 Semantic Function Search** | Find functions by describing what they do in natural language | ![Function Search](screenshot/detect_function.png) |
 | **🏗️ Class & Method Discovery** | Explore class hierarchies and their methods with context-aware search | ![Class Methods](screenshot/detect_method_in_class.png) |
-| **📊 Intelligent Ranking** | View classes ranked by relevance with detailed statistics | ![Class Rankings](screenshot/class_stats_mode.png) |
+| **📊 Intelligent Ranking** | View classes ranked by relevance with detailed statistics. Methods inside each class are ordered by their search rank so you can see which ones boosted the score. | ![Class Rankings](screenshot/class_stats_mode.png) |
 | **⚙️ Environment Management** | Built-in alerts and management for Python environments | ![Environment Alert](screenshot/alart_No_venv.png) |
 
 ### 🚀 Quick Start
