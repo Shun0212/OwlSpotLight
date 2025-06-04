@@ -246,6 +246,17 @@ def is_ignored(path: str, spec: Optional[PathSpec], root_dir: str) -> bool:
     rel_path = os.path.relpath(path, root_dir)
     return spec.match_file(rel_path)
 
+# ファイルのハッシュ計算関数
+def file_hash(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(8192)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
+
 # ディレクトリ内の全ファイルから関数抽出・インデックス作成（一時的なインデックス、状態保存なし）
 def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, update_state: bool = False):
     import hashlib
@@ -443,7 +454,11 @@ async def force_rebuild_index_api(req: BuildIndexRequest):
 @app.get("/index_status")
 async def index_status():
     print("/index_status called")
-    up_to_date = global_index_state.is_up_to_date()
+    # If no directory is set, consider it up to date (no index to check)
+    if global_index_state.directory is None:
+        up_to_date = True
+    else:
+        up_to_date = global_index_state.is_up_to_date()
     return IndexStatus(
         directory=global_index_state.directory or "",
         indexed_files=list(global_index_state.file_info.keys()),
@@ -770,16 +785,7 @@ async def get_class_stats(request: ClassStatsRequest):
         print(f"Error getting class stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# ファイルのハッシュ計算関数
-def file_hash(path):
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        while True:
-            chunk = f.read(8192)
-            if not chunk:
-                break
-            h.update(chunk)
-    return h.hexdigest()
+
 
 # ディレクトリ単位でクラスタ分割
 # 例: src/ → cluster_src, tests/ → cluster_tests
