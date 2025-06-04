@@ -697,28 +697,32 @@ async def get_class_stats(request: ClassStatsRequest):
         for class_key, class_info in classes.items():
             search_result_ranks = []
             matched_methods = set()
-            for i, result in enumerate(search_results):
-                result_func_name = result["name"]
-                result_file = result.get("file", "")
-                result_lineno = result.get("lineno", result.get("line_number", 0))
-                
-                # ファイルパスを正規化して比較
-                result_file_abs = os.path.abspath(result_file) if result_file else ""
-                
-                for method in class_info["methods"]:
-                    method_file = method.get("file_path", method.get("file", ""))
-                    method_file_abs = os.path.abspath(method_file) if method_file else ""
-                    method_lineno = method.get("lineno", method.get("line_number", 0))
-                    method_key = (method["name"], method_file_abs, method_lineno)
-                    
-                    if (method["name"] == result_func_name and 
+
+            for method in class_info["methods"]:
+                method_file = method.get("file_path", method.get("file", ""))
+                method_file_abs = os.path.abspath(method_file) if method_file else ""
+                method_lineno = method.get("lineno", method.get("line_number", 0))
+                method_key = (method["name"], method_file_abs, method_lineno)
+
+                method_rank = None
+                for i, result in enumerate(search_results):
+                    result_func_name = result["name"]
+                    result_file = result.get("file", "")
+                    result_lineno = result.get("lineno", result.get("line_number", 0))
+                    result_file_abs = os.path.abspath(result_file) if result_file else ""
+
+                    if (method["name"] == result_func_name and
                         method_file_abs == result_file_abs and
-                        method_lineno == result_lineno and
-                        method_key not in matched_methods):
-                        search_result_ranks.append(i + 1)
-                        matched_methods.add(method_key)
-                        print(f"Matched method {method['name']} in class {class_info['name']} at rank {i + 1}")
+                        method_lineno == result_lineno):
+                        method_rank = i + 1
+                        if method_key not in matched_methods:
+                            search_result_ranks.append(method_rank)
+                            matched_methods.add(method_key)
+                            print(f"Matched method {method['name']} in class {class_info['name']} at rank {method_rank}")
                         break
+
+                method["search_rank"] = method_rank
+
             if search_result_ranks:
                 sum_inverse_ranks = sum(1.0 / rank for rank in search_result_ranks)
                 weighted_score = sum_inverse_ranks
@@ -740,6 +744,12 @@ async def get_class_stats(request: ClassStatsRequest):
             class_info["best_rank"] = best_rank
             class_info["proportion"] = proportion
             class_info["composite_score"] = composite_score
+
+            # クラス内メソッドを検索順位でソート（順位がないものは末尾）
+            class_info["methods"] = sorted(
+                class_info["methods"],
+                key=lambda m: m.get("search_rank") if m.get("search_rank") is not None else float("inf")
+            )
         
         sorted_classes = sorted(classes.values(), key=lambda x: x["composite_score"], reverse=True)
         
