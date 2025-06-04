@@ -151,6 +151,7 @@ pip install -r requirements.txt
 - [x] Class relationship visualization
 - [x] Advanced filtering and statistics
 - [x] Experimental Java support
+- [x] Automatic language detection with selectable options
 
 #### 🔄 Coming Soon
 - [ ] **Multi-language support** (JavaScript, TypeScript, Java, C++)
