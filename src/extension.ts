@@ -201,12 +201,28 @@ async function getClassRangeByIndent(doc: vscode.TextDocument, startPos: vscode.
 
 // クラス外にgetNonceを定義
 function getNonce() {
-	let text = '';
-	const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-	for (let i = 0; i < 32; i++) {
-		text += possible.charAt(Math.floor(Math.random() * possible.length));
-	}
-	return text;
+        let text = '';
+        const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+        for (let i = 0; i < 32; i++) {
+                text += possible.charAt(Math.floor(Math.random() * possible.length));
+        }
+        return text;
+}
+
+// ワークスペース内の言語を自動検出
+async function detectLanguages(): Promise<string[]> {
+        const patterns = [
+                { glob: '**/*.py', ext: '.py' },
+                { glob: '**/*.java', ext: '.java' }
+        ];
+        const detected: string[] = [];
+        for (const p of patterns) {
+                const files = await vscode.workspace.findFiles(p.glob, '**/node_modules/**', 1);
+                if (files.length > 0) {
+                        detected.push(p.ext);
+                }
+        }
+        return detected;
 }
 
 // WebviewViewProviderでサイドバーUIをリッチ化
@@ -216,17 +232,18 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 
 	constructor(private readonly _context: vscode.ExtensionContext) {}
 
-	resolveWebviewView(
-		webviewView: vscode.WebviewView,
-		context: vscode.WebviewViewResolveContext,
-		_token: vscode.CancellationToken
-	) {
-		this._view = webviewView;
-		webviewView.webview.options = {
-			enableScripts: true,
-			localResourceRoots: [this._context.extensionUri]
-		};
-		webviewView.webview.html = this.getHtmlForWebview(webviewView.webview);
+       async resolveWebviewView(
+               webviewView: vscode.WebviewView,
+               context: vscode.WebviewViewResolveContext,
+               _token: vscode.CancellationToken
+       ) {
+               this._view = webviewView;
+               webviewView.webview.options = {
+                       enableScripts: true,
+                       localResourceRoots: [this._context.extensionUri]
+               };
+               const langs = await detectLanguages();
+               webviewView.webview.html = this.getHtmlForWebview(webviewView.webview, langs);
 
 		// Webviewからのメッセージ受信
 		webviewView.webview.onDidReceiveMessage(async (msg) => {
@@ -494,8 +511,8 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 		});
 	}
 
-	getHtmlForWebview(webview: vscode.Webview): string {
-		const nonce = getNonce();
+       getHtmlForWebview(webview: vscode.Webview, languages: string[]): string {
+               const nonce = getNonce();
 		const scriptUri = webview.asWebviewUri(
 			vscode.Uri.joinPath(this._context.extensionUri, 'media', 'main.js')
 		);
@@ -508,7 +525,11 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 		const owlPngUri = webview.asWebviewUri(
 			vscode.Uri.joinPath(this._context.extensionUri, 'media', 'owl.png')
 		);
-		return `<!DOCTYPE html>
+                const langMap: { [key: string]: string } = { '.py': 'Python', '.java': 'Java' };
+                const options = (languages.length ? languages : ['.py']).map(l => `<option value="${l}">${langMap[l] || l}</option>`).join('');
+                const selectStyle = (languages.length <= 1) ? 'style="display:none;"' : '';
+
+                return `<!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
@@ -545,9 +566,8 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
   <!-- 検索タブ -->
   <div class="tab-content active" id="search-tab">
     <div class="searchbar">
-      <select id="languageSelect">
-        <option value=".py">Python</option>
-        <option value=".java">Java</option>
+      <select id="languageSelect" ${selectStyle}>
+        ${options}
       </select>
       <input id="searchInput" type="text" placeholder="Search by function name or code snippet..." />
       <button id="searchBtn">Search</button>
