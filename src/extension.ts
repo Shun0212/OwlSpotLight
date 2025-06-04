@@ -787,24 +787,39 @@ export function activate(context: vscode.ExtensionContext) {
 		const serverDir = path.join(context.extensionPath, 'model_server');
 		const fs = require('fs');
 		
-		try {
-			// メインのキャッシュディレクトリ
-			const mainCacheDir = path.join(serverDir, '__pycache__');
-			if (fs.existsSync(mainCacheDir)) {
-				fs.rmSync(mainCacheDir, { recursive: true, force: true });
-			}
-			
-			// .owl_index ディレクトリの内容を削除 (server-side cache)
-			const owlIndexDir = path.join(serverDir, '.owl_index');
-			if (fs.existsSync(owlIndexDir)) {
-				// ディレクトリの中身だけを削除し、ディレクトリ自体は残す
-				const items = fs.readdirSync(owlIndexDir);
-				for (const item of items) {
-					const itemPath = path.join(owlIndexDir, item);
-					fs.rmSync(itemPath, { recursive: true, force: true });
-				}
-				console.log('Cleared .owl_index directory contents');
-			}
+                try {
+                        const mainCacheDir = path.join(serverDir, '__pycache__');
+                        const owlIndexDir = path.join(serverDir, '.owl_index');
+
+                        // 削除候補のディレクトリを収集
+                        const dirOptions: vscode.QuickPickItem[] = [];
+                        if (fs.existsSync(mainCacheDir)) {
+                                dirOptions.push({ label: '__pycache__', description: mainCacheDir });
+                        }
+                        if (fs.existsSync(owlIndexDir)) {
+                                const items = fs.readdirSync(owlIndexDir);
+                                for (const item of items) {
+                                        const itemPath = path.join(owlIndexDir, item);
+                                        if (fs.statSync(itemPath).isDirectory()) {
+                                                dirOptions.push({ label: path.join('.owl_index', item), description: itemPath });
+                                        }
+                                }
+                        }
+
+                        let selectedDirs: readonly vscode.QuickPickItem[] = [];
+                        if (dirOptions.length > 0) {
+                                selectedDirs = await vscode.window.showQuickPick(dirOptions, {
+                                        canPickMany: true,
+                                        placeHolder: 'Select cache folders to delete'
+                                }) || [];
+                        }
+
+                        for (const dir of selectedDirs) {
+                                const target = dir.description ?? dir.label;
+                                if (fs.existsSync(target)) {
+                                        fs.rmSync(target, { recursive: true, force: true });
+                                }
+                        }
 			
 			// カスタムキャッシュパスが指定されている場合
 			if (customCachePath && fs.existsSync(customCachePath)) {
