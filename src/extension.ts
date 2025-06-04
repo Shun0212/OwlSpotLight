@@ -635,20 +635,22 @@ function updatePythonServerConfig() {
 	if (fs.existsSync(envPath)) {
 		envContent = fs.readFileSync(envPath, 'utf8');
 	}
-	const lines = envContent.split(/\r?\n/).filter((l: string) => 
-		!l.startsWith('OWL_BATCH_SIZE=') &&
-		!l.startsWith('OWLSETTINGS_BATCH_SIZE=') &&
-		!l.startsWith('OWLSETTINGS_AUTO_CLEAR_CACHE=') &&
-		!l.startsWith('OWLSETTINGS_AUTO_CLEAR_LOCAL_CACHE=') &&
-		!l.startsWith('OWLSETTINGS_CACHE_PATH=') &&
-		!l.startsWith('OWLSETTINGS_PYTHON_VERSION=')
-	);
+       const lines = envContent.split(/\r?\n/).filter((l: string) =>
+               !l.startsWith('OWL_BATCH_SIZE=') &&
+               !l.startsWith('OWLSETTINGS_BATCH_SIZE=') &&
+               !l.startsWith('OWLSETTINGS_AUTO_CLEAR_CACHE=') &&
+               !l.startsWith('OWLSETTINGS_AUTO_CLEAR_LOCAL_CACHE=') &&
+               !l.startsWith('OWLSETTINGS_CACHE_PATH=') &&
+               !l.startsWith('OWLSETTINGS_PYTHON_VERSION=') &&
+               !l.startsWith('OWLSETTINGS_VENV_PATH=')
+       );
 	lines.push(`OWL_BATCH_SIZE=${batchSize}`);
 	lines.push(`OWLSETTINGS_AUTO_CLEAR_CACHE=${cacheSettings.autoClearCache || false}`);
 	lines.push(`OWLSETTINGS_AUTO_CLEAR_LOCAL_CACHE=${cacheSettings.autoClearLocalCache || false}`);
-	lines.push(`OWLSETTINGS_CACHE_PATH=${cacheSettings.cachePath || ''}`);
-	lines.push(`OWLSETTINGS_PYTHON_VERSION=${envSettings.pythonVersion || '3.11'}`);
-	fs.writeFileSync(envPath, lines.join('\n'));
+       lines.push(`OWLSETTINGS_CACHE_PATH=${cacheSettings.cachePath || ''}`);
+       lines.push(`OWLSETTINGS_PYTHON_VERSION=${envSettings.pythonVersion || '3.11'}`);
+       lines.push(`OWLSETTINGS_VENV_PATH=${envSettings.venvPath || ''}`);
+       fs.writeFileSync(envPath, lines.join('\n'));
 }
 
 export function activate(context: vscode.ExtensionContext) {
@@ -675,11 +677,14 @@ export function activate(context: vscode.ExtensionContext) {
 	// サーバー起動コマンドはそのまま
 	const startServerDisposable = vscode.commands.registerCommand('owlspotlight.startServer', async () => {
 		const config = vscode.workspace.getConfiguration('owlspotlight');
-		const cacheSettings = config.get<any>('cacheSettings', {});
-		const autoClearCache = cacheSettings.autoClearCache || false;
-		const serverDir = path.join(context.extensionPath, 'model_server');
-		const venvDir = path.join(serverDir, '.venv');
-		const fs = require('fs');
+               const cacheSettings = config.get<any>('cacheSettings', {});
+               const envSettings = config.get<any>('environmentSettings', {});
+               const autoClearCache = cacheSettings.autoClearCache || false;
+               const serverDir = path.join(context.extensionPath, 'model_server');
+               const venvDir = envSettings.venvPath && envSettings.venvPath !== ''
+                       ? path.resolve(envSettings.venvPath)
+                       : path.join(serverDir, '.venv');
+               const fs = require('fs');
 
 		// 仮想環境がなければ作成を促す
 		if (!fs.existsSync(venvDir)) {
@@ -713,14 +718,16 @@ export function activate(context: vscode.ExtensionContext) {
 				name: 'OwlSpotlight Server',
 				cwd: serverDir
 			});
-			const platform = os.platform();
-			if (platform === 'win32') {
-				terminal.sendText('.\\.venv\\Scripts\\activate', true);
-				terminal.sendText('uvicorn server:app --host 127.0.0.1 --port 8000 --reload', true);
-			} else {
-				terminal.sendText('source .venv/bin/activate', true);
-				terminal.sendText('uvicorn server:app --host 127.0.0.1 --port 8000 --reload', true);
-			}
+                       const platform = os.platform();
+                       if (platform === 'win32') {
+                               const activatePath = path.join(venvDir, 'Scripts', 'activate');
+                               terminal.sendText(activatePath.replace(/\\/g, '\\\\'), true);
+                               terminal.sendText('uvicorn server:app --host 127.0.0.1 --port 8000 --reload', true);
+                       } else {
+                               const activatePath = path.join(venvDir, 'bin', 'activate');
+                               terminal.sendText(`source ${activatePath}`, true);
+                               terminal.sendText('uvicorn server:app --host 127.0.0.1 --port 8000 --reload', true);
+                       }
 			terminal.show();
 			vscode.window.showInformationMessage('OwlSpotlight server started in a new terminal.');
 		} catch (err) {
@@ -744,9 +751,11 @@ export function activate(context: vscode.ExtensionContext) {
 		const autoRemoveVenv = envSettings.autoRemoveVenv || false;
 		const pythonVersion = envSettings.pythonVersion || '3.11';
 		
-		const serverDir = path.join(context.extensionPath, 'model_server');
-		const venvDir = path.join(serverDir, '.venv');
-		const fs = require('fs');
+               const serverDir = path.join(context.extensionPath, 'model_server');
+               const venvDir = envSettings.venvPath && envSettings.venvPath !== ''
+                       ? path.resolve(envSettings.venvPath)
+                       : path.join(serverDir, '.venv');
+               const fs = require('fs');
 		
 		// 自動削除設定がオンの場合、既存の仮想環境を削除
 		if (autoRemoveVenv && fs.existsSync(venvDir)) {
@@ -758,30 +767,32 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 		}
 		
-		const terminal = vscode.window.createTerminal({
-			name: 'OwlSpotlight Setup',
-			cwd: serverDir
-		});
-		terminal.show();
-		const platform = os.platform();
-		if (platform === 'win32') {
-			// Windows用: pyenvチェックはスキップ
-			terminal.sendText('python -m venv .venv', true);
-			terminal.sendText('.\\.venv\\Scripts\\activate', true);
-			terminal.sendText('python -m pip install --upgrade pip', true);
-			terminal.sendText('pip install -r requirements.txt', true);
-			vscode.window.showInformationMessage('OwlSpotlight Python environment setup command executed for Windows. Please start the server after setup completes.');
-		} else {
-			// macOS/Linux用: pyenvチェックあり
-			terminal.sendText('if ! command -v pyenv >/dev/null 2>&1; then echo "[OwlSpotlight] pyenv is not installed. Please install pyenv first. For example: brew install pyenv"; exit 1; fi', true);
-			terminal.sendText(`if ! pyenv versions --bare | grep -q "^${pythonVersion}"; then echo "[OwlSpotlight] Python ${pythonVersion} is not installed in pyenv. Please run: pyenv install ${pythonVersion}"; exit 1; fi`, true);
-			terminal.sendText(`pyenv local ${pythonVersion}`, true);
-			terminal.sendText(`python${pythonVersion} -m venv .venv`, true);
-			terminal.sendText('source .venv/bin/activate', true);
-			terminal.sendText('pip install --upgrade pip', true);
-			terminal.sendText('pip install -r requirements.txt', true);
-			vscode.window.showInformationMessage(`OwlSpotlight Python ${pythonVersion} environment setup command executed for macOS/Linux. Please ensure pyenv and Python ${pythonVersion} are installed. Start the server after setup completes.`);
-		}
+               const terminal = vscode.window.createTerminal({
+                       name: 'OwlSpotlight Setup',
+                       cwd: serverDir
+               });
+               terminal.show();
+               const platform = os.platform();
+               if (platform === 'win32') {
+                       // Windows用: pyenvチェックはスキップ
+                       terminal.sendText(`python -m venv "${venvDir}"`, true);
+                       const activatePath = path.join(venvDir, 'Scripts', 'activate');
+                       terminal.sendText(activatePath.replace(/\\/g, '\\\\'), true);
+                       terminal.sendText('python -m pip install --upgrade pip', true);
+                       terminal.sendText('pip install -r requirements.txt', true);
+                       vscode.window.showInformationMessage('OwlSpotlight Python environment setup command executed for Windows. Please start the server after setup completes.');
+               } else {
+                       // macOS/Linux用: pyenvチェックあり
+                       terminal.sendText('if ! command -v pyenv >/dev/null 2>&1; then echo "[OwlSpotlight] pyenv is not installed. Please install pyenv first. For example: brew install pyenv"; exit 1; fi', true);
+                       terminal.sendText(`if ! pyenv versions --bare | grep -q "^${pythonVersion}"; then echo "[OwlSpotlight] Python ${pythonVersion} is not installed in pyenv. Please run: pyenv install ${pythonVersion}"; exit 1; fi`, true);
+                       terminal.sendText(`pyenv local ${pythonVersion}`, true);
+                       terminal.sendText(`python${pythonVersion} -m venv "${venvDir}"`, true);
+                       const activatePath = path.join(venvDir, 'bin', 'activate');
+                       terminal.sendText(`source ${activatePath}`, true);
+                       terminal.sendText('pip install --upgrade pip', true);
+                       terminal.sendText('pip install -r requirements.txt', true);
+                       vscode.window.showInformationMessage(`OwlSpotlight Python ${pythonVersion} environment setup command executed for macOS/Linux. Please ensure pyenv and Python ${pythonVersion} are installed. Start the server after setup completes.`);
+               }
 	});
 	context.subscriptions.push(setupEnvDisposable);
 
@@ -862,9 +873,13 @@ export function activate(context: vscode.ExtensionContext) {
 
 	// --- 仮想環境削除コマンドを追加 ---
 	const removeVenvDisposable = vscode.commands.registerCommand('owlspotlight.removeVenv', async () => {
-		const serverDir = path.join(context.extensionPath, 'model_server');
-		const venvDir = path.join(serverDir, '.venv');
-		const fs = require('fs');
+               const serverDir = path.join(context.extensionPath, 'model_server');
+               const config = vscode.workspace.getConfiguration('owlspotlight');
+               const envSettings = config.get<any>('environmentSettings', {});
+               const venvDir = envSettings.venvPath && envSettings.venvPath !== ''
+                       ? path.resolve(envSettings.venvPath)
+                       : path.join(serverDir, '.venv');
+               const fs = require('fs');
 		
 		try {
 			if (fs.existsSync(venvDir)) {

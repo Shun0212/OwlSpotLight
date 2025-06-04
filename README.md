@@ -136,6 +136,8 @@ source .venv/bin/activate          # macOS/Linux
 pip install -r requirements.txt
 ```
 
+To keep the Python environment between extension updates, set `owlspotlight.environmentSettings.venvPath` in your VS Code settings. When specified, the setup and server commands will use this directory instead of the extension folder, preventing the virtual environment from being removed on update.
+
 **Performance Tips**:
 - Use SSD storage for faster indexing
 - Allocate more RAM for large projects

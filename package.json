@@ -122,6 +122,11 @@
               "default": false,
               "description": "Automatically remove existing virtual environment before setup. WARNING: This will delete all installed packages!"
             },
+            "venvPath": {
+              "type": "string",
+              "default": "",
+              "description": "Custom path for the Python virtual environment. Leave empty to use the extension folder"
+            },
             "pythonVersion": {
               "type": "string",
               "default": "3.11",
