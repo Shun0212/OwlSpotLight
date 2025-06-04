@@ -119,9 +119,10 @@ class GlobalIndexerState:
         self.faiss_index: Optional[faiss.IndexFlatL2] = None  # 追加: FAISSインデックス
         self.index_dir = None  # ディレクトリごとに動的に設定
 
-    def set_index_dir(self, directory: str):
+    def set_index_dir(self, directory: str, file_ext: str = ".py"):
         safe_dir = os.path.basename(os.path.abspath(directory))
-        self.index_dir = os.path.join(os.getcwd(), OWL_INDEX_DIR, safe_dir)
+        ext_dir = file_ext.lstrip(".")
+        self.index_dir = os.path.join(os.getcwd(), OWL_INDEX_DIR, safe_dir, ext_dir)
         # ディレクトリの作成は保存時のみ行う（startup時は作成しない）
 
     def is_up_to_date(self, tol: float = 1e-3, directory: Optional[str] = None) -> bool:
@@ -153,12 +154,15 @@ class GlobalIndexerState:
         self.directory = None
         self.last_indexed = 0.0
 
-    def force_rebuild_from_disk(self, directory: str):
+    def force_rebuild_from_disk(self, directory: str, file_ext: str = ".py"):
         """ディスクから強制的にインデックスを再構築"""
         self.clear_cache()
-        self.load(directory)
+        self.load(directory, file_ext)
 
     def save(self):
+        if not self.directory:
+            return
+        self.set_index_dir(self.directory, self.file_ext)
         if not self.index_dir:
             return
         os.makedirs(self.index_dir, exist_ok=True)
@@ -182,9 +186,9 @@ class GlobalIndexerState:
         with open(os.path.join(self.index_dir, "meta.json"), "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False)
 
-    def load(self, directory: str):
+    def load(self, directory: str, file_ext: str = ".py"):
         directory = os.path.abspath(directory)
-        self.set_index_dir(directory)
+        self.set_index_dir(directory, file_ext)
         
         # インデックスディレクトリが存在しない場合は何もしない（メモリキャッシュ優先）
         if not os.path.exists(self.index_dir):
@@ -278,8 +282,8 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
                 global_index_state.indexer)
     
     # 必要な時のみディスクからロード
-    global_index_state.load(directory)
-    global_index_state.set_index_dir(directory)
+    global_index_state.load(directory, file_ext)
+    global_index_state.set_index_dir(directory, file_ext)
     spec = load_gitignore_spec(directory)
     file_paths = []
     for root, dirs, files in os.walk(directory):
@@ -478,11 +482,16 @@ async def search_api(query: str, top_k: int = 5):
 
 # --- クラスタ分割・ClusterManager利用の雛形 ---
 # グローバルでクラスタマネージャを保持（本実装ではリクエストごとに再構築せずキャッシュ推奨）
+
 global_cluster_manager = None
 
 def get_or_create_cluster_manager(directory: str, file_ext: str = ".py"):
     global global_cluster_manager
-    if global_cluster_manager is None or global_cluster_manager.base_dir != directory:
+    if (
+        global_cluster_manager is None
+        or global_cluster_manager.base_dir != directory
+        or global_cluster_manager.file_ext != file_ext
+    ):
         global_cluster_manager = ClusterManager(directory, file_ext)
     return global_cluster_manager
 
@@ -815,8 +824,9 @@ def get_clusters_for_directory(directory: str, file_ext: str = ".py"):
 
 # クラスタごとに .owl_index/cluster_xxx/ を作成
 
-def get_cluster_index_path(base_dir: str, cluster_name: str) -> str:
-    return os.path.join(base_dir, OWL_INDEX_DIR, f"cluster_{cluster_name}")
+def get_cluster_index_path(base_dir: str, cluster_name: str, file_ext: str = ".py") -> str:
+    ext_dir = file_ext.lstrip(".")
+    return os.path.join(base_dir, OWL_INDEX_DIR, f"cluster_{cluster_name}", ext_dir)
 
 # クラスタ一覧を管理
 class ClusterManager:
@@ -826,7 +836,7 @@ class ClusterManager:
         self.clusters = get_clusters_for_directory(base_dir, file_ext)
         self.cluster_indexes = {}
         for cname in self.clusters:
-            cpath = get_cluster_index_path(base_dir, cname)
+            cpath = get_cluster_index_path(base_dir, cname, file_ext)
             # ディレクトリは作成せず、必要時に作成
             self.cluster_indexes[cname] = ClusterIndex(cname, Path(cpath))
 

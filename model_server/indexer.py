@@ -10,6 +10,10 @@ class CodeIndexer:
         self.code2emb = {}   # コード文字列→埋め込みベクトル
 
     def add_functions(self, functions: list[dict]):
+        # 空のリストが渡された場合は何もしない
+        if not functions:
+            return
+            
         codes = [f["code"] for f in functions]
         new_codes = [c for c in codes if c not in self.code2emb]
         if new_codes:
