@@ -24,7 +24,7 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
 
 OWL_INDEX_DIR = ".owl_index"
 
-from extractor import extract_functions
+from extractors import extract_functions
 from indexer import CodeIndexer
 from cluster_index import ClusterIndex
 import hashlib
