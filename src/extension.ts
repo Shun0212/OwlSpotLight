@@ -5,6 +5,36 @@ import * as path from 'path';
 import * as os from 'os';
 import * as cp from 'child_process';
 
+// Translate Japanese query to English using external API
+async function translateJapaneseToEnglish(text: string): Promise<string> {
+    const config = vscode.workspace.getConfiguration('owlspotlight');
+    const tSettings = config.get<any>('translationSettings', {});
+    const enabled = tSettings.enableJapaneseTranslation || false;
+    if (!enabled) {
+        return text;
+    }
+    const hasJapanese = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9faf]/.test(text);
+    if (!hasJapanese) {
+        return text;
+    }
+    const url = tSettings.translationApiUrl || 'https://libretranslate.de/translate';
+    const apiKey = tSettings.translationApiKey || '';
+    try {
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ q: text, source: 'ja', target: 'en', api_key: apiKey })
+        });
+        const data: any = await res.json();
+        if (data && data.translatedText) {
+            return data.translatedText as string;
+        }
+    } catch (e) {
+        vscode.window.showWarningMessage('Translation failed: ' + e);
+    }
+    return text;
+}
+
 // インデントベースで関数の範囲を検出する関数
 async function getFunctionRangeByIndent(doc: vscode.TextDocument, startPos: vscode.Position): Promise<vscode.Range> {
 	const text = doc.getText();
@@ -272,7 +302,8 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					);
 					return;
 				}
-                                const query = msg.text;
+                                let query = msg.text;
+                                query = await translateJapaneseToEnglish(query);
                                 const fileExt = msg.lang || '.py';
 				const workspaceFolders = vscode.workspace.workspaceFolders;
 				if (!workspaceFolders || workspaceFolders.length === 0) {
@@ -306,7 +337,8 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					return;
 				}
                                 const folderPath = workspaceFolders[0].uri.fsPath;
-                                const query = msg.query || ''; // クエリパラメータを受け取る
+                                let query = msg.query || ''; // クエリパラメータを受け取る
+                                query = await translateJapaneseToEnglish(query);
                                 const fileExt = msg.lang || '.py';
 				webviewView.webview.postMessage({ type: 'status', message: 'Loading class statistics...' });
 				try {

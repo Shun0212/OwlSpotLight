@@ -133,6 +133,28 @@
               "description": "Python version to use for virtual environment (requires pyenv on macOS/Linux)"
             }
           }
+        },
+        "owlspotlight.translationSettings": {
+          "type": "object",
+          "title": "Translation Settings",
+          "description": "Configure automatic translation of Japanese queries",
+          "properties": {
+            "enableJapaneseTranslation": {
+              "type": "boolean",
+              "default": false,
+              "description": "Translate Japanese search queries to English before searching"
+            },
+            "translationApiUrl": {
+              "type": "string",
+              "default": "https://libretranslate.de/translate",
+              "description": "Endpoint URL for the translation API"
+            },
+            "translationApiKey": {
+              "type": "string",
+              "default": "",
+              "description": "API key for the translation service (if required)"
+            }
+          }
         }
       }
     }
