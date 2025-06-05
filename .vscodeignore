@@ -15,3 +15,4 @@ model_server/__pycache__
 model_server/.owl_index
 model_server/.env
 screenshot/
+model_server/extractors/__pycache__
