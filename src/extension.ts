@@ -327,8 +327,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                const tSet = config.get<any>('translationSettings', {});
                webviewView.webview.postMessage({
                        type: 'translationSettings',
-                       enable: tSet.enableJapaneseTranslation || false,
-                       apiKey: tSet.geminiApiKey || ''
+                       enable: tSet.enableJapaneseTranslation || false
                });
 
 		// Webviewからのメッセージ受信
@@ -344,13 +343,18 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                         if (msg.command === 'requestTranslationSettings') {
                                 const config = vscode.workspace.getConfiguration('owlspotlight');
                                 const tCfg = config.get<any>('translationSettings', {});
-                                webviewView.webview.postMessage({ type: 'translationSettings', enable: tCfg.enableJapaneseTranslation || false, apiKey: tCfg.geminiApiKey || '' });
+                                webviewView.webview.postMessage({ type: 'translationSettings', enable: tCfg.enableJapaneseTranslation || false });
                         }
                         if (msg.command === 'updateTranslationSettings') {
                                 const config = vscode.workspace.getConfiguration('owlspotlight');
-                                await config.update('translationSettings.enableJapaneseTranslation', !!msg.enable, vscode.ConfigurationTarget.Global);
-                                await config.update('translationSettings.geminiApiKey', msg.apiKey || '', vscode.ConfigurationTarget.Global);
-                                webviewView.webview.postMessage({ type: 'translationSettings', enable: !!msg.enable, apiKey: msg.apiKey || '' });
+                                if (typeof msg.enable === 'boolean') {
+                                        await config.update('translationSettings.enableJapaneseTranslation', !!msg.enable, vscode.ConfigurationTarget.Global);
+                                }
+                                if (typeof msg.apiKey === 'string') {
+                                        await config.update('translationSettings.geminiApiKey', msg.apiKey, vscode.ConfigurationTarget.Global);
+                                }
+                                const tCfg = config.get<any>('translationSettings', {});
+                                webviewView.webview.postMessage({ type: 'translationSettings', enable: tCfg.enableJapaneseTranslation || false });
                         }
                         if (msg.command === 'search') {
 				// サーバー起動チェック
@@ -657,8 +661,6 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
   </div>
   <div class="translation-settings">
     <label><input type="checkbox" id="translateToggle"> JP→EN</label>
-    <input id="geminiApiKeyInput" type="text" placeholder="Gemini API Key" />
-    <button id="saveTranslationBtn">Save</button>
   </div>
   <!-- ヘルプモーダル -->
   <div id="helpModal">

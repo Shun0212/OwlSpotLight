@@ -54,15 +54,12 @@ window.onload = function() {
           };
         }
 
-        // 翻訳設定の保存
+        // 翻訳設定のトグル
         const translateToggle = document.getElementById('translateToggle');
-        const geminiInput = document.getElementById('geminiApiKeyInput');
-        const saveTransBtn = document.getElementById('saveTranslationBtn');
-        if (saveTransBtn) {
-          saveTransBtn.onclick = () => {
-            const enable = translateToggle?.checked || false;
-            const apiKey = geminiInput?.value || '';
-            vscode.postMessage({ command: 'updateTranslationSettings', enable, apiKey });
+        if (translateToggle) {
+          translateToggle.onchange = () => {
+            const enable = translateToggle.checked;
+            vscode.postMessage({ command: 'updateTranslationSettings', enable });
           };
         }
 
@@ -261,9 +258,7 @@ window.onload = function() {
                 const msg = event.data;
                 if (msg.type === 'translationSettings') {
                         const tToggle = document.getElementById('translateToggle');
-                        const apiInput = document.getElementById('geminiApiKeyInput');
                         if (tToggle) { tToggle.checked = !!msg.enable; }
-                        if (apiInput && typeof msg.apiKey === 'string') { apiInput.value = msg.apiKey; }
                 }
                 if (msg.type === 'status') {
                         document.getElementById('status').textContent = msg.message;
