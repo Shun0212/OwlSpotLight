@@ -18,7 +18,7 @@ jobs:
       - run: npm run compile
       - run: npm run lint
       - run: sudo apt-get update && sudo apt-get install -y xvfb
-      - run: xvfb-run --auto-servernum --server-args='-screen 0 1024x768x24' npm test
+      - run: /usr/bin/xvfb-run --auto-servernum --server-args='-screen 0 1024x768x24' npx vscode-test
       - run: npx vsce package
       - uses: actions/upload-artifact@v3
         with:
