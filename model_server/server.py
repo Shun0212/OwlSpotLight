@@ -1,40 +1,34 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from sentence_transformers import SentenceTransformer
-import torch
-from threading import Lock
-import os
-from typing import List, Dict, Optional
+from pydantic_settings import BaseSettings
+from dotenv import load_dotenv
+
 from concurrent.futures import ThreadPoolExecutor
-import pathlib
-from tqdm import tqdm
+from functools import partial
+from pathlib import Path
+from threading import Lock
+from typing import List, Dict, Optional
+
+import json
+import os
+import shutil
+import sys
+import time
+import hashlib
+
 import faiss
 import numpy as np
 from pathspec import PathSpec
 from pathspec.patterns import GitWildMatchPattern
-import sys
-from functools import partial
-from pathlib import Path
-import json
-import hashlib
-from pydantic_settings import BaseSettings
-from dotenv import load_dotenv
-import shutil
+from tqdm import tqdm
 
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
+load_dotenv(Path(__file__).with_name('.env'))
 
 OWL_INDEX_DIR = ".owl_index"
 
 from extractors import extract_functions
 from indexer import CodeIndexer
 from cluster_index import ClusterIndex
-import hashlib
-import sys
-import os
-import time
-import torch
-import faiss
-import numpy as np
 
 # モデル管理を model.py から import
 from model import get_model, get_current_device, cleanup_memory, encode_code, DEFAULT_MODEL, get_device
@@ -288,7 +282,6 @@ def file_hash(path):
 
 # ディレクトリ内の全ファイルから関数抽出・インデックス作成（一時的なインデックス、状態保存なし）
 def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, update_state: bool = False):
-    import hashlib
     def func_id(func):
         # ファイルパス・関数名・lineno・end_linenoを組み合わせて一意なIDを生成
         key = f"{func.get('file','')}|{func.get('name','')}|{func.get('lineno','')}|{func.get('end_lineno','')}"
@@ -449,7 +442,7 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
         global_index_state.indexer = indexer
         global_index_state.directory = os.path.abspath(directory)
         global_index_state.file_ext = file_ext
-        global_index_state.last_indexed = float(__import__('time').time())
+        global_index_state.last_indexed = float(time.time())
         global_index_state.file_info = new_info
         global_index_state.model_name = model_name
         global_index_state.save()
