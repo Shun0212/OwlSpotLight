@@ -19,6 +19,7 @@ import json
 import hashlib
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
+import shutil
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
 
@@ -120,6 +121,7 @@ class GlobalIndexerState:
         self.embeddings: Optional[np.ndarray] = None  # 追加: 関数埋め込み
         self.faiss_index: Optional[faiss.IndexFlatL2] = None  # 追加: FAISSインデックス
         self.index_dir = None  # ディレクトリごとに動的に設定
+        self.model_name: Optional[str] = None  # 追加: インデックス構築に使用したモデル名
 
     def set_index_dir(self, directory: str, file_ext: str = ".py"):
         safe_dir = os.path.basename(os.path.abspath(directory))
@@ -133,6 +135,9 @@ class GlobalIndexerState:
             if os.path.abspath(directory) != os.path.abspath(self.directory or ""):
                 print(f"[is_up_to_date] directory mismatch: {directory} != {self.directory}")
                 return False
+        if self.model_name and self.model_name != model_name:
+            print(f"[is_up_to_date] model mismatch: {self.model_name} != {model_name}")
+            return False
         if not self.directory:
             print("[is_up_to_date] self.directory is None")
             return False
@@ -147,7 +152,7 @@ class GlobalIndexerState:
                 return False
         return True
 
-    def clear_cache(self):
+    def clear_cache(self, clear_disk: bool = False):
         """メモリキャッシュをクリアして強制的に再構築を促す"""
         self.indexer = None
         self.embeddings = None
@@ -155,6 +160,9 @@ class GlobalIndexerState:
         self.file_info = {}
         self.directory = None
         self.last_indexed = 0.0
+        self.model_name = None
+        if clear_disk and self.index_dir and os.path.exists(self.index_dir):
+            shutil.rmtree(self.index_dir, ignore_errors=True)
 
     def force_rebuild_from_disk(self, directory: str, file_ext: str = ".py"):
         """ディスクから強制的にインデックスを再構築"""
@@ -183,7 +191,8 @@ class GlobalIndexerState:
             "file_info": self.file_info,
             "directory": os.path.abspath(self.directory) if self.directory else None,
             "last_indexed": self.last_indexed,
-            "file_ext": self.file_ext
+            "file_ext": self.file_ext,
+            "model_name": self.model_name or model_name,
         }
         with open(os.path.join(self.index_dir, "meta.json"), "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False)
@@ -225,11 +234,13 @@ class GlobalIndexerState:
             self.directory = os.path.abspath(meta.get("directory", directory))
             self.last_indexed = meta.get("last_indexed", 0.0)
             self.file_ext = meta.get("file_ext", ".py")
+            self.model_name = meta.get("model_name")
         except Exception:
             self.file_info = {}
             self.directory = None
             self.last_indexed = 0.0
             self.file_ext = ".py"
+            self.model_name = None
 
 global_index_state = GlobalIndexerState()
 # サーバー起動時は自動ロードを行わない（メモリキャッシュ優先、必要時のみディスクアクセス）
@@ -286,6 +297,19 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
     # 必要な時のみディスクからロード
     global_index_state.load(directory, file_ext)
     global_index_state.set_index_dir(directory, file_ext)
+    if global_index_state.model_name and global_index_state.model_name != model_name:
+        print("[build_index] cached model mismatch – rebuilding")
+        global_index_state.clear_cache(clear_disk=True)
+        prev_info = {}
+        prev_indexer = None
+        prev_funcs_by_file = {}
+    else:
+        prev_info = dict(global_index_state.file_info) if update_state else {}
+        prev_indexer = global_index_state.indexer if update_state else None
+        prev_funcs_by_file = {}
+        if prev_indexer:
+            for func in prev_indexer.functions:
+                prev_funcs_by_file.setdefault(func.get("file"), []).append(func)
     spec = load_gitignore_spec(directory)
     file_paths = []
     for root, dirs, files in os.walk(directory):
@@ -297,14 +321,6 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
             if is_ignored(fpath, spec, directory):
                 continue
             file_paths.append(fpath)
-
-    # 差分インデックス用: 既存情報
-    prev_info = dict(global_index_state.file_info) if update_state else {}
-    prev_indexer = global_index_state.indexer if update_state else None
-    prev_funcs_by_file = {}
-    if prev_indexer:
-        for func in prev_indexer.functions:
-            prev_funcs_by_file.setdefault(func.get("file"), []).append(func)
 
     # 追加・変更・削除ファイルを判定（mtimeとhash両方で判定）
     new_info = {f: {"mtime": os.path.getmtime(f), "hash": file_hash(f)} for f in file_paths}
@@ -411,6 +427,7 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
         global_index_state.file_ext = file_ext
         global_index_state.last_indexed = float(__import__('time').time())
         global_index_state.file_info = new_info
+        global_index_state.model_name = model_name
         global_index_state.save()
     else:
         indexer = CodeIndexer()
