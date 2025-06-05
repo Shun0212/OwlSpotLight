@@ -2,7 +2,14 @@ import { defineConfig } from '@vscode/test-cli';
 
 export default defineConfig({
 	files: 'out/test/**/*.test.js',
-	useInstallation: {
-		fromMachine: true
+	version: 'stable',
+	launchArgs: [
+		'--headless',
+		'--disable-gpu',
+		'--disable-dev-shm-usage',
+		'--no-sandbox'
+	],
+	env: {
+		DISPLAY: ':99'
 	}
 });
