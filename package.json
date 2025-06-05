@@ -144,15 +144,10 @@
               "default": false,
               "description": "Translate Japanese search queries to English before searching"
             },
-            "translationApiUrl": {
-              "type": "string",
-              "default": "https://libretranslate.de/translate",
-              "description": "Endpoint URL for the translation API"
-            },
-            "translationApiKey": {
+            "geminiApiKey": {
               "type": "string",
               "default": "",
-              "description": "API key for the translation service (if required)"
+              "description": "Google Gemini API key for translation"
             }
           }
         }
@@ -177,18 +172,21 @@
     "test": "vscode-test"
   },
   "devDependencies": {
-    "@types/vscode": "^1.100.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "20.x",
+    "@types/vscode": "^1.100.0",
     "@typescript-eslint/eslint-plugin": "^8.31.1",
     "@typescript-eslint/parser": "^8.31.1",
-    "eslint": "^9.25.1",
-    "typescript": "^5.8.3",
     "@vscode/test-cli": "^0.0.10",
-    "@vscode/test-electron": "^2.5.2"
+    "@vscode/test-electron": "^2.5.2",
+    "eslint": "^9.25.1",
+    "typescript": "^5.8.3"
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/Shun0212/owlspotlight.git"
+  },
+  "dependencies": {
+    "@google/genai": "^1.4.0"
   }
 }

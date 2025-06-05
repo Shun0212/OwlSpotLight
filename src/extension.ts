@@ -5,20 +5,68 @@ import * as path from 'path';
 import * as os from 'os';
 import * as cp from 'child_process';
 
-// Translate Japanese query to English using external API
+// Translate Japanese query to English using Gemini API or LibreTranslate
 async function translateJapaneseToEnglish(text: string): Promise<string> {
     const config = vscode.workspace.getConfiguration('owlspotlight');
     const tSettings = config.get<any>('translationSettings', {});
     const enabled = tSettings.enableJapaneseTranslation || false;
+    
     if (!enabled) {
         return text;
     }
+    
     const hasJapanese = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9faf]/.test(text);
     if (!hasJapanese) {
         return text;
     }
+    
+    const provider = tSettings.translationProvider || 'libretranslate';
+    
+    if (provider === 'gemini') {
+        return await translateWithGemini(text, tSettings);
+    } else {
+        return await translateWithLibreTranslate(text, tSettings);
+    }
+}
+
+// Gemini APIを使用した翻訳
+async function translateWithGemini(text: string, tSettings: any): Promise<string> {
+    try {
+        const geminiApiKey = tSettings.geminiApiKey || tSettings.translationApiKey || '';
+        
+        if (!geminiApiKey) {
+            vscode.window.showWarningMessage('Gemini API key is not configured. Please set it in settings.');
+            return text;
+        }
+        
+        // Dynamic import of the new Gemini API
+        const { GoogleGenAI } = await import('@google/genai');
+        const ai = new GoogleGenAI({ apiKey: geminiApiKey });
+        
+        const prompt = `Translate the following Japanese text to English. Only return the translated text, nothing else:
+
+${text}`;
+        
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.0-flash-exp',
+            contents: prompt,
+        });
+        
+        const translatedText = response.text?.trim() || text;
+        return translatedText;
+        
+    } catch (e: any) {
+        console.error('Gemini translation error:', e);
+        vscode.window.showWarningMessage('Gemini translation failed: ' + e.message);
+        return text;
+    }
+}
+
+// LibreTranslateを使用した翻訳（既存の機能）
+async function translateWithLibreTranslate(text: string, tSettings: any): Promise<string> {
     const url = tSettings.translationApiUrl || 'https://libretranslate.de/translate';
     const apiKey = tSettings.translationApiKey || '';
+    
     try {
         const res = await fetch(url, {
             method: 'POST',
@@ -30,7 +78,7 @@ async function translateJapaneseToEnglish(text: string): Promise<string> {
             return data.translatedText as string;
         }
     } catch (e) {
-        vscode.window.showWarningMessage('Translation failed: ' + e);
+        vscode.window.showWarningMessage('LibreTranslate translation failed: ' + e);
     }
     return text;
 }
@@ -303,7 +351,10 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					return;
 				}
                                 let query = msg.text;
+                                const originalQuery = query;
                                 query = await translateJapaneseToEnglish(query);
+                                // Always send both original and translated query to Webview for debugging
+                                webviewView.webview.postMessage({ type: 'translatedQuery', original: originalQuery, translated: query });
                                 const fileExt = msg.lang || '.py';
 				const workspaceFolders = vscode.workspace.workspaceFolders;
 				if (!workspaceFolders || workspaceFolders.length === 0) {
@@ -336,10 +387,12 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					webviewView.webview.postMessage({ type: 'error', message: 'No workspace folder found' });
 					return;
 				}
-                                const folderPath = workspaceFolders[0].uri.fsPath;
-                                let query = msg.query || ''; // クエリパラメータを受け取る
-                                query = await translateJapaneseToEnglish(query);
-                                const fileExt = msg.lang || '.py';
+                const folderPath = workspaceFolders[0].uri.fsPath;
+                let query = msg.query || '';
+                const originalQuery = query;
+                query = await translateJapaneseToEnglish(query);
+                webviewView.webview.postMessage({ type: 'translatedQuery', original: originalQuery, translated: query });
+                const fileExt = msg.lang || '.py';
 				webviewView.webview.postMessage({ type: 'status', message: 'Loading class statistics...' });
 				try {
 					const res = await fetch('http://localhost:8000/get_class_stats', {

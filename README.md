@@ -249,17 +249,23 @@ OwlSpotlightは、VS CodeでPythonコードを自然言語で検索できる拡�
 
 ### 高度な設定
 
-Windowsユーザーや手動セットアップの場合：
+#### 翻訳設定（日本語検索対応）
 
-```bash
-brew install npm pyenv
-pyenv install 3.11
-cd model_server
-pyenv local 3.11
-python3 -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-```
+OwlSpotlightは日本語クエリを英語に自動翻訳して検索することができます。翻訳サービスは**Google Gemini API**のみ対応しています。
+
+##### Gemini APIを使用した翻訳（推奨）
+
+高精度な翻訳のためにGoogle Gemini APIを使用できます：
+
+1. [Google AI Studio](https://aistudio.google.com/app/apikey)で無料のAPIキーを取得
+2. VS Codeの設定を開く（`Cmd+,` または `Ctrl+,`）
+3. 以下の設定を行う：
+   - `owlspotlight.translationSettings.enableJapaneseTranslation`: `true`
+   - `owlspotlight.translationSettings.geminiApiKey`: あなたのGemini APIキー
+
+**使用例：**
+- 「メールアドレスを検証する関数」→ "function that validates email address"
+- 「データベース接続を管理するクラス」→ "class that manages database connection"
 
 ### 開発ロードマップ
 
