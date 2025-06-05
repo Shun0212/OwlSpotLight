@@ -173,13 +173,16 @@ class ClusterIndex:
 
     def rebuild_from_functions(self, funcs: List[Dict[str, Any]], embeddings: Optional[np.ndarray] = None):
         """関数リストから完全にインデックスを再構築"""
+        from tqdm import tqdm
+        
         with self.lock:
             self.meta = funcs
             self.file_map = {}
             self.last_update = {}
             
             # ファイルマップとmtimeを構築
-            for i, func in enumerate(funcs):
+            print(f"🔄 Building file map for {len(funcs)} functions in cluster '{self.name}'...")
+            for i, func in enumerate(tqdm(funcs, desc=f"Mapping functions ({self.name})", disable=len(funcs) < 10)):
                 file_path = func.get('file')
                 if file_path:
                     if file_path not in self.file_map:
@@ -190,6 +193,7 @@ class ClusterIndex:
             
             # FAISSインデックスを再構築
             if embeddings is not None and len(embeddings) > 0:
+                print(f"🔄 Building FAISS index for cluster '{self.name}' with {len(embeddings)} embeddings...")
                 self.index = faiss.IndexFlatL2(embeddings.shape[1])
                 self.index.add(embeddings)
             else:
