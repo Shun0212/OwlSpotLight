@@ -128,6 +128,18 @@
               "description": "Python version to use for virtual environment (requires pyenv on macOS/Linux)"
             }
           }
+        },
+        "owlspotlight.modelSettings": {
+          "type": "object",
+          "title": "Model Settings",
+          "description": "Configure embedding model",
+          "properties": {
+            "modelName": {
+              "type": "string",
+              "default": "Shuu12121/CodeSearch-ModernBERT-Owl-2.0-Plus",
+              "description": "Hugging Face model name used for embeddings"
+            }
+          }
         }
       }
     }

@@ -38,7 +38,9 @@ import numpy as np
 app = FastAPI()
 
 # モデルロード
-model = SentenceTransformer("Shuu12121/CodeSearch-ModernBERT-Owl-2.0-Plus")
+DEFAULT_MODEL = "Shuu12121/CodeSearch-ModernBERT-Owl-2.0-Plus"
+model_name = os.environ.get("OWL_MODEL_NAME", DEFAULT_MODEL)
+model = SentenceTransformer(model_name)
 model_device = None  # 現在のデバイスを記録
 
 # === 設定: バッチサイズなど ===

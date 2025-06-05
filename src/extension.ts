@@ -641,10 +641,11 @@ function setupDecorationListeners() {
 
 // 拡張機能設定の監視とPythonサーバーへの反映
 function updatePythonServerConfig() {
-	const config = vscode.workspace.getConfiguration('owlspotlight');
-	const batchSize = config.get<number>('batchSize', 32);
-	const cacheSettings = config.get<any>('cacheSettings', {});
-	const envSettings = config.get<any>('environmentSettings', {});
+        const config = vscode.workspace.getConfiguration('owlspotlight');
+        const batchSize = config.get<number>('batchSize', 32);
+        const cacheSettings = config.get<any>('cacheSettings', {});
+        const envSettings = config.get<any>('environmentSettings', {});
+        const modelSettings = config.get<any>('modelSettings', {});
 	
 	// .envファイルに書き込む
 	const fs = require('fs');
@@ -655,20 +656,22 @@ function updatePythonServerConfig() {
 	if (fs.existsSync(envPath)) {
 		envContent = fs.readFileSync(envPath, 'utf8');
 	}
-	const lines = envContent.split(/\r?\n/).filter((l: string) => 
-		!l.startsWith('OWL_BATCH_SIZE=') &&
-		!l.startsWith('OWLSETTINGS_BATCH_SIZE=') &&
-		!l.startsWith('OWLSETTINGS_AUTO_CLEAR_CACHE=') &&
-		!l.startsWith('OWLSETTINGS_AUTO_CLEAR_LOCAL_CACHE=') &&
-		!l.startsWith('OWLSETTINGS_CACHE_PATH=') &&
-		!l.startsWith('OWLSETTINGS_PYTHON_VERSION=')
-	);
+        const lines = envContent.split(/\r?\n/).filter((l: string) =>
+                !l.startsWith('OWL_BATCH_SIZE=') &&
+                !l.startsWith('OWLSETTINGS_BATCH_SIZE=') &&
+                !l.startsWith('OWLSETTINGS_AUTO_CLEAR_CACHE=') &&
+                !l.startsWith('OWLSETTINGS_AUTO_CLEAR_LOCAL_CACHE=') &&
+                !l.startsWith('OWLSETTINGS_CACHE_PATH=') &&
+                !l.startsWith('OWLSETTINGS_PYTHON_VERSION=') &&
+                !l.startsWith('OWL_MODEL_NAME=')
+        );
 	lines.push(`OWL_BATCH_SIZE=${batchSize}`);
 	lines.push(`OWLSETTINGS_AUTO_CLEAR_CACHE=${cacheSettings.autoClearCache || false}`);
 	lines.push(`OWLSETTINGS_AUTO_CLEAR_LOCAL_CACHE=${cacheSettings.autoClearLocalCache || false}`);
-	lines.push(`OWLSETTINGS_CACHE_PATH=${cacheSettings.cachePath || ''}`);
-	lines.push(`OWLSETTINGS_PYTHON_VERSION=${envSettings.pythonVersion || '3.11'}`);
-	fs.writeFileSync(envPath, lines.join('\n'));
+        lines.push(`OWLSETTINGS_CACHE_PATH=${cacheSettings.cachePath || ''}`);
+        lines.push(`OWLSETTINGS_PYTHON_VERSION=${envSettings.pythonVersion || '3.11'}`);
+        lines.push(`OWL_MODEL_NAME=${modelSettings.modelName || 'Shuu12121/CodeSearch-ModernBERT-Owl-2.0-Plus'}`);
+        fs.writeFileSync(envPath, lines.join('\n'));
 }
 
 export function activate(context: vscode.ExtensionContext) {
