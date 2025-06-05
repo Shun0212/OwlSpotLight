@@ -10,6 +10,8 @@ warnings.filterwarnings("ignore", message=".*torch.compile.*mps.*", category=Use
 
 DEFAULT_MODEL = "Shuu12121/CodeSearch-ModernBERT-Owl-2.0-Plus"
 model_name = os.environ.get("OWL_MODEL_NAME", DEFAULT_MODEL)
+# 環境変数で進捗表示を制御 ("0"/"false" で非表示)
+progress_env = os.environ.get("OWL_PROGRESS", "1").lower()
 
 # グローバル変数でモデルとデバイスを管理
 model = None
@@ -61,6 +63,8 @@ def load_model_with_device_fallback():
         model.to(device)
         model_device = device
         print(f"✅ Model loaded successfully on {device}")
+        emb_dim = model.get_sentence_embedding_dimension()
+        print(f"ℹ️ Embedding dimension: {emb_dim}")
         
     except Exception as e:
         print(f"⚠️ Failed to load model on {device}: {e}")
@@ -95,21 +99,23 @@ def encode_code(codes: list[str], batch_size: int = 8, max_retries: int = 3, sho
     """コードをエンコードし、メモリエラー時は自動的にバッチサイズを調整"""
     from tqdm import tqdm
     import sys
-    
+
     current_model = get_model()
-    
+
+    # 環境変数や件数に応じて進捗表示を制御
+    progress_enabled = (
+        show_progress
+        and progress_env not in ("0", "false")
+        and len(codes) >= 10
+    )
+
     for attempt in range(max_retries):
         try:
-            # Progress bar description
-            desc = f"Encoding {len(codes)} functions (batch={batch_size})"
-            if attempt > 0:
-                desc += f" [retry {attempt + 1}]"
-            
             return current_model.encode(
-                codes, 
-                batch_size=batch_size, 
+                codes,
+                batch_size=batch_size,
                 normalize_embeddings=True,
-                show_progress_bar=show_progress,
+                show_progress_bar=progress_enabled,
                 convert_to_numpy=True
             )
         
