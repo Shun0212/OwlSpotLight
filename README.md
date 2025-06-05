@@ -270,6 +270,15 @@ pip install -r requirements.txt
 - ファイル保存時の自動更新
 - クラス継承図の表示
 
+### 自動テストとデプロイ
+
+GitHub Actions を利用した CI ワークフローを追加しました。`main` ブランチへのプッシュや
+プルリクエスト時に `npm test` と `eslint` を実行して拡張機能をビルドします。
+
+タグ `v*.*.*` を作成すると、自動的に VS Code 拡張機能 (`vsix` ファイル) を生成し、
+`vsce publish` を使用してマーケットプレースへ公開できます。発行用のトークンは
+`VSCE_TOKEN` シークレットに設定してください。
+
 ### ライセンス
 
 MIT License - 詳細は[LICENSE](LICENSE)をご覧ください。
