@@ -647,16 +647,43 @@ function updatePythonServerConfig() {
     const envSettings = config.get<any>('environmentSettings', {});
     const modelName = config.get<string>('modelName', 'Shuu12121/CodeSearch-ModernBERT-Owl-2.0-Plus');
 
-    // .envファイルに書き込む
     const fs = require('fs');
     const path = require('path');
     const serverDir = path.join(__dirname, '..', 'model_server');
     const envPath = path.join(serverDir, '.env');
     let envContent = '';
+    let prevModelConfig: any = {};
     if (fs.existsSync(envPath)) {
         envContent = fs.readFileSync(envPath, 'utf8');
+        // 既存のモデル名を取得
+        const match = envContent.match(/^OWL_MODEL_NAME=(.*)$/m);
+        if (match) {
+            prevModelConfig.modelName = match[1].trim();
+        }
     }
-    const lines = envContent.split(/\r?\n/).filter((l: string) =>
+    // モデル名が変わった場合はキャッシュ削除
+    if (prevModelConfig.modelName && prevModelConfig.modelName !== modelName) {
+        try {
+            const owlIndexDir = path.join(serverDir, '.owl_index');
+            const cacheFiles = [
+                'index_cache.pkl',
+                'embeddings_cache.pkl',
+                'cluster_cache.pkl'
+            ];
+            if (fs.existsSync(owlIndexDir)) {
+                fs.rmSync(owlIndexDir, { recursive: true, force: true });
+            }
+            for (const file of cacheFiles) {
+                const filePath = path.join(serverDir, file);
+                if (fs.existsSync(filePath)) {
+                    fs.unlinkSync(filePath);
+                }
+            }
+        } catch (err) {
+            vscode.window.showWarningMessage('Failed to auto-clear cache for model change: ' + err);
+        }
+    }
+    const lines = envContent.split(/\r?\n/).filter((l) =>
         !l.startsWith('OWL_BATCH_SIZE=') &&
         !l.startsWith('OWLSETTINGS_BATCH_SIZE=') &&
         !l.startsWith('OWLSETTINGS_AUTO_CLEAR_CACHE=') &&

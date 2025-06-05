@@ -19,6 +19,7 @@ import json
 import hashlib
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
+import shutil
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
 
@@ -35,39 +36,37 @@ import torch
 import faiss
 import numpy as np
 
-app = FastAPI()
+# モデル管理を model.py から import
+from model import get_model, get_current_device, cleanup_memory, encode_code, DEFAULT_MODEL, get_device
 
-# モデルロード
-DEFAULT_MODEL = "Shuu12121/CodeSearch-ModernBERT-Owl-2.0-Plus"
+# グローバル変数
 model_name = os.environ.get("OWL_MODEL_NAME", DEFAULT_MODEL)
-model = SentenceTransformer(model_name)
-model_device = None  # 現在のデバイスを記録
+
+# 互換性のため、一時的なダミー関数
+def get_device_and_prepare():
+    """後方互換性のためのダミー関数 - get_model()が自動的にデバイス管理を行う"""
+    pass
+
+def encode_with_memory_management(codes: list[str], batch_size: int = None, max_retries: int = 3, show_progress: bool = True):
+    """後方互換性のためのラッパー関数"""
+    if batch_size is None:
+        batch_size = 8
+    return encode_code(codes, batch_size, max_retries, show_progress)
+
+# 互換性のため、model変数を追加
+model = get_model()
+model_device = get_current_device()
+
+app = FastAPI()
 
 # === 設定: バッチサイズなど ===
 class OwlSettings(BaseSettings):
-    batch_size: int = 32
+    batch_size: int = 8
     
     class Config:
         env_prefix = "OWL_"  # 環境変数はOWL_BATCH_SIZEで設定可能
 
 settings = OwlSettings()
-
-def get_device():
-    # Apple Silicon (M1/M2/M3) などで mps が使える場合は mps を優先
-    if torch.backends.mps.is_available() and torch.backends.mps.is_built():
-        return "mps"
-    elif torch.cuda.is_available():
-        return "cuda"
-    else:
-        return "cpu"
-
-def get_device_and_prepare():
-    global model_device
-    device = get_device()
-    if model_device != device:
-        model.to(device)
-        model_device = device
-    return device
 
 # ✅ リクエスト用の Pydantic モデル
 class EmbedRequest(BaseModel):
@@ -120,6 +119,15 @@ class GlobalIndexerState:
         self.embeddings: Optional[np.ndarray] = None  # 追加: 関数埋め込み
         self.faiss_index: Optional[faiss.IndexFlatL2] = None  # 追加: FAISSインデックス
         self.index_dir = None  # ディレクトリごとに動的に設定
+        self.model_name: Optional[str] = None  # 追加: インデックス構築に使用したモデル名
+        self.model_config: dict = {}  # 追加: モデル構成情報
+
+    def get_current_model_config(self) -> dict:
+        # Add new config keys here as needed for extensibility
+        return {
+            "model_name": model_name,
+            # e.g. add more: "embedding_dim": ..., "other_param": ...
+        }
 
     def set_index_dir(self, directory: str, file_ext: str = ".py"):
         safe_dir = os.path.basename(os.path.abspath(directory))
@@ -133,6 +141,11 @@ class GlobalIndexerState:
             if os.path.abspath(directory) != os.path.abspath(self.directory or ""):
                 print(f"[is_up_to_date] directory mismatch: {directory} != {self.directory}")
                 return False
+        # Compare full model_config for extensibility
+        current_model_config = self.get_current_model_config()
+        if self.model_config and self.model_config != current_model_config:
+            print(f"[is_up_to_date] model_config mismatch: {self.model_config} != {current_model_config}")
+            return False
         if not self.directory:
             print("[is_up_to_date] self.directory is None")
             return False
@@ -147,7 +160,7 @@ class GlobalIndexerState:
                 return False
         return True
 
-    def clear_cache(self):
+    def clear_cache(self, clear_disk: bool = False):
         """メモリキャッシュをクリアして強制的に再構築を促す"""
         self.indexer = None
         self.embeddings = None
@@ -155,6 +168,10 @@ class GlobalIndexerState:
         self.file_info = {}
         self.directory = None
         self.last_indexed = 0.0
+        self.model_name = None
+        self.model_config = {}
+        if clear_disk and self.index_dir and os.path.exists(self.index_dir):
+            shutil.rmtree(self.index_dir, ignore_errors=True)
 
     def force_rebuild_from_disk(self, directory: str, file_ext: str = ".py"):
         """ディスクから強制的にインデックスを再構築"""
@@ -183,7 +200,9 @@ class GlobalIndexerState:
             "file_info": self.file_info,
             "directory": os.path.abspath(self.directory) if self.directory else None,
             "last_indexed": self.last_indexed,
-            "file_ext": self.file_ext
+            "file_ext": self.file_ext,
+            "model_name": self.model_name or model_name,
+            "model_config": self.model_config or self.get_current_model_config(),
         }
         with open(os.path.join(self.index_dir, "meta.json"), "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False)
@@ -191,7 +210,6 @@ class GlobalIndexerState:
     def load(self, directory: str, file_ext: str = ".py"):
         directory = os.path.abspath(directory)
         self.set_index_dir(directory, file_ext)
-        
         # インデックスディレクトリが存在しない場合は何もしない（メモリキャッシュ優先）
         if not os.path.exists(self.index_dir):
             self.indexer = None
@@ -201,8 +219,9 @@ class GlobalIndexerState:
             self.directory = None
             self.last_indexed = 0.0
             self.file_ext = ".py"
+            self.model_name = None
+            self.model_config = {}
             return
-            
         try:
             with open(os.path.join(self.index_dir, "functions.json"), "r", encoding="utf-8") as f:
                 functions = json.load(f)
@@ -225,11 +244,15 @@ class GlobalIndexerState:
             self.directory = os.path.abspath(meta.get("directory", directory))
             self.last_indexed = meta.get("last_indexed", 0.0)
             self.file_ext = meta.get("file_ext", ".py")
+            self.model_name = meta.get("model_name")
+            self.model_config = meta.get("model_config", {"model_name": self.model_name})
         except Exception:
             self.file_info = {}
             self.directory = None
             self.last_indexed = 0.0
             self.file_ext = ".py"
+            self.model_name = None
+            self.model_config = {}
 
 global_index_state = GlobalIndexerState()
 # サーバー起動時は自動ロードを行わない（メモリキャッシュ優先、必要時のみディスクアクセス）
@@ -272,20 +295,47 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
         return hashlib.sha256(key.encode()).hexdigest()
 
     directory = os.path.abspath(directory)
-    
-    # メモリキャッシュが有効で、同じディレクトリで最新なら、ディスクアクセスをスキップ
-    if (global_index_state.indexer is not None and 
-        global_index_state.directory == directory and 
+    current_model_config = global_index_state.get_current_model_config()
+    # Always check model_config for cache validity
+    if (
+        global_index_state.indexer is not None and 
+        global_index_state.directory == directory and
         global_index_state.file_ext == file_ext and
-        global_index_state.is_up_to_date(directory=directory)):
-        print(f"[build_index] メモリキャッシュが最新、ディスクアクセスをスキップ (funcs={len(global_index_state.indexer.functions)}, files={len(global_index_state.file_info)})")
-        return (global_index_state.indexer.functions, 
-                len(global_index_state.file_info), 
-                global_index_state.indexer)
-    
+        global_index_state.is_up_to_date(directory=directory)
+    ):
+        # If model_config changed, force clear and rebuild
+        if global_index_state.model_config and global_index_state.model_config != current_model_config:
+            print("[build_index] model_config mismatch – rebuilding")
+            global_index_state.clear_cache(clear_disk=True)
+        else:
+            print(f"[build_index] メモリキャッシュが最新、ディスクアクセスをスキップ (funcs={len(global_index_state.indexer.functions)}, files={len(global_index_state.file_info)})")
+            return (global_index_state.indexer.functions, 
+                    len(global_index_state.file_info), 
+                    global_index_state.indexer)
+    # If we get here, we need to rebuild
+    # Always update model_config for extensibility
+    global_index_state.model_config = current_model_config
     # 必要な時のみディスクからロード
     global_index_state.load(directory, file_ext)
     global_index_state.set_index_dir(directory, file_ext)
+    if global_index_state.model_config and global_index_state.model_config != current_model_config:
+        print("[build_index] model_config mismatch after load – rebuilding")
+        global_index_state.clear_cache(clear_disk=True)
+        # After clearing, reload config
+        global_index_state.model_config = current_model_config
+    if global_index_state.model_name and global_index_state.model_name != model_name:
+        print("[build_index] cached model mismatch – rebuilding")
+        global_index_state.clear_cache(clear_disk=True)
+        prev_info = {}
+        prev_indexer = None
+        prev_funcs_by_file = {}
+    else:
+        prev_info = dict(global_index_state.file_info) if update_state else {}
+        prev_indexer = global_index_state.indexer if update_state else None
+        prev_funcs_by_file = {}
+        if prev_indexer:
+            for func in prev_indexer.functions:
+                prev_funcs_by_file.setdefault(func.get("file"), []).append(func)
     spec = load_gitignore_spec(directory)
     file_paths = []
     for root, dirs, files in os.walk(directory):
@@ -297,14 +347,6 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
             if is_ignored(fpath, spec, directory):
                 continue
             file_paths.append(fpath)
-
-    # 差分インデックス用: 既存情報
-    prev_info = dict(global_index_state.file_info) if update_state else {}
-    prev_indexer = global_index_state.indexer if update_state else None
-    prev_funcs_by_file = {}
-    if prev_indexer:
-        for func in prev_indexer.functions:
-            prev_funcs_by_file.setdefault(func.get("file"), []).append(func)
 
     # 追加・変更・削除ファイルを判定（mtimeとhash両方で判定）
     new_info = {f: {"mtime": os.path.getmtime(f), "hash": file_hash(f)} for f in file_paths}
@@ -373,10 +415,9 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
             kept_embeddings = prev_embeddings[keep_indices] if keep_indices else np.zeros((0, prev_embeddings.shape[1]), dtype=prev_embeddings.dtype)
             # 追加・変更分の埋め込み
             if added_modified_funcs:
-                get_device_and_prepare()
-                encode = partial(model.encode, show_progress_bar=True)
                 new_codes = [func["code"] for func in added_modified_funcs]
-                new_embeddings = encode(new_codes, batch_size=settings.batch_size, convert_to_numpy=True)
+                print(f"🔄 Generating embeddings for {len(new_codes)} new/modified functions...")
+                new_embeddings = encode_code(new_codes, settings.batch_size, show_progress=True)
                 embeddings = np.vstack([kept_embeddings, new_embeddings]) if kept_embeddings.shape[0] > 0 else new_embeddings
             else:
                 embeddings = kept_embeddings
@@ -393,9 +434,8 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
             # 初回 or キャッシュなし: 全件エンコード
             codes = [func["code"] for func in new_funcs]
             if codes:
-                get_device_and_prepare()
-                encode = partial(model.encode, show_progress_bar=True)
-                embeddings = encode(codes, batch_size=settings.batch_size, convert_to_numpy=True)
+                print(f"🔄 Generating embeddings for {len(codes)} functions...")
+                embeddings = encode_code(codes, settings.batch_size, show_progress=True)
                 faiss_index = faiss.IndexFlatL2(embeddings.shape[1])
                 faiss_index.add(embeddings)
                 global_index_state.embeddings = embeddings
@@ -411,6 +451,7 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
         global_index_state.file_ext = file_ext
         global_index_state.last_indexed = float(__import__('time').time())
         global_index_state.file_info = new_info
+        global_index_state.model_name = model_name
         global_index_state.save()
     else:
         indexer = CodeIndexer()
@@ -420,14 +461,12 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
 @app.post("/embed")
 async def embed(req: EmbedRequest):
     print("/embed called")
-    get_device_and_prepare()
-    embeddings = model.encode(req.texts, batch_size=settings.batch_size, convert_to_numpy=True).tolist()
-    return {"embeddings": embeddings}
+    embeddings = encode_with_memory_management(req.texts, settings.batch_size)
+    return {"embeddings": embeddings.tolist()}
 
 @app.post("/index_and_search")
 async def index_and_search(req: IndexAndSearchRequest):
     print("/index_and_search called")
-    get_device_and_prepare()
     global global_indexer
     with index_lock:
         if global_indexer is None:
@@ -475,7 +514,6 @@ async def index_status():
 @app.post("/search")
 async def search_api(query: str, top_k: int = 5):
     print(f"/search called with query: {query}")
-    get_device_and_prepare()
     with index_lock:
         if not global_index_state.indexer:
             return {"results": [], "error": "No index built."}
@@ -612,10 +650,11 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
             results, file_count, indexer = build_index(req.directory, req.file_ext, update_state=True)
             embeddings = global_index_state.embeddings
             faiss_index = global_index_state.faiss_index
+        
         if not results or embeddings is None or faiss_index is None:
             return {"results": [], "message": "No functions found."}
-        get_device_and_prepare()
-        query_emb = model.encode([req.query], batch_size=settings.batch_size, convert_to_numpy=True)
+        
+        query_emb = encode_code([req.query], batch_size=1)  # クエリは1つなのでバッチサイズ1
         D, I = faiss_index.search(query_emb, req.top_k)
         found = []
         for idx in I[0]:
@@ -882,9 +921,7 @@ class ClusterManager:
         if added_funcs:
             codes = [func["code"] for func in added_funcs]
             if codes:
-                get_device_and_prepare()
-                encode = partial(model.encode, show_progress_bar=True)
-                embeddings = encode(codes, batch_size=settings.batch_size, convert_to_numpy=True)
+                embeddings = encode_with_memory_management(codes, settings.batch_size)
         
         # クラスタインデックスを更新
         cluster.update_files(added_funcs, deleted_files, embeddings)
@@ -950,7 +987,8 @@ class ClusterManager:
 
     def rebuild_changed_clusters(self):
         # 変更があったディレクトリ（クラスタ）は問答無用で再構築
-        for cname, files in self.clusters.items():
+        print(f"🔄 Rebuilding changed clusters...")
+        for cname, files in tqdm(self.clusters.items(), desc="Rebuilding clusters"):
             cluster = self.cluster_indexes[cname]
             # 関数抽出
             funcs = []
@@ -962,9 +1000,8 @@ class ClusterManager:
             # 埋め込み生成
             codes = [func["code"] for func in funcs]
             if codes:
-                get_device_and_prepare()
-                encode = partial(model.encode, show_progress_bar=True)
-                embeddings = encode(codes, batch_size=settings.batch_size, convert_to_numpy=True)
+                print(f"🔄 Generating embeddings for cluster '{cname}' ({len(codes)} functions)...")
+                embeddings = encode_with_memory_management(codes, settings.batch_size, show_progress=True)
                 # FAISSインデックス再構築
                 faiss_index = faiss.IndexFlatL2(embeddings.shape[1])
                 faiss_index.add(embeddings)
@@ -979,7 +1016,8 @@ class ClusterManager:
 
     def rebuild_clusters_with_diff(self, changed_dirs: set, added_files: set):
         # 追加ファイルは差分追加、変更ディレクトリは問答無用で再構築
-        for cname, files in self.clusters.items():
+        print(f"🔄 Rebuilding clusters with differential updates...")
+        for cname, files in tqdm(self.clusters.items(), desc="Processing clusters"):
             cluster = self.cluster_indexes[cname]
             cluster_dir = os.path.join(self.base_dir, *(cname.split('_'))) if cname != 'root' else self.base_dir
             if cluster_dir in changed_dirs:
@@ -992,6 +1030,7 @@ class ClusterManager:
                         print(f"[ClusterManager] extract error: {f}: {e}")
                 codes = [func["code"] for func in funcs]
                 if codes:
+                    print(f"🔄 Full rebuild for cluster '{cname}' ({len(codes)} functions)...")
                     get_device_and_prepare()
                     encode = partial(model.encode, show_progress_bar=True)
                     embeddings = encode(codes, batch_size=settings.batch_size, convert_to_numpy=True)
@@ -1015,6 +1054,7 @@ class ClusterManager:
                         print(f"[ClusterManager] extract error: {f}: {e}")
                 if add_funcs:
                     codes = [func["code"] for func in add_funcs]
+                    print(f"🔄 Adding {len(codes)} new functions to cluster '{cname}'...")
                     get_device_and_prepare()
                     encode = partial(model.encode, show_progress_bar=True)
                     embeddings = encode(codes, batch_size=settings.batch_size, convert_to_numpy=True)

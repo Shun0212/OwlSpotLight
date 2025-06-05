@@ -139,6 +139,8 @@ pip install -r requirements.txt
 
 You can change the embedding model by modifying the `owlspotlight.modelSettings.modelName` setting in VS Code. By default it uses `Shuu12121/CodeSearch-ModernBERT-Owl-2.0-Plus`.
 
+Progress bars during embedding can be disabled by setting the environment variable `OWL_PROGRESS=0`.
+
 **Performance Tips**:
 - Use SSD storage for faster indexing
 - Allocate more RAM for large projects
