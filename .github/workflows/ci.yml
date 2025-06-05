@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run lint
+      - name: Setup display for VS Code
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+      - name: Run tests
+        run: xvfb-run -a npm test
+        env:
+          DISPLAY: ':99'
