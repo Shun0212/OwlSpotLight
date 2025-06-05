@@ -46,13 +46,27 @@ window.onload = function() {
 	    vscode.postMessage({ command: 'startServer' });
 	  };
 	}
-	if (document.getElementById('clearCacheBtn')) {
+        if (document.getElementById('clearCacheBtn')) {
           document.getElementById('clearCacheBtn').onclick = () => {
             console.log('clearCacheBtn clicked');
             const lang = document.getElementById('languageSelect')?.value || '.py';
             vscode.postMessage({ command: 'clearCache', lang });
           };
         }
+
+        // 翻訳設定の保存
+        const translateToggle = document.getElementById('translateToggle');
+        const geminiInput = document.getElementById('geminiApiKeyInput');
+        const saveTransBtn = document.getElementById('saveTranslationBtn');
+        if (saveTransBtn) {
+          saveTransBtn.onclick = () => {
+            const enable = translateToggle?.checked || false;
+            const apiKey = geminiInput?.value || '';
+            vscode.postMessage({ command: 'updateTranslationSettings', enable, apiKey });
+          };
+        }
+
+        vscode.postMessage({ command: 'requestTranslationSettings' });
 	
 	document.getElementById('searchBtn').onclick = () => {
                 const text = (document.getElementById('searchInput')).value;
@@ -243,11 +257,17 @@ window.onload = function() {
 	}
 
 	// メッセージハンドラー
-	window.addEventListener('message', event => {
-		const msg = event.data;
-		if (msg.type === 'status') {
-			document.getElementById('status').textContent = msg.message;
-		}
+        window.addEventListener('message', event => {
+                const msg = event.data;
+                if (msg.type === 'translationSettings') {
+                        const tToggle = document.getElementById('translateToggle');
+                        const apiInput = document.getElementById('geminiApiKeyInput');
+                        if (tToggle) { tToggle.checked = !!msg.enable; }
+                        if (apiInput && typeof msg.apiKey === 'string') { apiInput.value = msg.apiKey; }
+                }
+                if (msg.type === 'status') {
+                        document.getElementById('status').textContent = msg.message;
+                }
 		if (msg.type === 'error') {
 			document.getElementById('status').textContent = msg.message;
 			document.getElementById('results').innerHTML = '';
