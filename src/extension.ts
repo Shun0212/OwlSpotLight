@@ -8,8 +8,12 @@ import * as cp from 'child_process';
 // Translate Japanese query to English using Gemini API or LibreTranslate
 async function translateJapaneseToEnglish(text: string): Promise<string> {
     const config = vscode.workspace.getConfiguration('owlspotlight');
+    // フラットな設定取得に対応
+    const enabled = config.get<boolean>('enableJapaneseTranslation', false);
+    const geminiApiKey = config.get<string>('geminiApiKey', '');
+    // translationProviderや他の設定は従来通り取得
     const tSettings = config.get<any>('translationSettings', {});
-    const enabled = tSettings.enableJapaneseTranslation || false;
+    const provider = tSettings.translationProvider || 'libretranslate';
     
     if (!enabled) {
         return text;
@@ -20,10 +24,8 @@ async function translateJapaneseToEnglish(text: string): Promise<string> {
         return text;
     }
     
-    const provider = tSettings.translationProvider || 'libretranslate';
-    
     if (provider === 'gemini') {
-        return await translateWithGemini(text, tSettings);
+        return await translateWithGemini(text, { ...tSettings, geminiApiKey });
     } else {
         return await translateWithLibreTranslate(text, tSettings);
     }
@@ -48,7 +50,7 @@ async function translateWithGemini(text: string, tSettings: any): Promise<string
 ${text}`;
         
         const response = await ai.models.generateContent({
-            model: 'gemini-2.0-flash-exp',
+            model: ' gemini-2.0-flash',
             contents: prompt,
         });
         
@@ -324,10 +326,11 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                webviewView.webview.html = this.getHtmlForWebview(webviewView.webview, langs);
 
                const config = vscode.workspace.getConfiguration('owlspotlight');
-               const tSet = config.get<any>('translationSettings', {});
+               // フラットな設定取得に対応
+               const enable = config.get<boolean>('enableJapaneseTranslation', false);
                webviewView.webview.postMessage({
                        type: 'translationSettings',
-                       enable: tSet.enableJapaneseTranslation || false
+                       enable: enable
                });
 
 		// Webviewからのメッセージ受信
@@ -342,19 +345,19 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                         }
                         if (msg.command === 'requestTranslationSettings') {
                                 const config = vscode.workspace.getConfiguration('owlspotlight');
-                                const tCfg = config.get<any>('translationSettings', {});
-                                webviewView.webview.postMessage({ type: 'translationSettings', enable: tCfg.enableJapaneseTranslation || false });
+                                const enable = config.get<boolean>('enableJapaneseTranslation', false);
+                                webviewView.webview.postMessage({ type: 'translationSettings', enable });
                         }
                         if (msg.command === 'updateTranslationSettings') {
                                 const config = vscode.workspace.getConfiguration('owlspotlight');
                                 if (typeof msg.enable === 'boolean') {
-                                        await config.update('translationSettings.enableJapaneseTranslation', !!msg.enable, vscode.ConfigurationTarget.Global);
+                                        await config.update('enableJapaneseTranslation', !!msg.enable, vscode.ConfigurationTarget.Global);
                                 }
                                 if (typeof msg.apiKey === 'string') {
-                                        await config.update('translationSettings.geminiApiKey', msg.apiKey, vscode.ConfigurationTarget.Global);
+                                        await config.update('geminiApiKey', msg.apiKey, vscode.ConfigurationTarget.Global);
                                 }
-                                const tCfg = config.get<any>('translationSettings', {});
-                                webviewView.webview.postMessage({ type: 'translationSettings', enable: tCfg.enableJapaneseTranslation || false });
+                                const enable = config.get<boolean>('enableJapaneseTranslation', false);
+                                webviewView.webview.postMessage({ type: 'translationSettings', enable });
                         }
                         if (msg.command === 'search') {
 				// サーバー起動チェック
