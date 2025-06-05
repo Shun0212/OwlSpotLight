@@ -46,13 +46,24 @@ window.onload = function() {
 	    vscode.postMessage({ command: 'startServer' });
 	  };
 	}
-	if (document.getElementById('clearCacheBtn')) {
+        if (document.getElementById('clearCacheBtn')) {
           document.getElementById('clearCacheBtn').onclick = () => {
             console.log('clearCacheBtn clicked');
             const lang = document.getElementById('languageSelect')?.value || '.py';
             vscode.postMessage({ command: 'clearCache', lang });
           };
         }
+
+        // 翻訳設定のトグル
+        const translateToggle = document.getElementById('translateToggle');
+        if (translateToggle) {
+          translateToggle.onchange = () => {
+            const enable = translateToggle.checked;
+            vscode.postMessage({ command: 'updateTranslationSettings', enable });
+          };
+        }
+
+        vscode.postMessage({ command: 'requestTranslationSettings' });
 	
 	document.getElementById('searchBtn').onclick = () => {
                 const text = (document.getElementById('searchInput')).value;
@@ -243,11 +254,15 @@ window.onload = function() {
 	}
 
 	// メッセージハンドラー
-	window.addEventListener('message', event => {
-		const msg = event.data;
-		if (msg.type === 'status') {
-			document.getElementById('status').textContent = msg.message;
-		}
+        window.addEventListener('message', event => {
+                const msg = event.data;
+                if (msg.type === 'translationSettings') {
+                        const tToggle = document.getElementById('translateToggle');
+                        if (tToggle) { tToggle.checked = !!msg.enable; }
+                }
+                if (msg.type === 'status') {
+                        document.getElementById('status').textContent = msg.message;
+                }
 		if (msg.type === 'error') {
 			document.getElementById('status').textContent = msg.message;
 			document.getElementById('results').innerHTML = '';

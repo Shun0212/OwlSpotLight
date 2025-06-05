@@ -134,22 +134,15 @@
             }
           }
         },
-        "owlspotlight.translationSettings": {
-          "type": "object",
-          "title": "Translation Settings",
-          "description": "Configure automatic translation of Japanese queries",
-          "properties": {
-            "enableJapaneseTranslation": {
-              "type": "boolean",
-              "default": false,
-              "description": "Translate Japanese search queries to English before searching"
-            },
-            "geminiApiKey": {
-              "type": "string",
-              "default": "",
-              "description": "Google Gemini API key for translation"
-            }
-          }
+        "owlspotlight.enableJapaneseTranslation": {
+          "type": "boolean",
+          "default": false,
+          "description": "Translate Japanese search queries to English before searching"
+        },
+        "owlspotlight.geminiApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Google Gemini API key for translation"
         }
       }
     }
