@@ -41,6 +41,7 @@ OwlSpotlight transforms code navigation by bringing **semantic understanding** t
 - Simple, intuitive sidebar interface
 - Apple Silicon optimized
 - Built-in cache clearing and environment management
+- Customizable SentenceTransformer model via settings
 
 ### See It In Action
 
@@ -135,6 +136,8 @@ source .venv/bin/activate          # macOS/Linux
 
 pip install -r requirements.txt
 ```
+
+You can change the embedding model by modifying the `owlspotlight.modelSettings.modelName` setting in VS Code. By default it uses `Shuu12121/CodeSearch-ModernBERT-Owl-2.0-Plus`.
 
 **Performance Tips**:
 - Use SSD storage for faster indexing

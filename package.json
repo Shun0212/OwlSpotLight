@@ -79,6 +79,11 @@
       "type": "object",
       "title": "OwlSpotlight Settings",
       "properties": {
+        "owlspotlight.modelName": {
+          "type": "string",
+          "default": "Shuu12121/CodeSearch-ModernBERT-Owl-2.0-Plus",
+          "description": "Hugging Face model name used for embeddings"
+        },
         "owlspotlight.batchSize": {
           "type": "number",
           "default": 32,
