@@ -40,17 +40,23 @@ async function translateWithGemini(text: string, tSettings: any): Promise<string
         const { GoogleGenAI } = await import('@google/genai');
         const ai = new GoogleGenAI({ apiKey: geminiApiKey });
         
-        const prompt = `Translate the following Japanese text to English. Only return the translated text, nothing else:
-
-${text}`;
+        const prompt = `Translate the following Japanese text to English. Only return the translated text, nothing else:\n\n${text}`;
         
         const response = await ai.models.generateContent({
-            model: ' gemini-2.0-flash',
+            model: 'gemini-2.0-flash',
             contents: prompt,
         });
         
-        const translatedText = response.text?.trim() || text;
-        return translatedText;
+        // Geminiのレスポンス仕様に合わせてテキスト抽出
+        let translatedText = '';
+        if (response && typeof response.text === 'string') {
+            translatedText = response.text.trim();
+        } else if (response && response.candidates && response.candidates[0]?.content?.parts) {
+            translatedText = response.candidates[0].content.parts.map((p: any) => p.text).join('').trim();
+        } else {
+            translatedText = text;
+        }
+        return translatedText || text;
         
     } catch (e: any) {
         console.error('Gemini translation error:', e);
