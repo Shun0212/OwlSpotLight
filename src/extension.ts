@@ -5,15 +5,14 @@ import * as path from 'path';
 import * as os from 'os';
 import * as cp from 'child_process';
 
-// Translate Japanese query to English using Gemini API or LibreTranslate
+// Translate Japanese query to English using Gemini API
 async function translateJapaneseToEnglish(text: string): Promise<string> {
     const config = vscode.workspace.getConfiguration('owlspotlight');
     // フラットな設定取得に対応
     const enabled = config.get<boolean>('enableJapaneseTranslation', false);
     const geminiApiKey = config.get<string>('geminiApiKey', '');
-    // translationProviderや他の設定は従来通り取得
+    // 追加設定を取得 (将来の拡張用)
     const tSettings = config.get<any>('translationSettings', {});
-    const provider = tSettings.translationProvider || 'libretranslate';
     
     if (!enabled) {
         return text;
@@ -24,11 +23,7 @@ async function translateJapaneseToEnglish(text: string): Promise<string> {
         return text;
     }
     
-    if (provider === 'gemini') {
-        return await translateWithGemini(text, { ...tSettings, geminiApiKey });
-    } else {
-        return await translateWithLibreTranslate(text, tSettings);
-    }
+    return await translateWithGemini(text, { ...tSettings, geminiApiKey });
 }
 
 // Gemini APIを使用した翻訳
@@ -45,17 +40,23 @@ async function translateWithGemini(text: string, tSettings: any): Promise<string
         const { GoogleGenAI } = await import('@google/genai');
         const ai = new GoogleGenAI({ apiKey: geminiApiKey });
         
-        const prompt = `Translate the following Japanese text to English. Only return the translated text, nothing else:
-
-${text}`;
+        const prompt = `Translate the following Japanese text to English. Only return the translated text, nothing else:\n\n${text}`;
         
         const response = await ai.models.generateContent({
-            model: ' gemini-2.0-flash',
+            model: 'gemini-2.0-flash',
             contents: prompt,
         });
         
-        const translatedText = response.text?.trim() || text;
-        return translatedText;
+        // Geminiのレスポンス仕様に合わせてテキスト抽出
+        let translatedText = '';
+        if (response && typeof response.text === 'string') {
+            translatedText = response.text.trim();
+        } else if (response && response.candidates && response.candidates[0]?.content?.parts) {
+            translatedText = response.candidates[0].content.parts.map((p: any) => p.text).join('').trim();
+        } else {
+            translatedText = text;
+        }
+        return translatedText || text;
         
     } catch (e: any) {
         console.error('Gemini translation error:', e);
@@ -64,26 +65,6 @@ ${text}`;
     }
 }
 
-// LibreTranslateを使用した翻訳（既存の機能）
-async function translateWithLibreTranslate(text: string, tSettings: any): Promise<string> {
-    const url = tSettings.translationApiUrl || 'https://libretranslate.de/translate';
-    const apiKey = tSettings.translationApiKey || '';
-    
-    try {
-        const res = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ q: text, source: 'ja', target: 'en', api_key: apiKey })
-        });
-        const data: any = await res.json();
-        if (data && data.translatedText) {
-            return data.translatedText as string;
-        }
-    } catch (e) {
-        vscode.window.showWarningMessage('LibreTranslate translation failed: ' + e);
-    }
-    return text;
-}
 
 // インデントベースで関数の範囲を検出する関数
 async function getFunctionRangeByIndent(doc: vscode.TextDocument, startPos: vscode.Position): Promise<vscode.Range> {
