@@ -924,7 +924,16 @@ export function activate(context: vscode.ExtensionContext) {
 			terminal.sendText('.\\.venv\\Scripts\\activate', true);
 			terminal.sendText('python -m pip install --upgrade pip', true);
 			terminal.sendText('pip install -r requirements.txt', true);
-			terminal.sendText('echo "To enable GPU support, install PyTorch with CUDA: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128"', true);
+			const confirm = await vscode.window.showWarningMessage(
+				'Install PyTorch (CUDA version)? This requires about 3.6GB. Proceed?',
+				{ modal: true },
+				'YES',
+				'NO'
+			);
+			if (confirm === 'YES') {
+				
+				terminal.sendText('pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128', true);
+			}
 			vscode.window.showInformationMessage('OwlSpotlight Python environment setup command executed for Windows. Please start the server after setup completes.');
 		} else {
 			// macOS/Linux用: pyenvチェックあり
