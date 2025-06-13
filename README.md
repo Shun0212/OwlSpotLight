@@ -117,23 +117,29 @@ OwlSpotlight transforms code navigation by bringing **semantic understanding** t
 
 ### 🛠️ Advanced Configuration
 
-For Windows users or manual setup:
+#### macOS/Linux
 
 ```bash
-# Install dependencies (macOS with Homebrew)
+# Install dependencies (requires Homebrew)
 brew install npm pyenv
 pyenv install 3.11
 
-# Setup Python environment
 cd model_server
 pyenv local 3.11
 python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
 
-# Activate virtual environment
-source .venv/bin/activate          # macOS/Linux
-# .venv\Scripts\activate           # Windows CMD
-# .venv\Scripts\Activate.ps1       # Windows PowerShell
+#### Windows
 
+```powershell
+# Install Python 3.11 from https://www.python.org/downloads/
+# (optional) pyenv-win can be used to manage multiple versions
+
+cd model_server
+py -3.11 -m venv .venv    # or 'python -m venv .venv' if Python 3.11 is default
+\.venv\Scripts\Activate.ps1   # For CMD use .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
