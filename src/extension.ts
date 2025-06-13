@@ -893,6 +893,17 @@ export function activate(context: vscode.ExtensionContext) {
 		const venvDir = path.join(serverDir, '.venv');
 		const fs = require('fs');
 		
+		// Windows: Python 3.11が存在しなければインストール案内＆中断
+		const platform = os.platform();
+		if (platform === 'win32') {
+			try {
+				cp.execSync('py -3.11 --version', { stdio: 'ignore' });
+			} catch (e) {
+				vscode.window.showErrorMessage('Python 3.11が見つかりません。公式サイト(https://www.python.org/downloads/release/python-3110/)からインストールしてください。インストール後、VSCodeを再起動して再度セットアップしてください。');
+				return;
+			}
+		}
+
 		// 自動削除設定がオンの場合、既存の仮想環境を削除
 		if (autoRemoveVenv && fs.existsSync(venvDir)) {
 			try {
@@ -908,13 +919,12 @@ export function activate(context: vscode.ExtensionContext) {
 			cwd: serverDir
 		});
 		terminal.show();
-		const platform = os.platform();
 		if (platform === 'win32') {
-			// Windows用: pyenvチェックはスキップ
-			terminal.sendText('python -m venv .venv', true);
+			terminal.sendText(`py -3.11 -m venv .venv`, true);
 			terminal.sendText('.\\.venv\\Scripts\\activate', true);
 			terminal.sendText('python -m pip install --upgrade pip', true);
 			terminal.sendText('pip install -r requirements.txt', true);
+			terminal.sendText('echo "To enable GPU support, install PyTorch with CUDA: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128"', true);
 			vscode.window.showInformationMessage('OwlSpotlight Python environment setup command executed for Windows. Please start the server after setup completes.');
 		} else {
 			// macOS/Linux用: pyenvチェックあり
