@@ -3,7 +3,7 @@
 <div align="center">
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.1.3-blue.svg)](https://github.com/shun0212/OwlSpotLight)
+[![Version](https://img.shields.io/badge/version-0.1.4-blue.svg)](https://github.com/shun0212/OwlSpotLight)
 [![Python](https://img.shields.io/badge/python-3.9+-green.svg)](https://www.python.org/)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.100+-blue.svg)](https://code.visualstudio.com/)
 
@@ -40,6 +40,7 @@ OwlSpotlight transforms code navigation by bringing **semantic understanding** t
 - Only changed files are re-indexed
 - Simple, intuitive sidebar interface
 - Apple Silicon optimized
+- CUDA/GPU acceleration supported
 - Built-in cache clearing and environment management
 - Customizable SentenceTransformer model via settings
 
@@ -169,7 +170,6 @@ Progress bars during embedding can be disabled by setting the environment variab
 
 #### 🔄 Coming Soon
 - [ ] **Multi-language support** (JavaScript, TypeScript, Java, C++)
-- [ ] **CUDA/GPU acceleration** with flash-attention
 - [ ] **VS Code Marketplace** release
 - [ ] **Real-time file watching** (auto-update on save)
 - [ ] **Class inheritance diagrams**
@@ -206,6 +206,7 @@ OwlSpotlightは、VS CodeでPythonコードを自然言語で検索できる拡�
 - 変更ファイルのみ再インデックス
 - シンプルで使いやすいUI
 - Apple Silicon対応
+- CUDA/GPU　対応
 - サイドバーから環境管理やキャッシュクリアが可能
 
 ### クイックスタート
@@ -239,7 +240,7 @@ OwlSpotlightは、VS CodeでPythonコードを自然言語で検索できる拡�
 3. Python環境をセットアップ：
    ```bash
    cd model_server
-   python3 -m venv .venv
+   python3.11 -m venv .venv
    source .venv/bin/activate  # Windows: .venv\Scripts\activate
    pip install -r requirements.txt
    ```
@@ -268,6 +269,9 @@ OwlSpotlightは日本語クエリを英語に自動翻訳して検索するこ�
 3. 以下の設定を行う：
    - `owlspotlight.translationSettings.enableJapaneseTranslation`: `true`
    - `owlspotlight.translationSettings.geminiApiKey`: あなたのGemini APIキー
+   - `owlspotlight.modelSettings.modelName`: Embedding model name (e.g. `Shuu12121/CodeSearch-ModernBERT-Owl-2.0-Plus`)
+
+![Settings Example](screenshot/Setting.png)
 
 **使用例：**
 - 「メールアドレスを検証する関数」→ "function that validates email address"
@@ -285,7 +289,6 @@ OwlSpotlightは日本語クエリを英語に自動翻訳して検索するこ�
 
 #### 今後の予定
 - 多言語対応（JavaScript, TypeScript, Java, C++など）
-- CUDA/GPU対応
 - VS Code Marketplace公開
 - ファイル保存時の自動更新
 - クラス継承図の表示
