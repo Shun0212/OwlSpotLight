@@ -944,6 +944,7 @@ export function activate(context: vscode.ExtensionContext) {
 			terminal.sendText('source .venv/bin/activate', true);
 			terminal.sendText('pip install --upgrade pip', true);
 			terminal.sendText('pip install -r requirements.txt', true);
+			terminal.sendText('pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128', true);
 			vscode.window.showInformationMessage(`OwlSpotlight Python ${pythonVersion} environment setup command executed for macOS/Linux. Please ensure pyenv and Python ${pythonVersion} are installed. Start the server after setup completes.`);
 		}
 	});
