@@ -369,12 +369,6 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					return;
 				}
 				const folderPath = workspaceFolders[0].uri.fsPath;
-				webviewView.webview.postMessage({ type: 'status', message: 'Building index...' });
-				await fetch('http://localhost:8000/build_index', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ directory: folderPath, file_ext: fileExt })
-				});
 				webviewView.webview.postMessage({ type: 'status', message: 'Searching...' });
 				const res = await fetch('http://localhost:8000/search_functions_simple', {
 					method: 'POST',

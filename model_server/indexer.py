@@ -1,5 +1,6 @@
 import faiss
 import numpy as np
+import faiss
 from model import encode_code, get_model_embedding_dim
 
 class CodeIndexer:
@@ -33,3 +34,13 @@ class CodeIndexer:
         query_vec = encode_code([query_code], show_progress=False)
         D, I = self.index.search(query_vec, top_k)
         return [self.metadata[i] for i in I[0]]
+
+    def add_functions_without_embedding(self, functions: list[dict]):
+        """
+        埋め込み計算を行わずに関数リストのみを追加する
+        ディスクからロード時など、既に埋め込みが存在する場合に使用
+        """
+        if not functions:
+            return
+        self.functions.extend(functions)
+        self.metadata.extend(functions)
