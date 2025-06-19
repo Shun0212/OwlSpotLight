@@ -225,10 +225,8 @@ class GlobalIndexerState:
         try:
             with open(os.path.join(self.index_dir, "functions.json"), "r", encoding="utf-8") as f:
                 functions = json.load(f)
-            self.indexer = CodeIndexer()
-            self.indexer.add_functions(functions)
         except Exception:
-            self.indexer = None
+            functions = []
         try:
             self.embeddings = np.load(os.path.join(self.index_dir, "embeddings.npy"))
         except Exception:
@@ -237,6 +235,11 @@ class GlobalIndexerState:
             self.faiss_index = faiss.read_index(os.path.join(self.index_dir, "faiss.index"))
         except Exception:
             self.faiss_index = None
+        try:
+            self.indexer = CodeIndexer(dim=self.embeddings.shape[1] if self.embeddings is not None else None)
+            self.indexer.add_functions(functions, self.embeddings)
+        except Exception:
+            self.indexer = None
         try:
             with open(os.path.join(self.index_dir, "meta.json"), "r", encoding="utf-8") as f:
                 meta = json.load(f)
@@ -445,7 +448,7 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
                 global_index_state.faiss_index = None
         # インデックス・メタ情報更新
         indexer = CodeIndexer()
-        indexer.add_functions(new_funcs)
+        indexer.add_functions(new_funcs, embeddings)
         global_index_state.indexer = indexer
         global_index_state.directory = os.path.abspath(directory)
         global_index_state.file_ext = file_ext
