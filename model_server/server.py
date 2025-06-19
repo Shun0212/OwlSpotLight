@@ -185,16 +185,40 @@ class GlobalIndexerState:
         if not self.index_dir:
             return
         os.makedirs(self.index_dir, exist_ok=True)
+
+        def _atomic_numpy_save(path: str, array: np.ndarray):
+            tmp = path + ".tmp"
+            try:
+                with open(tmp, "wb") as f:
+                    np.save(f, array)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp, path)
+            except Exception as e:
+                print(f"Error saving {path}: {e}")
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+
+        def _atomic_faiss_save(index: faiss.Index, path: str):
+            tmp = path + ".tmp"
+            try:
+                faiss.write_index(index, tmp)
+                os.replace(tmp, path)
+            except Exception as e:
+                print(f"Error saving {path}: {e}")
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+
         # 関数リスト
         if self.indexer:
             with open(os.path.join(self.index_dir, "functions.json"), "w", encoding="utf-8") as f:
                 json.dump(self.indexer.functions, f, ensure_ascii=False)
         # 埋め込み
         if self.embeddings is not None:
-            np.save(os.path.join(self.index_dir, "embeddings.npy"), self.embeddings)
+            _atomic_numpy_save(os.path.join(self.index_dir, "embeddings.npy"), self.embeddings)
         # faiss
         if self.faiss_index is not None:
-            faiss.write_index(self.faiss_index, os.path.join(self.index_dir, "faiss.index"))
+            _atomic_faiss_save(self.faiss_index, os.path.join(self.index_dir, "faiss.index"))
         # その他メタ
         meta = {
             "file_info": self.file_info,
