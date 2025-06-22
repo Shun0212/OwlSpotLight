@@ -731,10 +731,34 @@ function setupDecorationListeners() {
 // 拡張機能設定の監視とPythonサーバーへの反映
 function updatePythonServerConfig() {
     const config = vscode.workspace.getConfiguration('owlspotlight');
-    const batchSize = config.get<number>('batchSize', 32);
-    const cacheSettings = config.get<any>('cacheSettings', {});
-    const envSettings = config.get<any>('environmentSettings', {});
-    const modelName = config.get<string>('modelName', 'Shuu12121/CodeSearch-ModernBERT-Owl-3.0-Plus');
+    const defaultModelName = 'Shuu12121/CodeSearch-ModernBERT-Owl-3.0-Plus';
+    const defaultBatchSize = 32;
+    const defaultPythonVersion = '3.11';
+    // すべての設定値で空欄やnull/undefinedの場合はデフォルトを使う
+    let batchSize = config.get<number>('batchSize', defaultBatchSize);
+    if (!batchSize || typeof batchSize !== 'number' || isNaN(batchSize)) {
+        batchSize = defaultBatchSize;
+    }
+    let cacheSettings = config.get<any>('cacheSettings', {});
+    if (!cacheSettings || typeof cacheSettings !== 'object') {
+        cacheSettings = {};
+    }
+    let envSettings = config.get<any>('environmentSettings', {});
+    if (!envSettings || typeof envSettings !== 'object') {
+        envSettings = {};
+    }
+    let modelName = config.get<string>('modelName', defaultModelName);
+    if (!modelName || typeof modelName !== 'string' || modelName.trim() === '') {
+        modelName = defaultModelName;
+    }
+    let pythonVersion = envSettings.pythonVersion || defaultPythonVersion;
+    if (!pythonVersion || typeof pythonVersion !== 'string' || pythonVersion.trim() === '') {
+        pythonVersion = defaultPythonVersion;
+    }
+    // キャッシュ設定の各値もデフォルトを適用
+    const autoClearCache = typeof cacheSettings.autoClearCache === 'boolean' ? cacheSettings.autoClearCache : false;
+    const autoClearLocalCache = typeof cacheSettings.autoClearLocalCache === 'boolean' ? cacheSettings.autoClearLocalCache : false;
+    const cachePath = typeof cacheSettings.cachePath === 'string' ? cacheSettings.cachePath : '';
 
     const fs = require('fs');
     const path = require('path');
@@ -748,7 +772,11 @@ function updatePythonServerConfig() {
         const match = envContent.match(/^OWL_MODEL_NAME=(.*)$/m);
         if (match) {
             prevModelConfig.modelName = match[1].trim();
+        } else {
+            prevModelConfig.modelName = defaultModelName;
         }
+    } else {
+        prevModelConfig.modelName = defaultModelName;
     }
     // モデル名が変わった場合はキャッシュ削除
     if (prevModelConfig.modelName && prevModelConfig.modelName !== modelName) {
@@ -782,10 +810,10 @@ function updatePythonServerConfig() {
         !l.startsWith('OWL_MODEL_NAME=')
     );
     lines.push(`OWL_BATCH_SIZE=${batchSize}`);
-    lines.push(`OWLSETTINGS_AUTO_CLEAR_CACHE=${cacheSettings.autoClearCache || false}`);
-    lines.push(`OWLSETTINGS_AUTO_CLEAR_LOCAL_CACHE=${cacheSettings.autoClearLocalCache || false}`);
-    lines.push(`OWLSETTINGS_CACHE_PATH=${cacheSettings.cachePath || ''}`);
-    lines.push(`OWLSETTINGS_PYTHON_VERSION=${envSettings.pythonVersion || '3.11'}`);
+    lines.push(`OWLSETTINGS_AUTO_CLEAR_CACHE=${autoClearCache}`);
+    lines.push(`OWLSETTINGS_AUTO_CLEAR_LOCAL_CACHE=${autoClearLocalCache}`);
+    lines.push(`OWLSETTINGS_CACHE_PATH=${cachePath}`);
+    lines.push(`OWLSETTINGS_PYTHON_VERSION=${pythonVersion}`);
     lines.push(`OWL_MODEL_NAME=${modelName}`);
     fs.writeFileSync(envPath, lines.join('\n'));
 }
