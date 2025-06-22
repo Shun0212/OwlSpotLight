@@ -734,7 +734,7 @@ function updatePythonServerConfig() {
     const batchSize = config.get<number>('batchSize', 32);
     const cacheSettings = config.get<any>('cacheSettings', {});
     const envSettings = config.get<any>('environmentSettings', {});
-    const modelName = config.get<string>('modelName', 'Shuu12121/CodeSearch-ModernBERT-Owl-2.0-Plus');
+    const modelName = config.get<string>('modelName', 'Shuu12121/CodeSearch-ModernBERT-Owl-3.0-Plus');
 
     const fs = require('fs');
     const path = require('path');
