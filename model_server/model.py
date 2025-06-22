@@ -8,7 +8,7 @@ import warnings
 # MPSデバイス使用時のtorch.compile警告を抑制
 warnings.filterwarnings("ignore", message=".*torch.compile.*mps.*", category=UserWarning)
 
-DEFAULT_MODEL = "Shuu12121/CodeSearch-ModernBERT-Owl-3.0"
+DEFAULT_MODEL = "Shuu12121/CodeSearch-ModernBERT-Owl-3.0-Plus"
 model_name = os.environ.get("OWL_MODEL_NAME", DEFAULT_MODEL)
 # 環境変数で進捗表示を制御 ("0"/"false" で非表示)
 progress_env = os.environ.get("OWL_PROGRESS", "1").lower()
