@@ -274,7 +274,8 @@ function getNonce() {
 async function detectLanguages(): Promise<string[]> {
         const patterns = [
                 { glob: '**/*.py', ext: '.py' },
-                { glob: '**/*.java', ext: '.java' }
+                { glob: '**/*.java', ext: '.java' },
+                { glob: '**/*.ts', ext: '.ts' }
         ];
         const detected: string[] = [];
         for (const p of patterns) {
@@ -611,7 +612,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 		const owlPngUri = webview.asWebviewUri(
 			vscode.Uri.joinPath(this._context.extensionUri, 'media', 'owl.png')
 		);
-                const langMap: { [key: string]: string } = { '.py': 'Python', '.java': 'Java' };
+                const langMap: { [key: string]: string } = { '.py': 'Python', '.java': 'Java', '.ts': 'TypeScript' };
                 const options = (languages.length ? languages : ['.py']).map(l => `<option value="${l}">${langMap[l] || l}</option>`).join('');
                 const selectStyle = (languages.length <= 1) ? 'style="display:none;"' : '';
 
@@ -731,7 +732,7 @@ function setupDecorationListeners() {
 // 拡張機能設定の監視とPythonサーバーへの反映
 function updatePythonServerConfig() {
     const config = vscode.workspace.getConfiguration('owlspotlight');
-    const defaultModelName = 'Shuu12121/CodeSearch-ModernBERT-Owl-3.0-Plus';
+    const defaultModelName = 'Shuu12121/CodeSearch-ModernBERT-Owl-v1';
     const defaultBatchSize = 32;
     const defaultPythonVersion = '3.11';
     // すべての設定値で空欄やnull/undefinedの場合はデフォルトを使う

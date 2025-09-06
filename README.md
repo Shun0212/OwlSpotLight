@@ -4,7 +4,7 @@
 <div align="center">
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.2.1-blue.svg)](https://github.com/shun0212/OwlSpotLight)
+[![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](https://github.com/shun0212/OwlSpotLight)
 [![Python](https://img.shields.io/badge/python-3.9+-green.svg)](https://www.python.org/)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.100+-blue.svg)](https://code.visualstudio.com/)
 
@@ -166,11 +166,12 @@ Progress bars during embedding can be disabled by setting the environment variab
 - [x] Class relationship visualization
 - [x] Advanced filtering and statistics
 - [x] Experimental Java support
+- [x] Experimental TypeScript support (.ts)
 - [x] Automatic language detection with selectable options
 - [x] Optional Japanese to English translation for search queries
 
 #### 🔄 Coming Soon
-- [ ] **Multi-language support** (JavaScript, TypeScript, Java, C++)
+- [ ] **Multi-language support** (JavaScript, Java)
 - [ ] **VS Code Marketplace** release
 - [ ] **Real-time file watching** (auto-update on save)
 - [ ] **Class inheritance diagrams**
@@ -287,9 +288,10 @@ OwlSpotlightは日本語クエリを英語に自動翻訳して検索するこ�
 - クラス構造の可視化
 - フィルタ・統計表示
 - Java対応（実験的）
+- TypeScript対応（実験的・.ts）
 
 #### 今後の予定
-- 多言語対応（JavaScript, TypeScript, Java, C++など）
+- 多言語対応（JavaScript, Java, C++など）
 - VS Code Marketplace公開
 - ファイル保存時の自動更新
 - クラス継承図の表示

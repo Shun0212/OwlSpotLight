@@ -1,6 +1,7 @@
 from pathlib import Path
 from .python_extractor import extract_python_functions
 from .java_extractor import extract_java_functions
+from .typescript_extractor import extract_typescript_functions
 
 
 def extract_functions(file_path: str | Path) -> list[dict]:
@@ -18,6 +19,8 @@ def extract_functions(file_path: str | Path) -> list[dict]:
         return extract_python_functions(source_bytes)
     if ext == ".java":
         return extract_java_functions(source_bytes)
+    if ext == ".ts":
+        return extract_typescript_functions(source_bytes)
     return []
 
 __all__ = ["extract_functions"]
