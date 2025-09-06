@@ -308,15 +308,38 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                webviewView.webview.html = this.getHtmlForWebview(webviewView.webview, langs);
 
                const config = vscode.workspace.getConfiguration('owlspotlight');
-               // フラットな設定取得に対応
-               const enable = config.get<boolean>('enableJapaneseTranslation', false);
-               webviewView.webview.postMessage({
-                       type: 'translationSettings',
-                       enable: enable
-               });
+                // フラットな設定取得に対応
+                const enable = config.get<boolean>('enableJapaneseTranslation', false);
+                webviewView.webview.postMessage({
+                        type: 'translationSettings',
+                        enable: enable
+                });
+
+                // 拡張側に保持している前回状態をWebviewへ送る
+                try {
+                        const persisted = this._context.workspaceState.get<any>('owlspotlight:webviewState');
+                        if (persisted) {
+                                webviewView.webview.postMessage({ type: 'initState', state: persisted });
+                        }
+                } catch {}
 
 		// Webviewからのメッセージ受信
                 webviewView.webview.onDidReceiveMessage(async (msg) => {
+                        if (msg && msg.command === 'persistState') {
+                                try {
+                                        await this._context.workspaceState.update('owlspotlight:webviewState', msg.state ?? {});
+                                } catch {}
+                                return;
+                        }
+                        if (msg && msg.command === 'requestInitState') {
+                                try {
+                                        const persisted = this._context.workspaceState.get<any>('owlspotlight:webviewState');
+                                        webviewView.webview.postMessage({ type: 'initState', state: persisted || null });
+                                } catch {
+                                        webviewView.webview.postMessage({ type: 'initState', state: null });
+                                }
+                                return;
+                        }
                         if (msg.command === 'openExternal' && msg.url) {
 				try {
 					await vscode.env.openExternal(vscode.Uri.parse(msg.url));
