@@ -4,8 +4,8 @@
 <div align="center">
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.3.5-blue.svg)](https://github.com/shun0212/OwlSpotLight)
-[![Python](https://img.shields.io/badge/python-3.9+-green.svg)](https://www.python.org/)
+[![Version](https://img.shields.io/badge/version-0.3.6-blue.svg)](https://github.com/shun0212/OwlSpotLight)
+[![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://www.python.org/)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.100+-blue.svg)](https://code.visualstudio.com/)
 
 **🔍 Instantly discover code with AI-powered semantic search**
@@ -112,7 +112,7 @@ OwlSpotlight transforms code navigation by bringing **semantic understanding** t
 
 | Component | Requirement | Notes |
 |-----------|-------------|-------|
-| **Python** | 3.9+ (3.11 recommended) | Virtual environment recommended |
+| **Python** | 3.11+ (3.11 recommended) | Virtual environment recommended |
 | **Memory** | 4GB+ (8GB+ for large projects) | More RAM = better performance |
 | **Storage** | 2-3GB | For dependencies and models |
 | **Platform** | macOS (optimized), Linux, Windows | Apple Silicon fully supported |

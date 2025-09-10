@@ -939,16 +939,25 @@ export function activate(context: vscode.ExtensionContext) {
 		const venvDir = path.join(serverDir, '.venv');
 		const fs = require('fs');
 		
-		// Windows: Python 3.11が存在しなければインストール案内＆中断
-		const platform = os.platform();
-		if (platform === 'win32') {
-			try {
-				cp.execSync('py -3.11 --version', { stdio: 'ignore' });
-			} catch (e) {
-				vscode.window.showErrorMessage('Python 3.11が見つかりません。公式サイト(https://www.python.org/downloads/release/python-3110/)からインストールしてください。インストール後、VSCodeを再起動して再度セットアップしてください。');
-				return;
-			}
-		}
+	       // Python 3.11が存在しなければインストール案内＆中断（Windows/macOS/Linuxすべて）
+	       const platform = os.platform();
+	       let pythonCheckCmd = '';
+	       if (platform === 'win32') {
+		       pythonCheckCmd = 'py -3.11 --version';
+	       } else {
+		       pythonCheckCmd = 'python3.11 --version';
+	       }
+	       try {
+		       cp.execSync(pythonCheckCmd, { stdio: 'ignore' });
+	       } catch (e) {
+		       vscode.window.showErrorMessage(
+			       'Python 3.11 was not found.\n' +
+			       (platform === 'win32'
+				       ? 'Please install Python 3.11 from the official site (https://www.python.org/downloads/release/python-3110/). After installation, restart VSCode and try setup again.'
+				       : 'For macOS/Linux, install with `brew install python@3.11` or from the official site (https://www.python.org/downloads/release/python-3110/). After installation, restart VSCode and try setup again.')
+		       );
+		       return;
+	       }
 
 		// 自動削除設定がオンの場合、既存の仮想環境を削除
 		if (autoRemoveVenv && fs.existsSync(venvDir)) {
@@ -966,7 +975,10 @@ export function activate(context: vscode.ExtensionContext) {
 		});
 		terminal.show();
 		if (platform === 'win32') {
-			terminal.sendText(`py -3.11 -m venv .venv && .\\.venv\\Scripts\\activate && pip install --upgrade pip && pip install -r requirements.txt`, true);
+			terminal.sendText(`py -3.11 -m venv .venv`, true);
+			terminal.sendText('.\\.venv\\Scripts\\activate', true);
+			terminal.sendText('python -m pip install --upgrade pip', true);
+			terminal.sendText('pip install -r requirements.txt', true);
 			const confirm = await vscode.window.showWarningMessage(
 				'Install PyTorch (CUDA version)? This requires about 3.6GB. Proceed?',
 				{ modal: true },
@@ -979,7 +991,11 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 			vscode.window.showInformationMessage('OwlSpotlight Python environment setup command executed for Windows. Please start the server after setup completes.');
 		} else {
-			terminal.sendText('python3.11 -m venv .venv && source .venv/bin/activate && pip install --upgrade pip && pip install -r requirements.txt && pip install torch --index-url https://download.pytorch.org/whl/cu128', true);
+			terminal.sendText('python3.11 -m venv .venv', true);
+			terminal.sendText('source .venv/bin/activate', true);
+			terminal.sendText('pip install --upgrade pip', true);
+			terminal.sendText('pip install -r requirements.txt', true);
+			terminal.sendText('pip install torch --index-url https://download.pytorch.org/whl/cu128', true);
 			vscode.window.showInformationMessage(
 				`OwlSpotlight Python ${pythonVersion} environment setup executed for macOS/Linux. 
 				Make sure Python ${pythonVersion} is installed. 
