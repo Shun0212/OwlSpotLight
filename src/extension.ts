@@ -982,16 +982,16 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 			vscode.window.showInformationMessage('OwlSpotlight Python environment setup command executed for Windows. Please start the server after setup completes.');
 		} else {
-			// macOS/Linux用: pyenvチェックあり
-			terminal.sendText('if ! command -v pyenv >/dev/null 2>&1; then echo "[OwlSpotlight] pyenv is not installed. Please install pyenv first. For example: brew install pyenv"; exit 1; fi', true);
-			terminal.sendText(`if ! pyenv versions --bare | grep -q "^${pythonVersion}"; then echo "[OwlSpotlight] Python ${pythonVersion} is not installed in pyenv. Please run: pyenv install ${pythonVersion}"; exit 1; fi`, true);
-			terminal.sendText(`pyenv local ${pythonVersion}`, true);
-			terminal.sendText(`python${pythonVersion} -m venv .venv`, true);
+			terminal.sendText('python3.11 -m venv .venv', true);
 			terminal.sendText('source .venv/bin/activate', true);
 			terminal.sendText('pip install --upgrade pip', true);
 			terminal.sendText('pip install -r requirements.txt', true);
 			terminal.sendText('pip install torch --index-url https://download.pytorch.org/whl/cu128', true);
-			vscode.window.showInformationMessage(`OwlSpotlight Python ${pythonVersion} environment setup command executed for macOS/Linux. Please ensure pyenv and Python ${pythonVersion} are installed. Start the server after setup completes.`);
+			vscode.window.showInformationMessage(
+				`OwlSpotlight Python ${pythonVersion} environment setup executed for macOS/Linux. 
+				Make sure Python ${pythonVersion} is installed. 
+				Start the server after setup completes.`
+			);
 		}
 	});
 	context.subscriptions.push(setupEnvDisposable);
