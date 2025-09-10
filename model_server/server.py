@@ -168,6 +168,26 @@ class GlobalIndexerState:
         if changed_files:
             print(f"[is_up_to_date] {len(changed_files)} files changed: {changed_files[:3]}{'...' if len(changed_files) > 3 else ''}")
             return False
+        # Detect newly added files that match the target extension and are not ignored
+        try:
+            scan_dir = os.path.abspath(self.directory)
+            spec = load_gitignore_spec(scan_dir)
+            for root, dirs, files in os.walk(scan_dir):
+                # Respect .gitignore for directories
+                dirs[:] = [d for d in dirs if not is_ignored(os.path.join(root, d), spec, scan_dir)]
+                for fname in files:
+                    if not fname.endswith(self.file_ext):
+                        continue
+                    fpath = os.path.join(root, fname)
+                    if is_ignored(fpath, spec, scan_dir):
+                        continue
+                    if fpath not in self.file_info:
+                        print(f"[is_up_to_date] New file detected: {fpath}")
+                        return False
+        except Exception as e:
+            # Be conservative: if scanning fails, treat as outdated to force rebuild
+            print(f"[is_up_to_date] Error while scanning for new files: {e}")
+            return False
         print(f"[is_up_to_date] All {len(self.file_info)} files are up to date")
         return True
 
