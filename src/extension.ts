@@ -966,10 +966,7 @@ export function activate(context: vscode.ExtensionContext) {
 		});
 		terminal.show();
 		if (platform === 'win32') {
-			terminal.sendText(`py -3.11 -m venv .venv`, true);
-			terminal.sendText('.\\.venv\\Scripts\\activate', true);
-			terminal.sendText('python -m pip install --upgrade pip', true);
-			terminal.sendText('pip install -r requirements.txt', true);
+			terminal.sendText(`py -3.11 -m venv .venv && .\\.venv\\Scripts\\activate && pip install --upgrade pip && pip install -r requirements.txt`, true);
 			const confirm = await vscode.window.showWarningMessage(
 				'Install PyTorch (CUDA version)? This requires about 3.6GB. Proceed?',
 				{ modal: true },
@@ -982,11 +979,7 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 			vscode.window.showInformationMessage('OwlSpotlight Python environment setup command executed for Windows. Please start the server after setup completes.');
 		} else {
-			terminal.sendText('python3.11 -m venv .venv', true);
-			terminal.sendText('source .venv/bin/activate', true);
-			terminal.sendText('pip install --upgrade pip', true);
-			terminal.sendText('pip install -r requirements.txt', true);
-			terminal.sendText('pip install torch --index-url https://download.pytorch.org/whl/cu128', true);
+			terminal.sendText('python3.11 -m venv .venv && source .venv/bin/activate && pip install --upgrade pip && pip install -r requirements.txt && pip install torch --index-url https://download.pytorch.org/whl/cu128', true);
 			vscode.window.showInformationMessage(
 				`OwlSpotlight Python ${pythonVersion} environment setup executed for macOS/Linux. 
 				Make sure Python ${pythonVersion} is installed. 
