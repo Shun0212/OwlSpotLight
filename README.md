@@ -67,6 +67,7 @@ OwlSpotlight transforms code navigation by bringing **semantic understanding** t
    ```
    OwlSpotlight: Setup Python Environment
    ```
+   - Choose the PyTorch build (CPU/GPU/skip) when prompted. The command now executes `model_server/bootstrap_env.py` under the hood so the same workflow is available from a regular terminal.
 3. **Start the server**:
    ```
    OwlSpotlight: Start Server
@@ -89,13 +90,19 @@ OwlSpotlight transforms code navigation by bringing **semantic understanding** t
    - Select `Extensions: Install from VSIX...`
    - Choose the generated `.vsix` file
 
-3. **Setup Python environment**:
+3. **Setup Python environment** (mirrors the VS Code command):
    ```bash
    cd model_server
-   python3 -m venv .venv
-   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-   pip install -r requirements.txt
+   # macOS/Linux
+   python3.11 bootstrap_env.py --torch-mode cpu
+   source .venv/bin/activate
+
+   # Windows PowerShell
+   py -3.11 bootstrap_env.py --torch-mode cpu
+   .\.venv\Scripts\Activate.ps1
    ```
+
+   Add `--torch-mode cuda` to install the official CUDA (12.8) build or `--torch-mode skip` if you plan to manage PyTorch manually. Pass `--force-recreate` to rebuild the virtual environment from scratch (equivalent to toggling the *Auto remove venv* setting inside VS Code).
 
 4. **Launch**: Run the commands from Option 1, steps 2-4
 
@@ -128,9 +135,10 @@ pyenv install 3.11
 
 cd model_server
 pyenv local 3.11
-python3 -m venv .venv
+python3.11 bootstrap_env.py --torch-mode cpu
+# Optional GPU build
+# python3.11 bootstrap_env.py --torch-mode cuda
 source .venv/bin/activate
-pip install -r requirements.txt
 ```
 
 #### Windows
@@ -140,10 +148,13 @@ pip install -r requirements.txt
 # (optional) pyenv-win can be used to manage multiple versions
 
 cd model_server
-py -3.11 -m venv .venv    # or 'python -m venv .venv' if Python 3.11 is default
+py -3.11 bootstrap_env.py --torch-mode cpu
+# Optional GPU build
+# py -3.11 bootstrap_env.py --torch-mode cuda
 \.venv\Scripts\Activate.ps1   # For CMD use .venv\Scripts\activate
-pip install -r requirements.txt
 ```
+
+`model_server/requirements/base.txt` contains the shared dependencies while `model_server/requirements/torch-cpu.txt` pins the default CPU build of PyTorch. The `bootstrap_env.py` script installs both files automatically (unless `--torch-mode skip` is supplied) so that manual and editor-driven workflows stay in sync.
 
 You can change the embedding model by modifying the `owlspotlight.modelSettings.modelName` setting in VS Code. By default it uses `Shuu12121/CodeSearch-ModernBERT-Owl-2.0-Plus`.
 

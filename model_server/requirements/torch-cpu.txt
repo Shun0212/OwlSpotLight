@@ -1,0 +1,2 @@
+# Default CPU build of PyTorch. Override with --torch cuda in bootstrap_env.py or install manually for GPU builds.
+torch==2.7.0

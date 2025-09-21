@@ -933,31 +933,68 @@ export function activate(context: vscode.ExtensionContext) {
 		const config = vscode.workspace.getConfiguration('owlspotlight');
 		const envSettings = config.get<any>('environmentSettings', {});
 		const autoRemoveVenv = envSettings.autoRemoveVenv || false;
-		const pythonVersion = envSettings.pythonVersion || '3.11';
-		
+		let pythonVersion = envSettings.pythonVersion || '3.11';
+		if (typeof pythonVersion !== 'string' || pythonVersion.trim() === '') {
+			pythonVersion = '3.11';
+		} else {
+			pythonVersion = pythonVersion.trim();
+		}
+
 		const serverDir = path.join(context.extensionPath, 'model_server');
 		const venvDir = path.join(serverDir, '.venv');
 		const fs = require('fs');
-		
-	       // Python 3.11が存在しなければインストール案内＆中断（Windows/macOS/Linuxすべて）
-	       const platform = os.platform();
-	       let pythonCheckCmd = '';
-	       if (platform === 'win32') {
-		       pythonCheckCmd = 'py -3.11 --version';
-	       } else {
-		       pythonCheckCmd = 'python3.11 --version';
-	       }
-	       try {
-		       cp.execSync(pythonCheckCmd, { stdio: 'ignore' });
-	       } catch (e) {
-		       vscode.window.showErrorMessage(
-			       'Python 3.11 was not found.\n' +
-			       (platform === 'win32'
-				       ? 'Please install Python 3.11 from the official site (https://www.python.org/downloads/release/python-3110/). After installation, restart VSCode and try setup again.'
-				       : 'For macOS/Linux, install with `brew install python@3.11` or from the official site (https://www.python.org/downloads/release/python-3110/). After installation, restart VSCode and try setup again.')
-		       );
-		       return;
-	       }
+
+		// Python 3.11が存在しなければインストール案内＆中断（Windows/macOS/Linuxすべて）
+		const platform = os.platform();
+		const numericPython = /^\d+(?:\.\d+)?$/;
+		let pythonCommand = '';
+		if (platform === 'win32') {
+			pythonCommand = numericPython.test(pythonVersion)
+				? `py -${pythonVersion}`
+				: pythonVersion;
+		} else {
+			pythonCommand = numericPython.test(pythonVersion)
+				? `python${pythonVersion}`
+				: pythonVersion;
+		}
+		const pythonCheckCmd = `${pythonCommand} --version`;
+		try {
+			cp.execSync(pythonCheckCmd, { stdio: 'ignore' });
+		} catch (e) {
+			vscode.window.showErrorMessage(
+				`Python ${pythonVersion} was not found.\n` +
+				(platform === 'win32'
+					? `Please install Python ${pythonVersion} from the official site (https://www.python.org/downloads/). After installation, restart VSCode and try setup again.`
+					: `For macOS/Linux, install with \`brew install python@${pythonVersion}\` or from the official site (https://www.python.org/downloads/). After installation, restart VSCode and try setup again.`)
+			);
+			return;
+		}
+
+		const torchOptions: { label: string; description: string; value: 'cpu' | 'cuda' | 'skip' }[] = [
+			{
+				label: 'CPU (recommended)',
+				description: 'Install the default CPU build of PyTorch.',
+				value: 'cpu'
+			},
+			{
+				label: 'CUDA 12.8 (GPU)',
+				description: 'Install PyTorch from the official CUDA 12.8 wheel index (~3.6GB download).',
+				value: 'cuda'
+			},
+			{
+				label: 'Skip PyTorch installation',
+				description: 'Prepare the environment without installing PyTorch.',
+				value: 'skip'
+			}
+		];
+		const torchChoice = await vscode.window.showQuickPick(torchOptions, {
+			placeHolder: 'Select the PyTorch build to install during setup',
+			ignoreFocusOut: true
+		});
+		if (!torchChoice) {
+			vscode.window.showInformationMessage('OwlSpotlight Python environment setup cancelled.');
+			return;
+		}
 
 		// 自動削除設定がオンの場合、既存の仮想環境を削除
 		if (autoRemoveVenv && fs.existsSync(venvDir)) {
@@ -968,41 +1005,38 @@ export function activate(context: vscode.ExtensionContext) {
 				vscode.window.showWarningMessage(`Failed to remove existing virtual environment: ${error}`);
 			}
 		}
-		
+
 		const terminal = vscode.window.createTerminal({
 			name: 'OwlSpotlight Setup',
 			cwd: serverDir
 		});
 		terminal.show();
-		if (platform === 'win32') {
-			terminal.sendText(`py -3.11 -m venv .venv`, true);
-			terminal.sendText('.\\.venv\\Scripts\\activate', true);
-			terminal.sendText('python -m pip install --upgrade pip', true);
-			terminal.sendText('pip install -r requirements.txt', true);
-			const confirm = await vscode.window.showWarningMessage(
-				'Install PyTorch (CUDA version)? This requires about 3.6GB. Proceed?',
-				{ modal: true },
-				'YES',
-				'NO'
-			);
-			if (confirm === 'YES') {
-				
-				terminal.sendText('pip install torch --index-url https://download.pytorch.org/whl/cu128', true);
-			}
-			vscode.window.showInformationMessage('OwlSpotlight Python environment setup command executed for Windows. Please start the server after setup completes.');
-		} else {
-			terminal.sendText('python3.11 -m venv .venv', true);
-			terminal.sendText('source .venv/bin/activate', true);
-			terminal.sendText('pip install --upgrade pip', true);
-			terminal.sendText('pip install -r requirements.txt', true);
-			terminal.sendText('pip install torch --index-url https://download.pytorch.org/whl/cu128', true);
-			vscode.window.showInformationMessage(
-				`OwlSpotlight Python ${pythonVersion} environment setup executed for macOS/Linux. 
-				Make sure Python ${pythonVersion} is installed. 
-				Start the server after setup completes.`
-			);
+		const scriptArgs: string[] = ['--torch-mode', torchChoice.value];
+		if (autoRemoveVenv) {
+			scriptArgs.push('--force-recreate');
 		}
-	});
+		const commandSegments: string[] = [];
+		if (platform === 'win32') {
+			if (numericPython.test(pythonVersion)) {
+				commandSegments.push('py', `-${pythonVersion}`);
+			} else {
+				const needsQuoting = pythonCommand.includes(' ') && !pythonCommand.includes(' -');
+				commandSegments.push(needsQuoting ? `"${pythonCommand}"` : pythonCommand);
+			}
+		} else {
+			if (numericPython.test(pythonVersion)) {
+				commandSegments.push(`python${pythonVersion}`);
+			} else {
+				const needsQuoting = pythonCommand.includes(' ') && !pythonCommand.includes(' -');
+				commandSegments.push(needsQuoting ? `"${pythonCommand}"` : pythonCommand);
+			}
+		}
+		commandSegments.push('bootstrap_env.py', ...scriptArgs);
+		terminal.sendText(commandSegments.join(' '), true);
+		vscode.window.showInformationMessage(
+			`OwlSpotlight Python environment bootstrap started with ${torchChoice.label}. Monitor the terminal for progress and start the server after setup completes.`
+		);
+		});
 	context.subscriptions.push(setupEnvDisposable);
 
 	// --- キャッシュクリアコマンドを追加 ---
