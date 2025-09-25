@@ -142,7 +142,7 @@ def main() -> None:
     python_env_path = venv_bin_path(env_dir, "python")
 
     if not args.skip_pip_upgrade:
-        run_command([pip_path, "install", "--upgrade", "pip"])
+        run_command([python_env_path, "-m", "pip", "install", "--upgrade", "pip"])
 
     requirements_path = (project_root / args.requirements).resolve()
     if not requirements_path.exists():
