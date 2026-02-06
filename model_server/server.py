@@ -18,6 +18,9 @@ from functools import partial
 from pathlib import Path
 import json
 import hashlib
+import io
+import re
+import tokenize
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 import shutil
@@ -84,12 +87,14 @@ class IndexStatus(BaseModel):
     up_to_date: bool
     current_model_name: str
     indexed_model_name: str
+    strip_comments_for_embeddings: bool
 
 class BuildIndexRequest(BaseModel):
     directory: str
     file_ext: str = ".py"
     include_paths: List[str] = Field(default_factory=list)
     exclude_paths: List[str] = Field(default_factory=list)
+    strip_comments_for_embeddings: bool = False
 
 class SearchFunctionsSimpleRequest(BaseModel):
     directory: str
@@ -98,6 +103,7 @@ class SearchFunctionsSimpleRequest(BaseModel):
     file_ext: str = ".py"
     include_paths: List[str] = Field(default_factory=list)
     exclude_paths: List[str] = Field(default_factory=list)
+    strip_comments_for_embeddings: bool = False
 
 class BatchSearchFunctionsRequest(BaseModel):
     directory: str
@@ -106,6 +112,7 @@ class BatchSearchFunctionsRequest(BaseModel):
     file_ext: str = ".py"
     include_paths: List[str] = Field(default_factory=list)
     exclude_paths: List[str] = Field(default_factory=list)
+    strip_comments_for_embeddings: bool = False
 
 class FunctionRangeRequest(BaseModel):
     file: str
@@ -119,6 +126,7 @@ class ClassStatsRequest(BaseModel):
     file_ext: str = ".py"
     include_paths: List[str] = Field(default_factory=list)
     exclude_paths: List[str] = Field(default_factory=list)
+    strip_comments_for_embeddings: bool = False
 
 class OwlIgnoreManagerRequest(BaseModel):
     directory: str
@@ -145,6 +153,7 @@ class GlobalIndexerState:
         self.file_ext: str = ".py"
         self.include_paths: List[str] = []
         self.exclude_paths: List[str] = []
+        self.strip_comments_for_embeddings: bool = False
         self.scope_signature: str = ""
         self.embeddings: Optional[np.ndarray] = None  # 追加: 関数埋め込み
         self.faiss_index: Optional[faiss.IndexFlatL2] = None  # 追加: FAISSインデックス
@@ -174,7 +183,8 @@ class GlobalIndexerState:
         self,
         directory: Optional[str] = None,
         include_paths: Optional[List[str]] = None,
-        exclude_paths: Optional[List[str]] = None
+        exclude_paths: Optional[List[str]] = None,
+        strip_comments_for_embeddings: bool = False
     ) -> bool:
         # If directory argument is specified, compare it with self.directory
         if directory is not None:
@@ -188,6 +198,12 @@ class GlobalIndexerState:
             return False
         if self.exclude_paths != normalized_exclude:
             print(f"[is_up_to_date] exclude_paths mismatch: {self.exclude_paths} != {normalized_exclude}")
+            return False
+        if bool(self.strip_comments_for_embeddings) != bool(strip_comments_for_embeddings):
+            print(
+                f"[is_up_to_date] strip_comments_for_embeddings mismatch: "
+                f"{self.strip_comments_for_embeddings} != {strip_comments_for_embeddings}"
+            )
             return False
         current_model_config = self.get_current_model_config()
         if self.model_config and self.model_config != current_model_config:
@@ -253,6 +269,7 @@ class GlobalIndexerState:
         self.model_config = {}
         self.include_paths = []
         self.exclude_paths = []
+        self.strip_comments_for_embeddings = False
         self.scope_signature = ""
         if clear_disk and self.index_dir and os.path.exists(self.index_dir):
             shutil.rmtree(self.index_dir, ignore_errors=True)
@@ -311,6 +328,7 @@ class GlobalIndexerState:
             "file_ext": self.file_ext,
             "include_paths": self.include_paths,
             "exclude_paths": self.exclude_paths,
+            "strip_comments_for_embeddings": self.strip_comments_for_embeddings,
             "scope_signature": self.scope_signature,
             "model_name": self.model_name or model_name,
             "model_config": self.model_config or self.get_current_model_config(),
@@ -333,6 +351,7 @@ class GlobalIndexerState:
             self.file_ext = ".py"
             self.include_paths = []
             self.exclude_paths = []
+            self.strip_comments_for_embeddings = False
             self.scope_signature = ""
             self.model_name = None
             self.model_config = {}
@@ -369,6 +388,7 @@ class GlobalIndexerState:
             self.file_ext = meta.get("file_ext", ".py")
             self.include_paths = normalize_scope_patterns(meta.get("include_paths", []))
             self.exclude_paths = normalize_scope_patterns(meta.get("exclude_paths", []))
+            self.strip_comments_for_embeddings = bool(meta.get("strip_comments_for_embeddings", False))
             self.scope_signature = meta.get("scope_signature", "")
             self.model_name = meta.get("model_name")
             self.model_config = meta.get("model_config", {"model_name": self.model_name})
@@ -381,6 +401,7 @@ class GlobalIndexerState:
             self.file_ext = ".py"
             self.include_paths = []
             self.exclude_paths = []
+            self.strip_comments_for_embeddings = False
             self.scope_signature = ""
             self.model_name = None
             self.model_config = {}
@@ -590,6 +611,78 @@ def is_ignored(path: str, spec: Optional[PathSpec], root_dir: str) -> bool:
         return spec.match_file(f"{rel_path}/")
     return False
 
+
+_C_BLOCK_COMMENT_RE = re.compile(r"/\*[\s\S]*?\*/")
+_CPP_LINE_COMMENT_RE = re.compile(r"//.*?$", re.MULTILINE)
+
+
+def strip_python_comments_and_docstrings(code: str) -> str:
+    if not code:
+        return code
+    out: List[str] = []
+    prev_toktype = tokenize.INDENT
+    last_lineno = 1
+    last_col = 0
+    try:
+        token_stream = tokenize.generate_tokens(io.StringIO(code).readline)
+    except Exception:
+        return code
+
+    for tok in token_stream:
+        tok_type = tok.type
+        tok_text = tok.string
+        (start_line, start_col) = tok.start
+        (end_line, end_col) = tok.end
+        if tok_type == tokenize.COMMENT:
+            prev_toktype = tok_type
+            last_lineno, last_col = end_line, end_col
+            continue
+        # module/class/function level docstrings
+        if tok_type == tokenize.STRING and prev_toktype in (
+            tokenize.INDENT,
+            tokenize.DEDENT,
+            tokenize.NEWLINE,
+            tokenize.NL,
+            tokenize.ENCODING,
+        ):
+            prev_toktype = tok_type
+            last_lineno, last_col = end_line, end_col
+            continue
+        if start_line > last_lineno:
+            last_col = 0
+        if start_col > last_col:
+            out.append(" " * (start_col - last_col))
+        out.append(tok_text)
+        prev_toktype = tok_type
+        last_lineno, last_col = end_line, end_col
+    return "".join(out)
+
+
+def strip_c_style_comments(code: str) -> str:
+    if not code:
+        return code
+    no_block = _C_BLOCK_COMMENT_RE.sub("", code)
+    return _CPP_LINE_COMMENT_RE.sub("", no_block)
+
+
+def strip_comments_for_embedding_text(text: str, file_ext: str) -> str:
+    if not text:
+        return text
+    ext = (file_ext or "").lower()
+    if ext == ".py":
+        stripped = strip_python_comments_and_docstrings(text)
+    elif ext in {".ts", ".tsx", ".js", ".jsx", ".java", ".c", ".cc", ".cpp", ".h", ".hpp"}:
+        stripped = strip_c_style_comments(text)
+    else:
+        stripped = text
+    return stripped if stripped.strip() else text
+
+
+def prepare_text_for_embedding(text: str, file_ext: str, strip_comments_for_embeddings: bool) -> str:
+    if not strip_comments_for_embeddings:
+        return text
+    return strip_comments_for_embedding_text(text, file_ext)
+
 # ファイルのハッシュ計算関数
 def file_hash(path):
     h = hashlib.sha256()
@@ -608,7 +701,8 @@ def build_index(
     max_workers: int = 8,
     update_state: bool = False,
     include_paths: Optional[List[str]] = None,
-    exclude_paths: Optional[List[str]] = None
+    exclude_paths: Optional[List[str]] = None,
+    strip_comments_for_embeddings: bool = False
 ):
     import hashlib
     def func_id(func):
@@ -630,7 +724,8 @@ def build_index(
         global_index_state.is_up_to_date(
             directory=directory,
             include_paths=include_patterns,
-            exclude_paths=exclude_patterns
+            exclude_paths=exclude_patterns,
+            strip_comments_for_embeddings=strip_comments_for_embeddings
         )
     ):
         if global_index_state.model_config and global_index_state.model_config != current_model_config:
@@ -658,7 +753,8 @@ def build_index(
         global_index_state.is_up_to_date(
             directory=directory,
             include_paths=include_patterns,
-            exclude_paths=exclude_patterns
+            exclude_paths=exclude_patterns,
+            strip_comments_for_embeddings=strip_comments_for_embeddings
         ) and
         global_index_state.model_config == current_model_config and
         (global_index_state.model_name is None or global_index_state.model_name == model_name)
@@ -690,6 +786,13 @@ def build_index(
         if prev_indexer:
             for func in prev_indexer.functions:
                 prev_funcs_by_file.setdefault(func.get("file"), []).append(func)
+
+    strip_mode_changed = bool(global_index_state.strip_comments_for_embeddings) != bool(strip_comments_for_embeddings)
+    if strip_mode_changed:
+        print(
+            "[build_index] strip_comments_for_embeddings changed: "
+            f"{global_index_state.strip_comments_for_embeddings} -> {strip_comments_for_embeddings}"
+        )
     spec = load_ignore_spec(directory, exclude_patterns)
     file_paths = []
     for root, dirs, files in os.walk(directory):
@@ -711,7 +814,13 @@ def build_index(
     deleted = [f for f in prev_info if f not in new_info]
 
     # 変更・削除ゼロなら何もしないで戻る（キャッシュ再利用）
-    if update_state and not added_or_modified and not deleted and global_index_state.indexer is not None:
+    if (
+        update_state and
+        not added_or_modified and
+        not deleted and
+        global_index_state.indexer is not None and
+        not strip_mode_changed
+    ):
         print(f"[build_index] No changes – reusing cache (funcs={len(global_index_state.indexer.functions)}, files={len(global_index_state.file_info)})")
         return (
             global_index_state.indexer.functions,
@@ -775,12 +884,25 @@ def build_index(
         # 新規関数（前回に存在しないもの）
         new_func_indices = [i for i, fid in enumerate(results_func_ids) if fid not in prev_func_id2idx]
         # 埋め込み配列を順序通りに構築
-        if prev_indexer and global_index_state.embeddings is not None and global_index_state.faiss_index is not None and keep_indices:
+        if (
+            not strip_mode_changed and
+            prev_indexer and
+            global_index_state.embeddings is not None and
+            global_index_state.faiss_index is not None and
+            keep_indices
+        ):
             prev_embeddings = global_index_state.embeddings
             kept_embeddings = prev_embeddings[keep_indices] if keep_indices else np.zeros((0, prev_embeddings.shape[1]), dtype=prev_embeddings.dtype)
             # 新規分のみ埋め込み
             if new_func_indices:
-                new_codes = [results[i]["code"] for i in new_func_indices]
+                new_codes = [
+                    prepare_text_for_embedding(
+                        results[i]["code"],
+                        file_ext,
+                        strip_comments_for_embeddings
+                    )
+                    for i in new_func_indices
+                ]
                 print(f"Generating embeddings for {len(new_codes)} new/modified functions...")
                 new_embeddings = encode_code(new_codes, settings.batch_size, show_progress=True)
                 # 埋め込みを順序通りに合成
@@ -805,6 +927,10 @@ def build_index(
             # 全関数分再計算
             codes = [func["code"] for func in results]
             if codes:
+                codes = [
+                    prepare_text_for_embedding(code, file_ext, strip_comments_for_embeddings)
+                    for code in codes
+                ]
                 print(f"Generating embeddings for {len(codes)} functions (full rebuild)...")
                 embeddings = encode_code(codes, settings.batch_size, show_progress=True)
                 faiss_index = faiss.IndexFlatL2(embeddings.shape[1])
@@ -822,6 +948,7 @@ def build_index(
         global_index_state.file_ext = file_ext
         global_index_state.include_paths = include_patterns
         global_index_state.exclude_paths = exclude_patterns
+        global_index_state.strip_comments_for_embeddings = bool(strip_comments_for_embeddings)
         global_index_state.scope_signature = current_scope_signature
         global_index_state.last_indexed = float(__import__('time').time())
         global_index_state.file_info = new_info
@@ -863,7 +990,8 @@ async def build_index_api(req: BuildIndexRequest):
             req.file_ext,
             update_state=True,
             include_paths=req.include_paths,
-            exclude_paths=req.exclude_paths
+            exclude_paths=req.exclude_paths,
+            strip_comments_for_embeddings=req.strip_comments_for_embeddings
         )
     return {"num_functions": len(results), "num_files": file_count}
 
@@ -878,7 +1006,8 @@ async def force_rebuild_index_api(req: BuildIndexRequest):
             req.file_ext,
             update_state=True,
             include_paths=req.include_paths,
-            exclude_paths=req.exclude_paths
+            exclude_paths=req.exclude_paths,
+            strip_comments_for_embeddings=req.strip_comments_for_embeddings
         )
     return {"num_functions": len(results), "num_files": file_count, "message": "Index forcefully rebuilt"}
 
@@ -892,7 +1021,8 @@ async def index_status():
         up_to_date = global_index_state.is_up_to_date(
             directory=global_index_state.directory,
             include_paths=global_index_state.include_paths,
-            exclude_paths=global_index_state.exclude_paths
+            exclude_paths=global_index_state.exclude_paths,
+            strip_comments_for_embeddings=global_index_state.strip_comments_for_embeddings
         )
     return IndexStatus(
         directory=global_index_state.directory or "",
@@ -900,7 +1030,8 @@ async def index_status():
         last_indexed=global_index_state.last_indexed,
         up_to_date=up_to_date,
         current_model_name=model_name,
-        indexed_model_name=global_index_state.model_name or model_name
+        indexed_model_name=global_index_state.model_name or model_name,
+        strip_comments_for_embeddings=bool(global_index_state.strip_comments_for_embeddings)
     )
 
 
@@ -960,7 +1091,8 @@ def search_functions_for_queries(
     top_k: int = 5,
     max_workers: int = 8,
     include_paths: Optional[List[str]] = None,
-    exclude_paths: Optional[List[str]] = None
+    exclude_paths: Optional[List[str]] = None,
+    strip_comments_for_embeddings: bool = False
 ):
     results, file_count, _ = build_index(
         directory,
@@ -968,7 +1100,8 @@ def search_functions_for_queries(
         max_workers,
         update_state=True,
         include_paths=include_paths,
-        exclude_paths=exclude_paths
+        exclude_paths=exclude_paths,
+        strip_comments_for_embeddings=strip_comments_for_embeddings
     )
     # build_index後のキャッシュ状態をprint
     print("indexer_exists:", global_index_state.indexer is not None)
@@ -977,7 +1110,8 @@ def search_functions_for_queries(
         global_index_state.is_up_to_date(
             directory=directory,
             include_paths=include_paths,
-            exclude_paths=exclude_paths
+            exclude_paths=exclude_paths,
+            strip_comments_for_embeddings=strip_comments_for_embeddings
         )
     )
     print("embeddings_cached:", global_index_state.embeddings is not None)
@@ -998,7 +1132,8 @@ def search_functions_for_queries(
 
     items = []
     for query in cleaned_queries:
-        query_embedding = encode_code([query], batch_size=1, show_progress=False)
+        embedding_query = prepare_text_for_embedding(query, file_ext, strip_comments_for_embeddings)
+        query_embedding = encode_code([embedding_query], batch_size=1, show_progress=False)
         _, indices = faiss_index.search(query_embedding, top_k)
         found = []
         for idx in indices[0]:
@@ -1015,7 +1150,8 @@ def build_index_and_search(
     top_k: int = 5,
     max_workers: int = 8,
     include_paths: Optional[List[str]] = None,
-    exclude_paths: Optional[List[str]] = None
+    exclude_paths: Optional[List[str]] = None,
+    strip_comments_for_embeddings: bool = False
 ):
     searched = search_functions_for_queries(
         directory=directory,
@@ -1024,7 +1160,8 @@ def build_index_and_search(
         top_k=top_k,
         max_workers=max_workers,
         include_paths=include_paths,
-        exclude_paths=exclude_paths
+        exclude_paths=exclude_paths,
+        strip_comments_for_embeddings=strip_comments_for_embeddings
     )
     items = searched.get("items", [])
     first_results = items[0]["results"] if items else []
@@ -1046,7 +1183,8 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
             file_ext=req.file_ext,
             top_k=req.top_k,
             include_paths=req.include_paths,
-            exclude_paths=req.exclude_paths
+            exclude_paths=req.exclude_paths,
+            strip_comments_for_embeddings=req.strip_comments_for_embeddings
         )
 
 
@@ -1059,7 +1197,8 @@ async def search_functions_batch_api(req: BatchSearchFunctionsRequest):
             file_ext=req.file_ext,
             top_k=req.top_k,
             include_paths=req.include_paths,
-            exclude_paths=req.exclude_paths
+            exclude_paths=req.exclude_paths,
+            strip_comments_for_embeddings=req.strip_comments_for_embeddings
         )
 
 
@@ -1074,14 +1213,16 @@ async def get_class_stats(request: ClassStatsRequest):
                 top_k=request.top_k,
                 file_ext=request.file_ext,
                 include_paths=request.include_paths,
-                exclude_paths=request.exclude_paths
+                exclude_paths=request.exclude_paths,
+                strip_comments_for_embeddings=request.strip_comments_for_embeddings
             )
             all_functions, _, _ = build_index(
                 request.directory,
                 request.file_ext,
                 update_state=True,
                 include_paths=request.include_paths,
-                exclude_paths=request.exclude_paths
+                exclude_paths=request.exclude_paths,
+                strip_comments_for_embeddings=request.strip_comments_for_embeddings
             )
         search_items = search_response.get("items", [])
         search_results = search_items[0]["results"] if search_items else []

@@ -18,6 +18,7 @@ type BatchHistoryRun = {
         language?: string;
         includePaths?: string[];
         excludePaths?: string[];
+        stripCommentsFromEmbeddings?: boolean;
         folderPath?: string;
         items?: BatchHistoryItem[];
 };
@@ -46,6 +47,7 @@ function historyToCsv(
                 'folder_path',
                 'include_paths',
                 'exclude_paths',
+                'strip_comments_from_embeddings',
                 'owlignore_patterns',
                 'embedding_model_name',
                 'query_index',
@@ -63,6 +65,7 @@ function historyToCsv(
         for (const run of runs) {
                 const includePaths = Array.isArray(run.includePaths) ? run.includePaths.join('|') : '';
                 const excludePaths = Array.isArray(run.excludePaths) ? run.excludePaths.join('|') : '';
+                const stripComments = !!run.stripCommentsFromEmbeddings;
                 const items = Array.isArray(run.items) ? run.items : [];
                 if (items.length === 0) {
                         rows.push([
@@ -72,6 +75,7 @@ function historyToCsv(
                                 safeCsvValue(run.folderPath ?? ''),
                                 safeCsvValue(includePaths),
                                 safeCsvValue(excludePaths),
+                                safeCsvValue(stripComments),
                                 safeCsvValue(owlIgnoreText),
                                 safeCsvValue(embeddingModelName),
                                 safeCsvValue(''),
@@ -99,6 +103,7 @@ function historyToCsv(
                                         safeCsvValue(run.folderPath ?? ''),
                                         safeCsvValue(includePaths),
                                         safeCsvValue(excludePaths),
+                                        safeCsvValue(stripComments),
                                         safeCsvValue(owlIgnoreText),
                                         safeCsvValue(embeddingModelName),
                                         safeCsvValue(queryIndex + 1),
@@ -122,6 +127,7 @@ function historyToCsv(
                                         safeCsvValue(run.folderPath ?? ''),
                                         safeCsvValue(includePaths),
                                         safeCsvValue(excludePaths),
+                                        safeCsvValue(stripComments),
                                         safeCsvValue(owlIgnoreText),
                                         safeCsvValue(embeddingModelName),
                                         safeCsvValue(queryIndex + 1),
@@ -594,6 +600,9 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                 .map(item => item.trim())
                                 .filter(item => item.length > 0);
                 };
+                const normalizeBoolean = (value: unknown, fallback = false): boolean => {
+                        return typeof value === 'boolean' ? value : fallback;
+                };
                 const normalizeHistoryRuns = (value: unknown): BatchHistoryRun[] => {
                         if (!Array.isArray(value)) {
                                 return [];
@@ -864,6 +873,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                 const fileExt = msg.lang || '.py';
                                 const includePaths = normalizeStringList(msg.includePaths);
                                 const excludePaths = normalizeStringList(msg.excludePaths);
+                                const stripCommentsForEmbeddings = normalizeBoolean(msg.stripCommentsFromEmbeddings, false);
 				const workspaceFolders = vscode.workspace.workspaceFolders;
 				if (!workspaceFolders || workspaceFolders.length === 0) {
 					webviewView.webview.postMessage({ type: 'error', message: 'No workspace folder found' });
@@ -881,7 +891,8 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                                 top_k: 10,
                                                 file_ext: fileExt,
                                                 include_paths: includePaths,
-                                                exclude_paths: scope.requestExclude
+                                                exclude_paths: scope.requestExclude,
+                                                strip_comments_for_embeddings: stripCommentsForEmbeddings
                                         })
 				});
 				const data: any = await res.json();
@@ -909,6 +920,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                 const fileExt = msg.lang || '.py';
                 const includePaths = normalizeStringList(msg.includePaths);
                 const excludePaths = normalizeStringList(msg.excludePaths);
+                const stripCommentsForEmbeddings = normalizeBoolean(msg.stripCommentsFromEmbeddings, false);
                 const scope = resolveScope(folderPath, excludePaths);
 				webviewView.webview.postMessage({ type: 'status', message: 'Loading class statistics...' });
 				try {
@@ -921,7 +933,8 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                                         top_k: 50,
                                                         file_ext: fileExt,
                                                         include_paths: includePaths,
-                                                        exclude_paths: scope.requestExclude
+                                                        exclude_paths: scope.requestExclude,
+                                                        strip_comments_for_embeddings: stripCommentsForEmbeddings
                                                 })
 					});
 					const data: any = await res.json();
@@ -959,6 +972,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                 const fileExt = msg.lang || '.py';
                                 const includePaths = normalizeStringList(msg.includePaths);
                                 const excludePaths = normalizeStringList(msg.excludePaths);
+                                const stripCommentsForEmbeddings = normalizeBoolean(msg.stripCommentsFromEmbeddings, false);
                                 const folderPath = workspaceFolders[0].uri.fsPath;
                                 const scope = resolveScope(folderPath, excludePaths);
                                 const translatedQueries: string[] = [];
@@ -975,7 +989,8 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                                         top_k: 10,
                                                         file_ext: fileExt,
                                                         include_paths: includePaths,
-                                                        exclude_paths: scope.requestExclude
+                                                        exclude_paths: scope.requestExclude,
+                                                        strip_comments_for_embeddings: stripCommentsForEmbeddings
                                                 })
                                         });
                                         const data: any = await res.json();
@@ -1163,6 +1178,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                 const fileExt = msg.lang || '.py';
                                 const includePaths = normalizeStringList(msg.includePaths);
                                 const excludePaths = normalizeStringList(msg.excludePaths);
+                                const stripCommentsForEmbeddings = normalizeBoolean(msg.stripCommentsFromEmbeddings, false);
                                 const scope = resolveScope(folderPath, excludePaths);
                                 webviewView.webview.postMessage({ type: 'status', message: 'Clearing cache and rebuilding index...' });
 				try {
@@ -1173,7 +1189,8 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                                         directory: folderPath,
                                                         file_ext: fileExt,
                                                         include_paths: includePaths,
-                                                        exclude_paths: scope.requestExclude
+                                                        exclude_paths: scope.requestExclude,
+                                                        strip_comments_for_embeddings: stripCommentsForEmbeddings
                                                 })
 					});
 					const data = await res.json();
@@ -1257,6 +1274,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
   <details id="scopeDetails" class="scope-collapsible">
     <summary>Scope (.owlignore + optional GUI filters)</summary>
     <div class="scope-settings">
+      <label><input type="checkbox" id="stripCommentsToggle"> Embed w/o comments</label>
       <input id="includePathsInput" type="text" placeholder="Include folders/patterns (comma or newline separated), e.g. src,lib/**" />
       <input id="excludePathsInput" type="text" placeholder="Exclude folders/patterns, e.g. dist,node_modules/**" />
       <label class="owlignore-current-label" for="owlignoreCurrentPatterns">Current server .owlignore patterns</label>
