@@ -333,8 +333,6 @@ MIT License - 詳細は[LICENSE](LICENSE)をご覧ください。
 
 <div align="center">
 
-**⚡ Made with ❤️ for developers who love efficient code navigation**
-
-[⭐ Star this project](https://github.com/shun0212/OwlSpotLight) | [🐛 Report Issues](https://github.com/shun0212/OwlSpotLight/issues) | [💬 Discussions](https://github.com/shun0212/OwlSpotLight/discussions)
+[Star this project](https://github.com/shun0212/OwlSpotLight) | [Report Issues](https://github.com/shun0212/OwlSpotLight/issues) | [💬 Discussions](https://github.com/shun0212/OwlSpotLight/discussions)
 
 </div>
