@@ -134,6 +134,23 @@
             }
           }
         },
+        "owlspotlight.owlIgnoreSettings": {
+          "type": "object",
+          "title": "Owl Ignore Settings",
+          "description": "Configure server-managed scope behavior (.gitignore is used as default on first initialization)",
+          "properties": {
+            "autoCreate": {
+              "type": "boolean",
+              "default": true,
+              "description": "Automatically initialize server-managed .owlignore patterns when missing"
+            },
+            "applyOnDisplay": {
+              "type": "boolean",
+              "default": true,
+              "description": "Filter displayed results using server-managed .owlignore patterns in addition to server-side filtering"
+            }
+          }
+        },
         "owlspotlight.enableJapaneseTranslation": {
           "type": "boolean",
           "default": false,

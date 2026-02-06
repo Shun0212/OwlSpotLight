@@ -5,6 +5,267 @@ import * as path from 'path';
 import * as os from 'os';
 import * as cp from 'child_process';
 
+type BatchHistoryItem = {
+        original_query?: string;
+        translated_query?: string;
+        query?: string;
+        results?: any[];
+};
+
+type BatchHistoryRun = {
+        id?: number | string;
+        timestamp?: string;
+        language?: string;
+        includePaths?: string[];
+        excludePaths?: string[];
+        folderPath?: string;
+        items?: BatchHistoryItem[];
+};
+
+type OwlIgnoreSettings = {
+        autoCreate: boolean;
+        applyOnDisplay: boolean;
+};
+
+function safeCsvValue(value: unknown): string {
+        const raw = (value === null || value === undefined) ? '' : String(value);
+        const escaped = raw.replace(/"/g, '""');
+        return `"${escaped}"`;
+}
+
+function historyToCsv(
+        runs: BatchHistoryRun[],
+        owlIgnorePatterns: string[] = [],
+        embeddingModelName: string = ''
+): string {
+        const owlIgnoreText = Array.isArray(owlIgnorePatterns) ? owlIgnorePatterns.join('|') : '';
+        const header = [
+                'run_id',
+                'timestamp',
+                'language',
+                'folder_path',
+                'include_paths',
+                'exclude_paths',
+                'owlignore_patterns',
+                'embedding_model_name',
+                'query_index',
+                'original_query',
+                'translated_query',
+                'result_rank',
+                'result_name',
+                'result_class_name',
+                'result_file',
+                'result_line',
+                'result_end_line',
+                'result_code'
+        ];
+        const rows: string[] = [header.join(',')];
+        for (const run of runs) {
+                const includePaths = Array.isArray(run.includePaths) ? run.includePaths.join('|') : '';
+                const excludePaths = Array.isArray(run.excludePaths) ? run.excludePaths.join('|') : '';
+                const items = Array.isArray(run.items) ? run.items : [];
+                if (items.length === 0) {
+                        rows.push([
+                                safeCsvValue(run.id ?? ''),
+                                safeCsvValue(run.timestamp ?? ''),
+                                safeCsvValue(run.language ?? ''),
+                                safeCsvValue(run.folderPath ?? ''),
+                                safeCsvValue(includePaths),
+                                safeCsvValue(excludePaths),
+                                safeCsvValue(owlIgnoreText),
+                                safeCsvValue(embeddingModelName),
+                                safeCsvValue(''),
+                                safeCsvValue(''),
+                                safeCsvValue(''),
+                                safeCsvValue(''),
+                                safeCsvValue(''),
+                                safeCsvValue(''),
+                                safeCsvValue(''),
+                                safeCsvValue(''),
+                                safeCsvValue(''),
+                                safeCsvValue('')
+                        ].join(','));
+                        continue;
+                }
+                items.forEach((item, queryIndex) => {
+                        const query = item.original_query || item.query || '';
+                        const translated = item.translated_query || item.query || '';
+                        const results = Array.isArray(item.results) ? item.results : [];
+                        if (results.length === 0) {
+                                rows.push([
+                                        safeCsvValue(run.id ?? ''),
+                                        safeCsvValue(run.timestamp ?? ''),
+                                        safeCsvValue(run.language ?? ''),
+                                        safeCsvValue(run.folderPath ?? ''),
+                                        safeCsvValue(includePaths),
+                                        safeCsvValue(excludePaths),
+                                        safeCsvValue(owlIgnoreText),
+                                        safeCsvValue(embeddingModelName),
+                                        safeCsvValue(queryIndex + 1),
+                                        safeCsvValue(query),
+                                        safeCsvValue(translated),
+                                        safeCsvValue(''),
+                                        safeCsvValue(''),
+                                        safeCsvValue(''),
+                                        safeCsvValue(''),
+                                        safeCsvValue(''),
+                                        safeCsvValue(''),
+                                        safeCsvValue('')
+                                ].join(','));
+                                return;
+                        }
+                        results.forEach((result, resultIndex) => {
+                                rows.push([
+                                        safeCsvValue(run.id ?? ''),
+                                        safeCsvValue(run.timestamp ?? ''),
+                                        safeCsvValue(run.language ?? ''),
+                                        safeCsvValue(run.folderPath ?? ''),
+                                        safeCsvValue(includePaths),
+                                        safeCsvValue(excludePaths),
+                                        safeCsvValue(owlIgnoreText),
+                                        safeCsvValue(embeddingModelName),
+                                        safeCsvValue(queryIndex + 1),
+                                        safeCsvValue(query),
+                                        safeCsvValue(translated),
+                                        safeCsvValue(resultIndex + 1),
+                                        safeCsvValue(result?.function_name || result?.name || ''),
+                                        safeCsvValue(result?.class_name || ''),
+                                        safeCsvValue(result?.file_path || result?.file || ''),
+                                        safeCsvValue(result?.lineno || result?.line_number || ''),
+                                        safeCsvValue(result?.end_lineno || ''),
+                                        safeCsvValue(result?.code || '')
+                                ].join(','));
+                        });
+                });
+        }
+        return rows.join('\n');
+}
+
+function normalizePatternList(value: unknown): string[] {
+        if (!Array.isArray(value)) {
+                return [];
+        }
+        return Array.from(new Set(
+                value
+                        .filter((item): item is string => typeof item === 'string')
+                        .map(item => item.trim().replace(/\\/g, '/'))
+                        .map(item => item.startsWith('./') ? item.slice(2) : item)
+                        .map(item => item.replace(/^\/+/, ''))
+                        .filter(item => item.length > 0)
+        ));
+}
+
+function getOwlIgnoreSettings(): OwlIgnoreSettings {
+        const config = vscode.workspace.getConfiguration('owlspotlight');
+        const raw = config.get<any>('owlIgnoreSettings', {});
+        const autoCreate = typeof raw?.autoCreate === 'boolean' ? raw.autoCreate : true;
+        const applyOnDisplay = typeof raw?.applyOnDisplay === 'boolean' ? raw.applyOnDisplay : true;
+        return {
+                autoCreate,
+                applyOnDisplay
+        };
+}
+
+function escapeRegex(value: string): string {
+        return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function globToRegex(pattern: string): RegExp {
+        const placeholder = '__OWL_GLOBSTAR__';
+        const withPlaceholder = pattern.replace(/\*\*/g, placeholder);
+        const escaped = escapeRegex(withPlaceholder)
+                .replace(new RegExp(placeholder, 'g'), '.*')
+                .replace(/\\\*/g, '[^/]*')
+                .replace(/\\\?/g, '[^/]');
+        return new RegExp(`^${escaped}$`);
+}
+
+function normalizeRelPath(value: string): string {
+        return value.replace(/\\/g, '/').replace(/^\/+/, '');
+}
+
+function isIgnoredByPatterns(relPath: string, patterns: string[]): boolean {
+        const rel = normalizeRelPath(relPath);
+        for (const rawPattern of patterns) {
+                if (!rawPattern || rawPattern.startsWith('!')) {
+                        continue;
+                }
+                const pattern = normalizeRelPath(rawPattern);
+                if (!pattern) {
+                        continue;
+                }
+                if (pattern.endsWith('/')) {
+                        const dir = pattern.replace(/\/+$/, '');
+                        if (rel === dir || rel.startsWith(`${dir}/`)) {
+                                return true;
+                        }
+                        continue;
+                }
+                if (pattern.includes('*') || pattern.includes('?')) {
+                        if (globToRegex(pattern).test(rel)) {
+                                return true;
+                        }
+                        continue;
+                }
+                if (!pattern.includes('/')) {
+                        const parts = rel.split('/');
+                        if (parts.includes(pattern)) {
+                                return true;
+                        }
+                }
+                if (rel === pattern || rel.startsWith(`${pattern}/`)) {
+                        return true;
+                }
+        }
+        return false;
+}
+
+function filterSearchResultsByPatterns(results: any[], workspaceRoot: string, patterns: string[]): any[] {
+        if (!Array.isArray(results) || patterns.length === 0) {
+                return Array.isArray(results) ? results : [];
+        }
+        return results.filter((result) => {
+                const filePath = (result?.file_path || result?.file) as string | undefined;
+                if (!filePath) {
+                        return true;
+                }
+                const absPath = path.isAbsolute(filePath) ? filePath : path.join(workspaceRoot, filePath);
+                const relPath = normalizeRelPath(path.relative(workspaceRoot, absPath));
+                if (relPath.startsWith('..')) {
+                        return true;
+                }
+                return !isIgnoredByPatterns(relPath, patterns);
+        });
+}
+
+function filterClassStatsByPatterns(data: any, workspaceRoot: string, patterns: string[]): any {
+        if (!data || patterns.length === 0) {
+                return data;
+        }
+        const classes = Array.isArray(data.classes) ? data.classes : [];
+        const standalone = Array.isArray(data.standalone_functions) ? data.standalone_functions : [];
+
+        const filteredClasses = classes
+                .map((cls: any) => {
+                        const methods = filterSearchResultsByPatterns(cls?.methods || [], workspaceRoot, patterns);
+                        return {
+                                ...cls,
+                                methods,
+                                method_count: methods.length
+                        };
+                })
+                .filter((cls: any) => cls.method_count > 0);
+        const filteredStandalone = filterSearchResultsByPatterns(standalone, workspaceRoot, patterns);
+
+        return {
+                ...data,
+                classes: filteredClasses,
+                standalone_functions: filteredStandalone,
+                total_classes: filteredClasses.length,
+                total_standalone_functions: filteredStandalone.length
+        };
+}
+
 // Translate Japanese query to English using Gemini API
 async function translateJapaneseToEnglish(text: string): Promise<string> {
     const config = vscode.workspace.getConfiguration('owlspotlight');
@@ -324,6 +585,87 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                 } catch {}
 
 		// Webviewからのメッセージ受信
+                const normalizeStringList = (value: unknown): string[] => {
+                        if (!Array.isArray(value)) {
+                                return [];
+                        }
+                        return value
+                                .filter((item): item is string => typeof item === 'string')
+                                .map(item => item.trim())
+                                .filter(item => item.length > 0);
+                };
+                const normalizeHistoryRuns = (value: unknown): BatchHistoryRun[] => {
+                        if (!Array.isArray(value)) {
+                                return [];
+                        }
+                        return value.filter((run): run is BatchHistoryRun => !!run && typeof run === 'object');
+                };
+                const owlIgnoreCache = new Map<string, string[]>();
+
+                const syncScopeManagerData = async (
+                        workspaceRoot: string,
+                        opts?: { maxDepth?: number; includeTree?: boolean; postToWebview?: boolean }
+                ) => {
+                        const options = opts ?? {};
+                        const settings = getOwlIgnoreSettings();
+                        const maxDepth = typeof options.maxDepth === 'number' ? options.maxDepth : 4;
+                        const includeTree = options.includeTree !== false;
+                        const postToWebview = options.postToWebview === true;
+                        try {
+                                const res = await fetch('http://localhost:8000/owlignore_manager_data', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({
+                                                directory: workspaceRoot,
+                                                max_depth: maxDepth,
+                                                ensure_initialized: settings.autoCreate,
+                                                include_tree: includeTree
+                                        })
+                                });
+                                if (!res.ok) {
+                                        throw new Error(`HTTP ${res.status}`);
+                                }
+                                const data: any = await res.json();
+                                const patterns = normalizePatternList(data?.patterns);
+                                owlIgnoreCache.set(workspaceRoot, patterns);
+                                if (postToWebview) {
+                                        webviewView.webview.postMessage({
+                                                type: 'scopeManagerData',
+                                                data: {
+                                                        ...data,
+                                                        patterns,
+                                                        applyOnDisplay: settings.applyOnDisplay
+                                                }
+                                        });
+                                }
+                                return data;
+                        } catch (error: any) {
+                                if (postToWebview) {
+                                        webviewView.webview.postMessage({
+                                                type: 'scopeManagerError',
+                                                message: `Failed to load .owlignore manager data: ${error?.message || String(error)}`
+                                        });
+                                }
+                                return null;
+                        }
+                };
+
+                const resolveScope = (workspaceRoot: string, extraExclude: string[]) => {
+                        const settings = getOwlIgnoreSettings();
+                        const requestExclude = normalizePatternList(extraExclude);
+                        const displayExclude = requestExclude;
+                        return {
+                                owlIgnorePatterns: owlIgnoreCache.get(workspaceRoot) || [],
+                                requestExclude,
+                                displayExclude,
+                                applyOnDisplay: settings.applyOnDisplay
+                        };
+                };
+
+                const initialWorkspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+                if (initialWorkspace) {
+                        void syncScopeManagerData(initialWorkspace, { includeTree: true, postToWebview: true });
+                }
                 webviewView.webview.onDidReceiveMessage(async (msg) => {
                         if (msg && msg.command === 'persistState') {
                                 try {
@@ -364,6 +706,139 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                 const enable = config.get<boolean>('enableJapaneseTranslation', false);
                                 webviewView.webview.postMessage({ type: 'translationSettings', enable });
                         }
+                        if (msg.command === 'requestScopeManagerData') {
+                                const workspaceFolders = vscode.workspace.workspaceFolders;
+                                if (!workspaceFolders || workspaceFolders.length === 0) {
+                                        webviewView.webview.postMessage({ type: 'scopeManagerError', message: 'No workspace folder found' });
+                                        return;
+                                }
+                                const folderPath = workspaceFolders[0].uri.fsPath;
+                                await syncScopeManagerData(folderPath, {
+                                        maxDepth: typeof msg.maxDepth === 'number' ? msg.maxDepth : 4,
+                                        includeTree: true,
+                                        postToWebview: true
+                                });
+                                return;
+                        }
+                        if (msg.command === 'saveOwlIgnorePatterns') {
+                                const workspaceFolders = vscode.workspace.workspaceFolders;
+                                if (!workspaceFolders || workspaceFolders.length === 0) {
+                                        webviewView.webview.postMessage({ type: 'scopeManagerError', message: 'No workspace folder found' });
+                                        return;
+                                }
+                                const folderPath = workspaceFolders[0].uri.fsPath;
+                                const patterns = normalizePatternList(msg.patterns);
+                                try {
+                                        const res = await fetch('http://localhost:8000/update_owlignore', {
+                                                method: 'POST',
+                                                headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({
+                                                        directory: folderPath,
+                                                        patterns,
+                                                        max_depth: typeof msg.maxDepth === 'number' ? msg.maxDepth : 4
+                                                })
+                                        });
+                                        if (!res.ok) {
+                                                throw new Error(`HTTP ${res.status}`);
+                                        }
+                                        const data: any = await res.json();
+                                        const normalizedPatterns = normalizePatternList(data?.patterns);
+                                        owlIgnoreCache.set(folderPath, normalizedPatterns);
+                                        webviewView.webview.postMessage({
+                                                type: 'scopeManagerData',
+                                                data: {
+                                                        ...data,
+                                                        patterns: normalizedPatterns,
+                                                        applyOnDisplay: getOwlIgnoreSettings().applyOnDisplay
+                                                }
+                                        });
+                                        webviewView.webview.postMessage({ type: 'scopeManagerSaved', message: '.owlignore updated.' });
+                                } catch (error: any) {
+                                        webviewView.webview.postMessage({
+                                                type: 'scopeManagerError',
+                                                message: `Failed to update .owlignore: ${error?.message || String(error)}`
+                                        });
+                                }
+                                return;
+                        }
+                        if (msg.command === 'exportHistory') {
+                                const historyRuns = normalizeHistoryRuns(msg.history);
+                                if (historyRuns.length === 0) {
+                                        webviewView.webview.postMessage({ type: 'historyExportError', message: 'History is empty.' });
+                                        return;
+                                }
+                                const formatPick = await vscode.window.showQuickPick(
+                                        [
+                                                { label: 'JSON', description: 'Export full history as structured JSON', value: 'json' },
+                                                { label: 'CSV', description: 'Export flattened rows for analysis', value: 'csv' }
+                                        ],
+                                        {
+                                                placeHolder: 'Select export format',
+                                                ignoreFocusOut: true
+                                        }
+                                );
+                                if (!formatPick) {
+                                        return;
+                                }
+                                const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+                                let owlIgnorePatterns: string[] = [];
+                                let embeddingModelName = '';
+                                let currentModelName = '';
+                                if (workspaceRoot) {
+                                        const synced = await syncScopeManagerData(workspaceRoot, {
+                                                includeTree: false,
+                                                postToWebview: false
+                                        });
+                                        owlIgnorePatterns = normalizePatternList(
+                                                synced?.patterns ?? owlIgnoreCache.get(workspaceRoot) ?? []
+                                        );
+                                }
+                                try {
+                                        const statusRes = await fetch('http://localhost:8000/index_status');
+                                        if (statusRes.ok) {
+                                                const statusData: any = await statusRes.json();
+                                                embeddingModelName = typeof statusData?.indexed_model_name === 'string'
+                                                        ? statusData.indexed_model_name
+                                                        : '';
+                                                currentModelName = typeof statusData?.current_model_name === 'string'
+                                                        ? statusData.current_model_name
+                                                        : '';
+                                        }
+                                } catch {}
+                                const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+                                const ext = formatPick.value === 'csv' ? 'csv' : 'json';
+                                const defaultFileName = `owlspotlight-history-${stamp}.${ext}`;
+                                const defaultWorkspace = vscode.workspace.workspaceFolders?.[0]?.uri;
+                                const defaultUri = defaultWorkspace
+                                        ? vscode.Uri.joinPath(defaultWorkspace, defaultFileName)
+                                        : undefined;
+                                const saveUri = await vscode.window.showSaveDialog({
+                                        defaultUri,
+                                        saveLabel: 'Export OwlSpotlight History',
+                                        filters: ext === 'csv'
+                                                ? { CSV: ['csv'], All: ['*'] }
+                                                : { JSON: ['json'], All: ['*'] }
+                                });
+                                if (!saveUri) {
+                                        return;
+                                }
+                                const payload = formatPick.value === 'csv'
+                                        ? historyToCsv(historyRuns, owlIgnorePatterns, embeddingModelName)
+                                        : JSON.stringify({
+                                                version: 2,
+                                                exportedAt: new Date().toISOString(),
+                                                workspace: workspaceRoot || null,
+                                                embedding_model_name: embeddingModelName,
+                                                current_model_name: currentModelName,
+                                                owlignore: {
+                                                        patterns: owlIgnorePatterns
+                                                },
+                                                runs: historyRuns
+                                        }, null, 2);
+                                await vscode.workspace.fs.writeFile(saveUri, Buffer.from(payload, 'utf8'));
+                                webviewView.webview.postMessage({ type: 'historyExported', path: saveUri.fsPath });
+                                return;
+                        }
                         if (msg.command === 'search') {
 				// サーバー起動チェック
 				let serverUp = true;
@@ -387,21 +862,35 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                 // Always send both original and translated query to Webview for debugging
                                 webviewView.webview.postMessage({ type: 'translatedQuery', original: originalQuery, translated: query });
                                 const fileExt = msg.lang || '.py';
+                                const includePaths = normalizeStringList(msg.includePaths);
+                                const excludePaths = normalizeStringList(msg.excludePaths);
 				const workspaceFolders = vscode.workspace.workspaceFolders;
 				if (!workspaceFolders || workspaceFolders.length === 0) {
 					webviewView.webview.postMessage({ type: 'error', message: 'No workspace folder found' });
 					return;
 				}
 				const folderPath = workspaceFolders[0].uri.fsPath;
+                                const scope = resolveScope(folderPath, excludePaths);
 				webviewView.webview.postMessage({ type: 'status', message: 'Searching...' });
 				const res = await fetch('http://localhost:8000/search_functions_simple', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ directory: folderPath, query, top_k: 10, file_ext: fileExt })
+                                        body: JSON.stringify({
+                                                directory: folderPath,
+                                                query,
+                                                top_k: 10,
+                                                file_ext: fileExt,
+                                                include_paths: includePaths,
+                                                exclude_paths: scope.requestExclude
+                                        })
 				});
 				const data: any = await res.json();
-				if (data && data.results && Array.isArray(data.results) && data.results.length > 0) {
-					webviewView.webview.postMessage({ type: 'results', results: data.results, folderPath });
+                                const rawResults = Array.isArray(data?.results) ? data.results : [];
+                                const visibleResults = scope.applyOnDisplay
+                                        ? filterSearchResultsByPatterns(rawResults, folderPath, scope.displayExclude)
+                                        : rawResults;
+				if (visibleResults.length > 0) {
+					webviewView.webview.postMessage({ type: 'results', results: visibleResults, folderPath });
 				} else {
 					webviewView.webview.postMessage({ type: 'results', results: [], folderPath });
 				}
@@ -418,19 +907,96 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                 query = await translateJapaneseToEnglish(query);
                 webviewView.webview.postMessage({ type: 'translatedQuery', original: originalQuery, translated: query });
                 const fileExt = msg.lang || '.py';
+                const includePaths = normalizeStringList(msg.includePaths);
+                const excludePaths = normalizeStringList(msg.excludePaths);
+                const scope = resolveScope(folderPath, excludePaths);
 				webviewView.webview.postMessage({ type: 'status', message: 'Loading class statistics...' });
 				try {
 					const res = await fetch('http://localhost:8000/get_class_stats', {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify({ directory: folderPath, query: query, top_k: 50, file_ext: fileExt })
+                                                body: JSON.stringify({
+                                                        directory: folderPath,
+                                                        query: query,
+                                                        top_k: 50,
+                                                        file_ext: fileExt,
+                                                        include_paths: includePaths,
+                                                        exclude_paths: scope.requestExclude
+                                                })
 					});
 					const data: any = await res.json();
-					webviewView.webview.postMessage({ type: 'classStats', data, folderPath });
+                                        const visibleData = scope.applyOnDisplay
+                                                ? filterClassStatsByPatterns(data, folderPath, scope.displayExclude)
+                                                : data;
+					webviewView.webview.postMessage({ type: 'classStats', data: visibleData, folderPath });
 				} catch (error) {
 					webviewView.webview.postMessage({ type: 'error', message: 'Failed to load statistics. Make sure the server is running.' });
 				}
 			}
+                        if (msg.command === 'runBatchSearch') {
+                                // サーバー起動チェック
+                                let serverUp = true;
+                                try {
+                                        const statusRes = await fetch('http://localhost:8000/index_status');
+                                        if (!statusRes.ok) { serverUp = false; }
+                                } catch (e) {
+                                        serverUp = false;
+                                }
+                                if (!serverUp) {
+                                        webviewView.webview.postMessage({ type: 'batchError', message: 'Search server is not running.' });
+                                        return;
+                                }
+                                const workspaceFolders = vscode.workspace.workspaceFolders;
+                                if (!workspaceFolders || workspaceFolders.length === 0) {
+                                        webviewView.webview.postMessage({ type: 'batchError', message: 'No workspace folder found' });
+                                        return;
+                                }
+                                const inputQueries = normalizeStringList(msg.queries);
+                                if (inputQueries.length === 0) {
+                                        webviewView.webview.postMessage({ type: 'batchError', message: 'No queries provided.' });
+                                        return;
+                                }
+                                const fileExt = msg.lang || '.py';
+                                const includePaths = normalizeStringList(msg.includePaths);
+                                const excludePaths = normalizeStringList(msg.excludePaths);
+                                const folderPath = workspaceFolders[0].uri.fsPath;
+                                const scope = resolveScope(folderPath, excludePaths);
+                                const translatedQueries: string[] = [];
+                                for (const q of inputQueries) {
+                                        translatedQueries.push(await translateJapaneseToEnglish(q));
+                                }
+                                try {
+                                        const res = await fetch('http://localhost:8000/search_functions_batch', {
+                                                method: 'POST',
+                                                headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({
+                                                        directory: folderPath,
+                                                        queries: translatedQueries,
+                                                        top_k: 10,
+                                                        file_ext: fileExt,
+                                                        include_paths: includePaths,
+                                                        exclude_paths: scope.requestExclude
+                                                })
+                                        });
+                                        const data: any = await res.json();
+                                        const items = Array.isArray(data?.items) ? data.items : [];
+                                        const mergedItems = items.map((item: any, index: number) => ({
+                                                ...item,
+                                                original_query: inputQueries[index] || item.query || '',
+                                                translated_query: translatedQueries[index] || item.query || '',
+                                                results: scope.applyOnDisplay
+                                                        ? filterSearchResultsByPatterns(item?.results || [], folderPath, scope.displayExclude)
+                                                        : (Array.isArray(item?.results) ? item.results : [])
+                                        }));
+                                        webviewView.webview.postMessage({
+                                                type: 'batchResults',
+                                                data: { ...data, items: mergedItems },
+                                                folderPath
+                                        });
+                                } catch (error) {
+                                        webviewView.webview.postMessage({ type: 'batchError', message: 'Batch search failed. Make sure the server is running.' });
+                                }
+                        }
 			if (msg.command === 'jump') {
 				const file = msg.file;
 				const line = msg.line;
@@ -595,12 +1161,20 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				}
                                 const folderPath = workspaceFolders[0].uri.fsPath;
                                 const fileExt = msg.lang || '.py';
+                                const includePaths = normalizeStringList(msg.includePaths);
+                                const excludePaths = normalizeStringList(msg.excludePaths);
+                                const scope = resolveScope(folderPath, excludePaths);
                                 webviewView.webview.postMessage({ type: 'status', message: 'Clearing cache and rebuilding index...' });
 				try {
 					const res = await fetch('http://localhost:8000/force_rebuild_index', {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify({ directory: folderPath, file_ext: fileExt })
+                                                body: JSON.stringify({
+                                                        directory: folderPath,
+                                                        file_ext: fileExt,
+                                                        include_paths: includePaths,
+                                                        exclude_paths: scope.requestExclude
+                                                })
 					});
 					const data = await res.json();
 					const msg = typeof data === 'object' && data && 'message' in data ? (data as any).message : undefined;
@@ -675,7 +1249,26 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
   <div class="tabs">
     <button class="tab-btn active" data-tab="search">Search</button>
     <button class="tab-btn" data-tab="stats">Class Stats</button>
+    <button class="tab-btn" data-tab="experimental">Experimental</button>
   </div>
+  <div class="scope-toggle-row">
+    <button id="scopeManagerBtn">Scope / .owlignore</button>
+  </div>
+  <details id="scopeDetails" class="scope-collapsible">
+    <summary>Scope (.owlignore + optional GUI filters)</summary>
+    <div class="scope-settings">
+      <input id="includePathsInput" type="text" placeholder="Include folders/patterns (comma or newline separated), e.g. src,lib/**" />
+      <input id="excludePathsInput" type="text" placeholder="Exclude folders/patterns, e.g. dist,node_modules/**" />
+      <label class="owlignore-current-label" for="owlignoreCurrentPatterns">Current server .owlignore patterns</label>
+      <textarea id="owlignoreCurrentPatterns" class="owlignore-current-patterns" readonly></textarea>
+      <div class="owlignore-toolbar">
+        <button id="refreshScopeTreeBtn">Refresh Tree</button>
+        <button id="saveOwlIgnoreBtn">Save .owlignore</button>
+      </div>
+      <div class="status" id="owlignore-status"></div>
+      <div id="owlignore-tree" class="dir-tree"></div>
+    </div>
+  </details>
   <!-- 検索タブ -->
   <div class="tab-content active" id="search-tab">
     <div class="searchbar">
@@ -700,6 +1293,25 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
     </div>
     <div class="status" id="stats-status"></div>
     <div class="stats-results" id="stats-results"></div>
+  </div>
+  <!-- 実験タブ -->
+  <div class="tab-content" id="experimental-tab">
+    <div class="experimental-mode-toggle">
+      <button class="exp-mode-btn active" data-exp-mode="run" id="expRunModeBtn">Run</button>
+      <button class="exp-mode-btn" data-exp-mode="history" id="expHistoryModeBtn">History</button>
+      <button id="exportHistoryBtn">Export</button>
+      <button id="clearHistoryBtn">Clear History</button>
+    </div>
+    <div class="experimental-panel active" id="exp-run-panel">
+      <textarea id="batchQueriesInput" placeholder="One query per line..."></textarea>
+      <button id="runBatchBtn">Run Batch</button>
+      <div class="status" id="exp-status"></div>
+      <div class="results" id="exp-results"></div>
+    </div>
+    <div class="experimental-panel" id="exp-history-panel">
+      <div class="status" id="history-status">Saved runs</div>
+      <div class="results" id="history-results"></div>
+    </div>
   </div>
   <script nonce="${nonce}">
     window.HELP_HTML_URI = "${helpUri}";

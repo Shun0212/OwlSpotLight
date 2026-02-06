@@ -1,10 +1,11 @@
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sentence_transformers import SentenceTransformer
 import torch
 from threading import Lock
 import os
 from typing import List, Dict, Optional
+import fnmatch
 from concurrent.futures import ThreadPoolExecutor
 import pathlib
 from tqdm import tqdm
@@ -81,16 +82,30 @@ class IndexStatus(BaseModel):
     indexed_files: List[str]
     last_indexed: float
     up_to_date: bool
+    current_model_name: str
+    indexed_model_name: str
 
 class BuildIndexRequest(BaseModel):
     directory: str
     file_ext: str = ".py"
+    include_paths: List[str] = Field(default_factory=list)
+    exclude_paths: List[str] = Field(default_factory=list)
 
 class SearchFunctionsSimpleRequest(BaseModel):
     directory: str
     query: str
     top_k: int = 5
     file_ext: str = ".py"
+    include_paths: List[str] = Field(default_factory=list)
+    exclude_paths: List[str] = Field(default_factory=list)
+
+class BatchSearchFunctionsRequest(BaseModel):
+    directory: str
+    queries: List[str]
+    top_k: int = 5
+    file_ext: str = ".py"
+    include_paths: List[str] = Field(default_factory=list)
+    exclude_paths: List[str] = Field(default_factory=list)
 
 class FunctionRangeRequest(BaseModel):
     file: str
@@ -102,6 +117,19 @@ class ClassStatsRequest(BaseModel):
     query: str  # 検索クエリ
     top_k: int = 50  # 上位何件の関数を取得するか
     file_ext: str = ".py"
+    include_paths: List[str] = Field(default_factory=list)
+    exclude_paths: List[str] = Field(default_factory=list)
+
+class OwlIgnoreManagerRequest(BaseModel):
+    directory: str
+    max_depth: int = 4
+    ensure_initialized: bool = True
+    include_tree: bool = True
+
+class OwlIgnoreUpdateRequest(BaseModel):
+    directory: str
+    patterns: List[str] = Field(default_factory=list)
+    max_depth: int = 4
 
 # サーバー全体で1つのインデックスを保持
 index_lock = Lock()
@@ -115,6 +143,9 @@ class GlobalIndexerState:
         self.directory: Optional[str] = None
         self.last_indexed: float = 0.0
         self.file_ext: str = ".py"
+        self.include_paths: List[str] = []
+        self.exclude_paths: List[str] = []
+        self.scope_signature: str = ""
         self.embeddings: Optional[np.ndarray] = None  # 追加: 関数埋め込み
         self.faiss_index: Optional[faiss.IndexFlatL2] = None  # 追加: FAISSインデックス
         self.index_dir = None  # ディレクトリごとに動的に設定
@@ -139,18 +170,35 @@ class GlobalIndexerState:
         self.index_dir = os.path.join(model_server_dir, OWL_INDEX_DIR, f"{safe_dir}_{dir_hash}", ext_dir)
         # Directory creation is only done on save (not on startup)
 
-    def is_up_to_date(self, directory: Optional[str] = None) -> bool:
+    def is_up_to_date(
+        self,
+        directory: Optional[str] = None,
+        include_paths: Optional[List[str]] = None,
+        exclude_paths: Optional[List[str]] = None
+    ) -> bool:
         # If directory argument is specified, compare it with self.directory
         if directory is not None:
             if os.path.abspath(directory) != os.path.abspath(self.directory or ""):
                 print(f"[is_up_to_date] Directory mismatch: {directory} != {self.directory}")
                 return False
+        normalized_include = normalize_scope_patterns(include_paths)
+        normalized_exclude = normalize_scope_patterns(exclude_paths)
+        if self.include_paths != normalized_include:
+            print(f"[is_up_to_date] include_paths mismatch: {self.include_paths} != {normalized_include}")
+            return False
+        if self.exclude_paths != normalized_exclude:
+            print(f"[is_up_to_date] exclude_paths mismatch: {self.exclude_paths} != {normalized_exclude}")
+            return False
         current_model_config = self.get_current_model_config()
         if self.model_config and self.model_config != current_model_config:
             print(f"[is_up_to_date] Model config mismatch: {self.model_config} != {current_model_config}")
             return False
         if not self.directory:
             print("[is_up_to_date] self.directory is None")
+            return False
+        current_scope_signature = compute_scope_signature(os.path.abspath(self.directory), self.exclude_paths)
+        if self.scope_signature != current_scope_signature:
+            print("[is_up_to_date] ignore scope signature changed")
             return False
         # If file info is empty, consider it outdated
         if not self.file_info:
@@ -171,15 +219,17 @@ class GlobalIndexerState:
         # Detect newly added files that match the target extension and are not ignored
         try:
             scan_dir = os.path.abspath(self.directory)
-            spec = load_gitignore_spec(scan_dir)
+            spec = load_ignore_spec(scan_dir, self.exclude_paths)
             for root, dirs, files in os.walk(scan_dir):
-                # Respect .gitignore for directories
+                # Respect ignore files for directories
                 dirs[:] = [d for d in dirs if not is_ignored(os.path.join(root, d), spec, scan_dir)]
                 for fname in files:
                     if not fname.endswith(self.file_ext):
                         continue
                     fpath = os.path.join(root, fname)
                     if is_ignored(fpath, spec, scan_dir):
+                        continue
+                    if not is_included(fpath, scan_dir, self.include_paths):
                         continue
                     if fpath not in self.file_info:
                         print(f"[is_up_to_date] New file detected: {fpath}")
@@ -201,6 +251,9 @@ class GlobalIndexerState:
         self.last_indexed = 0.0
         self.model_name = None
         self.model_config = {}
+        self.include_paths = []
+        self.exclude_paths = []
+        self.scope_signature = ""
         if clear_disk and self.index_dir and os.path.exists(self.index_dir):
             shutil.rmtree(self.index_dir, ignore_errors=True)
 
@@ -256,6 +309,9 @@ class GlobalIndexerState:
             "directory": os.path.abspath(self.directory) if self.directory else None,
             "last_indexed": self.last_indexed,
             "file_ext": self.file_ext,
+            "include_paths": self.include_paths,
+            "exclude_paths": self.exclude_paths,
+            "scope_signature": self.scope_signature,
             "model_name": self.model_name or model_name,
             "model_config": self.model_config or self.get_current_model_config(),
         }
@@ -275,6 +331,9 @@ class GlobalIndexerState:
             self.directory = None
             self.last_indexed = 0.0
             self.file_ext = ".py"
+            self.include_paths = []
+            self.exclude_paths = []
+            self.scope_signature = ""
             self.model_name = None
             self.model_config = {}
             return
@@ -308,6 +367,9 @@ class GlobalIndexerState:
             self.directory = os.path.abspath(meta.get("directory", directory))
             self.last_indexed = meta.get("last_indexed", 0.0)
             self.file_ext = meta.get("file_ext", ".py")
+            self.include_paths = normalize_scope_patterns(meta.get("include_paths", []))
+            self.exclude_paths = normalize_scope_patterns(meta.get("exclude_paths", []))
+            self.scope_signature = meta.get("scope_signature", "")
             self.model_name = meta.get("model_name")
             self.model_config = meta.get("model_config", {"model_name": self.model_name})
             loaded_items.append(f"meta({len(self.file_info)} files)")
@@ -317,6 +379,9 @@ class GlobalIndexerState:
             self.directory = None
             self.last_indexed = 0.0
             self.file_ext = ".py"
+            self.include_paths = []
+            self.exclude_paths = []
+            self.scope_signature = ""
             self.model_name = None
             self.model_config = {}
         if loaded_items:
@@ -327,23 +392,203 @@ class GlobalIndexerState:
 global_index_state = GlobalIndexerState()
 # サーバー起動時は自動ロードを行わない（メモリキャッシュ優先、必要時のみディスクアクセス）
 
-def load_gitignore_spec(root_dir: str) -> Optional[PathSpec]:
+def normalize_scope_patterns(patterns: Optional[List[str]]) -> List[str]:
+    if not patterns:
+        return []
+    normalized: List[str] = []
+    for pattern in patterns:
+        if not isinstance(pattern, str):
+            continue
+        cleaned = pattern.strip().replace("\\", "/")
+        if cleaned.startswith("./"):
+            cleaned = cleaned[2:]
+        cleaned = cleaned.lstrip("/")
+        if cleaned:
+            normalized.append(cleaned)
+    return sorted(set(normalized))
+
+
+DEFAULT_OWLIGNORE_PATTERNS = [
+    "node_modules/",
+    "out/",
+    "dist/",
+    "build/",
+    ".venv/",
+    "__pycache__/",
+    ".owl_index/"
+]
+
+
+SCOPE_STORE_DIR = ".owl_scope"
+
+
+def _workspace_scope_key(root_dir: str) -> str:
+    abs_root = os.path.abspath(root_dir)
+    dir_hash = hashlib.md5(abs_root.encode()).hexdigest()[:16]
+    safe_dir = os.path.basename(abs_root) or "workspace"
+    return f"{safe_dir}_{dir_hash}"
+
+
+def get_owlignore_path(root_dir: str) -> str:
+    model_server_dir = os.path.dirname(os.path.abspath(__file__))
+    store_dir = os.path.join(model_server_dir, SCOPE_STORE_DIR)
+    os.makedirs(store_dir, exist_ok=True)
+    return os.path.join(store_dir, f"{_workspace_scope_key(root_dir)}.json")
+
+
+def read_gitignore_patterns(root_dir: str) -> List[str]:
+    gitignore_path = os.path.join(root_dir, ".gitignore")
+    if not os.path.exists(gitignore_path):
+        return []
+    with open(gitignore_path, encoding="utf-8") as f:
+        lines = [
+            ln.rstrip("\n")
+            for ln in f
+            if ln.strip() and not ln.strip().startswith("#")
+        ]
+    return normalize_scope_patterns(lines)
+
+
+def read_owlignore_patterns(root_dir: str) -> List[str]:
+    store_path = get_owlignore_path(root_dir)
+    if not os.path.exists(store_path):
+        return []
+    try:
+        with open(store_path, encoding="utf-8") as f:
+            payload = json.load(f)
+        return normalize_scope_patterns(payload.get("patterns", []))
+    except Exception as e:
+        print(f"[read_owlignore_patterns] Failed to read {store_path}: {e}")
+        return []
+
+
+def write_owlignore_patterns(root_dir: str, patterns: List[str]):
+    store_path = get_owlignore_path(root_dir)
+    normalized = normalize_scope_patterns(patterns)
+    payload = {
+        "directory": os.path.abspath(root_dir),
+        "patterns": normalized,
+        "updated_at": time.time()
+    }
+    tmp = store_path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, store_path)
+
+
+def ensure_owlignore_file(root_dir: str):
+    existing = read_owlignore_patterns(root_dir)
+    if existing:
+        return existing
+    defaults = read_gitignore_patterns(root_dir)
+    if not defaults:
+        defaults = DEFAULT_OWLIGNORE_PATTERNS
+    write_owlignore_patterns(root_dir, defaults)
+    return normalize_scope_patterns(defaults)
+
+
+def build_directory_tree(root_dir: str, patterns: List[str], max_depth: int = 4, max_nodes: int = 1500):
+    root_dir = os.path.abspath(root_dir)
+    max_depth = max(1, min(int(max_depth or 4), 12))
+    node_count = 0
+    scope_spec = PathSpec.from_lines(GitWildMatchPattern, patterns) if patterns else None
+
+    def is_checked(rel_path: str) -> bool:
+        if scope_spec is None:
+            return False
+        rp = rel_path.replace("\\", "/")
+        return scope_spec.match_file(rp) or scope_spec.match_file(f"{rp}/")
+
+    def walk(abs_dir: str, depth: int):
+        nonlocal node_count
+        if depth > max_depth or node_count >= max_nodes:
+            return []
+        entries = []
+        try:
+            with os.scandir(abs_dir) as it:
+                for entry in it:
+                    if not entry.is_dir(follow_symlinks=False):
+                        continue
+                    if entry.name in [".git", ".svn", ".hg"]:
+                        continue
+                    rel_path = os.path.relpath(entry.path, root_dir).replace("\\", "/")
+                    node_count += 1
+                    node = {
+                        "name": entry.name,
+                        "rel_path": rel_path,
+                        "checked": is_checked(rel_path),
+                        "children": []
+                    }
+                    if depth < max_depth and node_count < max_nodes:
+                        node["children"] = walk(entry.path, depth + 1)
+                    entries.append(node)
+                    if node_count >= max_nodes:
+                        break
+        except Exception as e:
+            print(f"[build_directory_tree] Failed to scan {abs_dir}: {e}")
+            return []
+        entries.sort(key=lambda x: x["name"].lower())
+        return entries
+
+    root_node = {
+        "name": os.path.basename(root_dir) or root_dir,
+        "rel_path": ".",
+        "checked": False,
+        "children": walk(root_dir, 1)
+    }
+    return root_node
+
+
+def collect_scope_patterns(root_dir: str, extra_excludes: Optional[List[str]] = None) -> List[str]:
+    lines: List[str] = []
+    lines.extend(read_gitignore_patterns(root_dir))
+    lines.extend(read_owlignore_patterns(root_dir))
+    lines.extend(normalize_scope_patterns(extra_excludes))
+    return normalize_scope_patterns(lines)
+
+
+def compute_scope_signature(root_dir: str, extra_excludes: Optional[List[str]] = None) -> str:
+    patterns = collect_scope_patterns(root_dir, extra_excludes)
+    payload = "\n".join(patterns)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def load_ignore_spec(root_dir: str, extra_excludes: Optional[List[str]] = None) -> Optional[PathSpec]:
     """
-    指定ディレクトリ直下の .gitignore を読み込み、Git のワイルドカード仕様
-    をそのまま解釈できる PathSpec を返す。存在しなければ None。
+    .gitignore とサーバー管理の .owlignore パターンを統合して読み込む。
+    GUI 由来の除外パターンは extra_excludes として追加できる。
     """
-    gi_path = os.path.join(root_dir, ".gitignore")
-    if not os.path.exists(gi_path):
+    lines = collect_scope_patterns(root_dir, extra_excludes)
+    if not lines:
         return None
-    with open(gi_path, encoding="utf-8") as f:
-        lines = [ln.rstrip("\n") for ln in f if ln.strip() and not ln.startswith("#")]
     return PathSpec.from_lines(GitWildMatchPattern, lines)
+
+
+def is_included(path: str, root_dir: str, include_patterns: Optional[List[str]] = None) -> bool:
+    normalized = normalize_scope_patterns(include_patterns)
+    if not normalized:
+        return True
+    rel_path = os.path.relpath(path, root_dir).replace("\\", "/")
+    for pattern in normalized:
+        if fnmatch.fnmatch(rel_path, pattern):
+            return True
+        # フォルダ指定 (例: src) でも配下を対象にする
+        if rel_path == pattern or rel_path.startswith(f"{pattern.rstrip('/')}/"):
+            return True
+    return False
 
 def is_ignored(path: str, spec: Optional[PathSpec], root_dir: str) -> bool:
     if spec is None:
         return False
-    rel_path = os.path.relpath(path, root_dir)
-    return spec.match_file(rel_path)
+    rel_path = os.path.relpath(path, root_dir).replace("\\", "/")
+    if spec.match_file(rel_path):
+        return True
+    # `dir/` パターンに対応するため、ディレクトリは末尾スラッシュでも判定する。
+    if os.path.isdir(path):
+        return spec.match_file(f"{rel_path}/")
+    return False
 
 # ファイルのハッシュ計算関数
 def file_hash(path):
@@ -357,7 +602,14 @@ def file_hash(path):
     return h.hexdigest()
 
 # ディレクトリ内の全ファイルから関数抽出・インデックス作成（一時的なインデックス、状態保存なし）
-def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, update_state: bool = False):
+def build_index(
+    directory: str,
+    file_ext: str = ".py",
+    max_workers: int = 8,
+    update_state: bool = False,
+    include_paths: Optional[List[str]] = None,
+    exclude_paths: Optional[List[str]] = None
+):
     import hashlib
     def func_id(func):
         # ファイルパス・関数名・lineno・end_linenoを組み合わせて一意なIDを生成
@@ -365,6 +617,9 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
         return hashlib.sha256(key.encode()).hexdigest()
 
     directory = os.path.abspath(directory)
+    include_patterns = normalize_scope_patterns(include_paths)
+    exclude_patterns = normalize_scope_patterns(exclude_paths)
+    current_scope_signature = compute_scope_signature(directory, exclude_patterns)
     current_model_config = global_index_state.get_current_model_config()
 
     # 1. まずメモリキャッシュが有効かつ up_to_date なら即リターン（メモリのみ）
@@ -372,7 +627,11 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
         global_index_state.indexer is not None and 
         global_index_state.directory == directory and
         global_index_state.file_ext == file_ext and
-        global_index_state.is_up_to_date(directory=directory)
+        global_index_state.is_up_to_date(
+            directory=directory,
+            include_paths=include_patterns,
+            exclude_paths=exclude_patterns
+        )
     ):
         if global_index_state.model_config and global_index_state.model_config != current_model_config:
             print("[build_index] Model config mismatch – rebuilding")
@@ -396,7 +655,11 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
         global_index_state.indexer is not None and 
         global_index_state.directory == directory and
         global_index_state.file_ext == file_ext and
-        global_index_state.is_up_to_date(directory=directory) and
+        global_index_state.is_up_to_date(
+            directory=directory,
+            include_paths=include_patterns,
+            exclude_paths=exclude_patterns
+        ) and
         global_index_state.model_config == current_model_config and
         (global_index_state.model_name is None or global_index_state.model_name == model_name)
     ):
@@ -427,7 +690,7 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
         if prev_indexer:
             for func in prev_indexer.functions:
                 prev_funcs_by_file.setdefault(func.get("file"), []).append(func)
-    spec = load_gitignore_spec(directory)
+    spec = load_ignore_spec(directory, exclude_patterns)
     file_paths = []
     for root, dirs, files in os.walk(directory):
         dirs[:] = [d for d in dirs if not is_ignored(os.path.join(root, d), spec, directory)]
@@ -436,6 +699,8 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
                 continue
             fpath = os.path.join(root, fname)
             if is_ignored(fpath, spec, directory):
+                continue
+            if not is_included(fpath, directory, include_patterns):
                 continue
             file_paths.append(fpath)
 
@@ -446,7 +711,7 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
     deleted = [f for f in prev_info if f not in new_info]
 
     # 変更・削除ゼロなら何もしないで戻る（キャッシュ再利用）
-    if update_state and not added_or_modified and not deleted:
+    if update_state and not added_or_modified and not deleted and global_index_state.indexer is not None:
         print(f"[build_index] No changes – reusing cache (funcs={len(global_index_state.indexer.functions)}, files={len(global_index_state.file_info)})")
         return (
             global_index_state.indexer.functions,
@@ -555,6 +820,9 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
         global_index_state.indexer = indexer
         global_index_state.directory = os.path.abspath(directory)
         global_index_state.file_ext = file_ext
+        global_index_state.include_paths = include_patterns
+        global_index_state.exclude_paths = exclude_patterns
+        global_index_state.scope_signature = current_scope_signature
         global_index_state.last_indexed = float(__import__('time').time())
         global_index_state.file_info = new_info
         global_index_state.model_name = model_name
@@ -590,7 +858,13 @@ async def index_and_search(req: IndexAndSearchRequest):
 async def build_index_api(req: BuildIndexRequest):
     print(f"/build_index called for directory: {req.directory}")
     with index_lock:
-        results, file_count, _ = build_index(req.directory, req.file_ext, update_state=True)
+        results, file_count, _ = build_index(
+            req.directory,
+            req.file_ext,
+            update_state=True,
+            include_paths=req.include_paths,
+            exclude_paths=req.exclude_paths
+        )
     return {"num_functions": len(results), "num_files": file_count}
 
 @app.post("/force_rebuild_index")
@@ -598,8 +872,14 @@ async def force_rebuild_index_api(req: BuildIndexRequest):
     """キャッシュをクリアして強制的にインデックスを再構築"""
     print(f"/force_rebuild_index called for directory: {req.directory}")
     with index_lock:
-        global_index_state.clear_cache()
-        results, file_count, _ = build_index(req.directory, req.file_ext, update_state=True)
+        global_index_state.clear_cache(clear_disk=True)
+        results, file_count, _ = build_index(
+            req.directory,
+            req.file_ext,
+            update_state=True,
+            include_paths=req.include_paths,
+            exclude_paths=req.exclude_paths
+        )
     return {"num_functions": len(results), "num_files": file_count, "message": "Index forcefully rebuilt"}
 
 @app.get("/index_status")
@@ -609,13 +889,59 @@ async def index_status():
     if global_index_state.directory is None:
         up_to_date = True
     else:
-        up_to_date = global_index_state.is_up_to_date()
+        up_to_date = global_index_state.is_up_to_date(
+            directory=global_index_state.directory,
+            include_paths=global_index_state.include_paths,
+            exclude_paths=global_index_state.exclude_paths
+        )
     return IndexStatus(
         directory=global_index_state.directory or "",
         indexed_files=list(global_index_state.file_info.keys()),
         last_indexed=global_index_state.last_indexed,
-        up_to_date=up_to_date
+        up_to_date=up_to_date,
+        current_model_name=model_name,
+        indexed_model_name=global_index_state.model_name or model_name
     )
+
+
+@app.post("/owlignore_manager_data")
+async def owlignore_manager_data(req: OwlIgnoreManagerRequest):
+    directory = os.path.abspath(req.directory)
+    if not os.path.isdir(directory):
+        raise HTTPException(status_code=400, detail=f"Directory not found: {directory}")
+
+    gitignore_patterns = read_gitignore_patterns(directory)
+    if req.ensure_initialized:
+        patterns = ensure_owlignore_file(directory)
+    else:
+        patterns = read_owlignore_patterns(directory)
+
+    payload = {
+        "directory": directory,
+        "owlignore_path": get_owlignore_path(directory),
+        "patterns": patterns,
+        "exists": os.path.exists(get_owlignore_path(directory)),
+        "default_patterns": gitignore_patterns
+    }
+    if req.include_tree:
+        payload["tree"] = build_directory_tree(directory, patterns, req.max_depth)
+    return payload
+
+
+@app.post("/update_owlignore")
+async def update_owlignore(req: OwlIgnoreUpdateRequest):
+    directory = os.path.abspath(req.directory)
+    if not os.path.isdir(directory):
+        raise HTTPException(status_code=400, detail=f"Directory not found: {directory}")
+    write_owlignore_patterns(directory, req.patterns)
+    patterns = read_owlignore_patterns(directory)
+    return {
+        "directory": directory,
+        "owlignore_path": get_owlignore_path(directory),
+        "patterns": patterns,
+        "exists": True,
+        "tree": build_directory_tree(directory, patterns, req.max_depth)
+    }
 
 @app.post("/search")
 async def search_api(query: str, top_k: int = 5):
@@ -627,98 +953,143 @@ async def search_api(query: str, top_k: int = 5):
     return {"results": results}
 
 
-def build_index_and_search(directory: str, query: str, file_ext: str = ".py", top_k: int = 5, max_workers: int = 8):
-    # キャッシュが有効で最新なら、埋め込み計算をスキップ
-    if (
-        global_index_state.indexer is not None and
-        global_index_state.directory == directory and
-        global_index_state.file_ext == file_ext and
-        global_index_state.is_up_to_date(directory=directory) and
-        global_index_state.embeddings is not None and
-        global_index_state.faiss_index is not None
-    ):
-        print("[build_index_and_search] キャッシュが最新、検索のみ実行")
-        results = global_index_state.indexer.functions
-        embeddings = global_index_state.embeddings
-        faiss_index = global_index_state.faiss_index
-        file_count = len(global_index_state.file_info)
-    else:
-        print("[build_index_and_search] インデックス構築が必要")
-        results, file_count, indexer = build_index(directory, file_ext, max_workers, update_state=True)
-        embeddings = global_index_state.embeddings
-        faiss_index = global_index_state.faiss_index
+def search_functions_for_queries(
+    directory: str,
+    queries: List[str],
+    file_ext: str = ".py",
+    top_k: int = 5,
+    max_workers: int = 8,
+    include_paths: Optional[List[str]] = None,
+    exclude_paths: Optional[List[str]] = None
+):
+    results, file_count, _ = build_index(
+        directory,
+        file_ext,
+        max_workers,
+        update_state=True,
+        include_paths=include_paths,
+        exclude_paths=exclude_paths
+    )
+    # build_index後のキャッシュ状態をprint
+    print("indexer_exists:", global_index_state.indexer is not None)
+    print(
+        "up_to_date:",
+        global_index_state.is_up_to_date(
+            directory=directory,
+            include_paths=include_paths,
+            exclude_paths=exclude_paths
+        )
+    )
+    print("embeddings_cached:", global_index_state.embeddings is not None)
+    print("file_ext:", global_index_state.file_ext)
+    embeddings = global_index_state.embeddings
+    faiss_index = global_index_state.faiss_index
+
+    cleaned_queries = [q.strip() for q in queries if isinstance(q, str) and q.strip()]
     if not results or embeddings is None or faiss_index is None:
-        return {"results": [], "message": "No functions found."}
-    query_emb = encode_code([query], batch_size=1)  # クエリは1つなのでバッチサイズ1
-    D, I = faiss_index.search(query_emb, top_k)
-    found = []
-    for idx in I[0]:
-        if 0 <= idx < len(results):
-            found.append(results[idx])
-    return {"results": found, "num_functions": len(results), "num_files": file_count}
+        return {
+            "items": [{"query": q, "results": []} for q in cleaned_queries],
+            "num_functions": len(results),
+            "num_files": file_count,
+            "message": "No functions found."
+        }
+    if not cleaned_queries:
+        return {"items": [], "num_functions": len(results), "num_files": file_count}
+
+    items = []
+    for query in cleaned_queries:
+        query_embedding = encode_code([query], batch_size=1, show_progress=False)
+        _, indices = faiss_index.search(query_embedding, top_k)
+        found = []
+        for idx in indices[0]:
+            if 0 <= idx < len(results):
+                found.append(results[idx])
+        items.append({"query": query, "results": found})
+    return {"items": items, "num_functions": len(results), "num_files": file_count}
+
+
+def build_index_and_search(
+    directory: str,
+    query: str,
+    file_ext: str = ".py",
+    top_k: int = 5,
+    max_workers: int = 8,
+    include_paths: Optional[List[str]] = None,
+    exclude_paths: Optional[List[str]] = None
+):
+    searched = search_functions_for_queries(
+        directory=directory,
+        queries=[query],
+        file_ext=file_ext,
+        top_k=top_k,
+        max_workers=max_workers,
+        include_paths=include_paths,
+        exclude_paths=exclude_paths
+    )
+    items = searched.get("items", [])
+    first_results = items[0]["results"] if items else []
+    payload = {
+        "results": first_results,
+        "num_functions": searched.get("num_functions", 0),
+        "num_files": searched.get("num_files", 0)
+    }
+    if "message" in searched:
+        payload["message"] = searched["message"]
+    return payload
 
 @app.post("/search_functions_simple")
 async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
     with index_lock:
-        # build_indexを必ず呼び、差分埋め込みロジックを統一
-        results, file_count, indexer = build_index(req.directory, req.file_ext, update_state=True)
-        # build_index後のキャッシュ状態をprint
-        print("indexer_exists:", global_index_state.indexer is not None)
-        print("up_to_date:", global_index_state.is_up_to_date())
-        print("embeddings_cached:", global_index_state.embeddings is not None)
-        print("file_ext:", global_index_state.file_ext)
-        embeddings = global_index_state.embeddings
-        faiss_index = global_index_state.faiss_index
-        if not results or embeddings is None or faiss_index is None:
-            return {"results": [], "message": "No functions found."}
-        query_emb = encode_code([req.query], batch_size=1)  # クエリは1つなのでバッチサイズ1
-        D, I = faiss_index.search(query_emb, req.top_k)
-        found = []
-        for idx in I[0]:
-            if 0 <= idx < len(results):
-                found.append(results[idx])
-        return {"results": found, "num_functions": len(results), "num_files": file_count}
+        return build_index_and_search(
+            directory=req.directory,
+            query=req.query,
+            file_ext=req.file_ext,
+            top_k=req.top_k,
+            include_paths=req.include_paths,
+            exclude_paths=req.exclude_paths
+        )
+
+
+@app.post("/search_functions_batch")
+async def search_functions_batch_api(req: BatchSearchFunctionsRequest):
+    with index_lock:
+        return search_functions_for_queries(
+            directory=req.directory,
+            queries=req.queries,
+            file_ext=req.file_ext,
+            top_k=req.top_k,
+            include_paths=req.include_paths,
+            exclude_paths=req.exclude_paths
+        )
 
 
 
 @app.post("/get_class_stats")
 async def get_class_stats(request: ClassStatsRequest):
     try:
-        # まず検索を実行して検索結果を取得
-        search_request = SearchFunctionsSimpleRequest(
-            directory=request.directory,
-            query=request.query,
-            top_k=request.top_k,
-            file_ext=request.file_ext
-        )
-        search_response = await search_functions_simple_api(search_request)
-        search_results = search_response["results"]
-        
-        # 全ての関数を抽出
-        all_functions = []
-        directory = request.directory
-        ignore_spec = load_gitignore_spec(directory)
-        
-        files = []
-        for root, dirs, filenames in os.walk(directory):
-            # .gitignoreのパターンでディレクトリをフィルタ
-            dirs[:] = [d for d in dirs if not is_ignored(os.path.join(root, d), ignore_spec, directory)]
-            
-            for filename in filenames:
-                if filename.endswith(request.file_ext):
-                    file_path = os.path.join(root, filename)
-                    if not is_ignored(file_path, ignore_spec, directory):
-                        files.append(file_path)
-        
-        for file_path in files:
-            try:
-                functions = extract_functions(file_path)
-                for func in functions:
-                    func['file_path'] = file_path
-                    all_functions.append(func)
-            except Exception as e:
-                print(f"Error processing {file_path}: {e}")
-                continue
+        with index_lock:
+            search_response = search_functions_for_queries(
+                directory=request.directory,
+                queries=[request.query],
+                top_k=request.top_k,
+                file_ext=request.file_ext,
+                include_paths=request.include_paths,
+                exclude_paths=request.exclude_paths
+            )
+            all_functions, _, _ = build_index(
+                request.directory,
+                request.file_ext,
+                update_state=True,
+                include_paths=request.include_paths,
+                exclude_paths=request.exclude_paths
+            )
+        search_items = search_response.get("items", [])
+        search_results = search_items[0]["results"] if search_items else []
+
+        # 表示ロジックの都合で file_path を付与
+        for func in all_functions:
+            if "file_path" not in func:
+                func["file_path"] = func.get("file", "")
         
         # クラス別にグループ化（ファイルごとに管理）
         classes = {}
