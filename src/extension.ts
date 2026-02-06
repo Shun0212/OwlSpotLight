@@ -43,7 +43,7 @@ async function translateWithGemini(text: string, tSettings: any): Promise<string
         const prompt = `Translate the following Japanese text to English. Only return the translated text, nothing else:\n\n${text}`;
         
         const response = await ai.models.generateContent({
-            model: 'gemini-2.0-flash',
+            model: 'gemini-2.5-flash',
             contents: prompt,
         });
         
