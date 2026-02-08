@@ -28,6 +28,7 @@ window.onload = function() {
 
     function getScopeFilters() {
         return {
+            searchMode: byId('searchModeSelect')?.value || 'semantic',
             includePaths: parsePatternText(byId('includePathsInput')?.value || ''),
             excludePaths: parsePatternText(byId('excludePathsInput')?.value || ''),
             stripCommentsFromEmbeddings: !!byId('stripCommentsToggle')?.checked
@@ -195,6 +196,7 @@ window.onload = function() {
         const expStatusText = byId('exp-status')?.textContent || '';
         const translateToggle = byId('translateToggle');
         const translateEnabled = translateToggle ? !!translateToggle.checked : false;
+        const searchMode = byId('searchModeSelect')?.value || 'semantic';
         const stripCommentsToggle = byId('stripCommentsToggle');
         const stripCommentsFromEmbeddings = stripCommentsToggle ? !!stripCommentsToggle.checked : false;
 
@@ -207,6 +209,7 @@ window.onload = function() {
             statsStatusText,
             expStatusText,
             translateEnabled,
+            searchMode,
             stripCommentsFromEmbeddings,
             includePathsInput: byId('includePathsInput')?.value || '',
             excludePathsInput: byId('excludePathsInput')?.value || '',
@@ -394,10 +397,11 @@ window.onload = function() {
 
             const scope = document.createElement('div');
             scope.className = 'history-scope';
+            const modeText = run.searchMode || 'semantic';
             const includeText = Array.isArray(run.includePaths) && run.includePaths.length ? run.includePaths.join(', ') : '-';
             const excludeText = Array.isArray(run.excludePaths) && run.excludePaths.length ? run.excludePaths.join(', ') : '-';
             const stripText = run.stripCommentsFromEmbeddings ? 'ON' : 'OFF';
-            scope.textContent = `Include: ${includeText} / Exclude: ${excludeText} / No-comment embed: ${stripText}`;
+            scope.textContent = `Mode: ${modeText} / Include: ${includeText} / Exclude: ${excludeText} / No-comment embed: ${stripText}`;
             item.appendChild(scope);
 
             const openBtn = document.createElement('button');
@@ -429,6 +433,9 @@ window.onload = function() {
         }
         if (typeof state.translateEnabled === 'boolean' && byId('translateToggle')) {
             byId('translateToggle').checked = !!state.translateEnabled;
+        }
+        if (typeof state.searchMode === 'string' && byId('searchModeSelect')) {
+            byId('searchModeSelect').value = state.searchMode === 'bm25' ? 'bm25' : 'semantic';
         }
         if (typeof state.stripCommentsFromEmbeddings === 'boolean' && byId('stripCommentsToggle')) {
             byId('stripCommentsToggle').checked = !!state.stripCommentsFromEmbeddings;
@@ -661,6 +668,12 @@ window.onload = function() {
         translateToggle.onchange = () => {
             const enable = translateToggle.checked;
             vscode.postMessage({ command: 'updateTranslationSettings', enable });
+            saveState();
+        };
+    }
+    const searchModeSelect = byId('searchModeSelect');
+    if (searchModeSelect) {
+        searchModeSelect.onchange = () => {
             saveState();
         };
     }
@@ -965,6 +978,7 @@ window.onload = function() {
                 id: Date.now(),
                 timestamp: new Date().toISOString(),
                 language: byId('languageSelect')?.value || '.py',
+                searchMode: scope.searchMode || 'semantic',
                 includePaths: scope.includePaths,
                 excludePaths: scope.excludePaths,
                 stripCommentsFromEmbeddings: !!scope.stripCommentsFromEmbeddings,

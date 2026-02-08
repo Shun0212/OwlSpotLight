@@ -104,6 +104,7 @@ class SearchFunctionsSimpleRequest(BaseModel):
     include_paths: List[str] = Field(default_factory=list)
     exclude_paths: List[str] = Field(default_factory=list)
     strip_comments_for_embeddings: bool = False
+    search_mode: str = "semantic"
 
 class BatchSearchFunctionsRequest(BaseModel):
     directory: str
@@ -113,6 +114,7 @@ class BatchSearchFunctionsRequest(BaseModel):
     include_paths: List[str] = Field(default_factory=list)
     exclude_paths: List[str] = Field(default_factory=list)
     strip_comments_for_embeddings: bool = False
+    search_mode: str = "semantic"
 
 class FunctionRangeRequest(BaseModel):
     file: str
@@ -127,6 +129,7 @@ class ClassStatsRequest(BaseModel):
     include_paths: List[str] = Field(default_factory=list)
     exclude_paths: List[str] = Field(default_factory=list)
     strip_comments_for_embeddings: bool = False
+    search_mode: str = "semantic"
 
 class OwlIgnoreManagerRequest(BaseModel):
     directory: str
@@ -683,6 +686,138 @@ def prepare_text_for_embedding(text: str, file_ext: str, strip_comments_for_embe
         return text
     return strip_comments_for_embedding_text(text, file_ext)
 
+
+_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|\d+")
+_CAMEL_RE = re.compile(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|\d+")
+
+
+def normalize_search_mode(search_mode: Optional[str]) -> str:
+    mode = (search_mode or "semantic").strip().lower()
+    if mode in {"bm25", "keyword", "lexical"}:
+        return "bm25"
+    return "semantic"
+
+
+def tokenize_bm25_text(text: str) -> List[str]:
+    if not text:
+        return []
+    tokens: List[str] = []
+    for raw in _TOKEN_RE.findall(text):
+        if not raw:
+            continue
+        lower_raw = raw.lower()
+        tokens.append(lower_raw)
+        for part in raw.split("_"):
+            if not part:
+                continue
+            camel_parts = _CAMEL_RE.findall(part)
+            if camel_parts:
+                for cp in camel_parts:
+                    cp_l = cp.lower()
+                    if cp_l and cp_l != lower_raw:
+                        tokens.append(cp_l)
+    return tokens
+
+
+def function_text_for_bm25(
+    func: dict,
+    file_ext: str,
+    strip_comments_for_embeddings: bool = False
+) -> str:
+    code_text = str(func.get("code", "") or "")
+    if strip_comments_for_embeddings:
+        code_text = prepare_text_for_embedding(code_text, file_ext, True)
+
+    # Python docstring等のコメント相当テキストは除外モード時にBM25対象外にする
+    docstring_text = str(func.get("docstring", "") or "")
+    if strip_comments_for_embeddings:
+        docstring_text = ""
+
+    return "\n".join(
+        str(part) for part in [
+            func.get("name", ""),
+            func.get("function_name", ""),
+            func.get("class_name", ""),
+            docstring_text,
+            code_text,
+        ] if part
+    )
+
+
+def bm25_search_functions(
+    functions: List[dict],
+    query: str,
+    top_k: int,
+    file_ext: str = ".py",
+    strip_comments_for_embeddings: bool = False
+) -> List[dict]:
+    if not functions or not query.strip() or top_k <= 0:
+        return []
+
+    doc_lens: List[int] = []
+    postings: Dict[str, List[tuple[int, int]]] = {}
+    doc_count = len(functions)
+
+    for idx, func in enumerate(functions):
+        tokens = tokenize_bm25_text(
+            function_text_for_bm25(
+                func,
+                file_ext=file_ext,
+                strip_comments_for_embeddings=strip_comments_for_embeddings
+            )
+        )
+        doc_lens.append(len(tokens))
+        if not tokens:
+            continue
+        tf: Dict[str, int] = {}
+        for t in tokens:
+            tf[t] = tf.get(t, 0) + 1
+        for term, freq in tf.items():
+            postings.setdefault(term, []).append((idx, freq))
+
+    if not postings:
+        return []
+
+    avgdl = (sum(doc_lens) / doc_count) if doc_count > 0 else 0.0
+    if avgdl <= 0:
+        avgdl = 1.0
+
+    # Robertson/Sparck Jones idf
+    idf: Dict[str, float] = {}
+    for term, plist in postings.items():
+        df = len(plist)
+        idf[term] = float(np.log(1.0 + ((doc_count - df + 0.5) / (df + 0.5))))
+
+    k1 = 1.5
+    b = 0.75
+    scores: Dict[int, float] = {}
+
+    query_text = prepare_text_for_embedding(query, file_ext, strip_comments_for_embeddings)
+    query_terms = tokenize_bm25_text(query_text)
+    if not query_terms:
+        return []
+
+    for term in query_terms:
+        plist = postings.get(term)
+        if not plist:
+            continue
+        term_idf = idf.get(term, 0.0)
+        if term_idf <= 0:
+            continue
+        for doc_idx, tf in plist:
+            dl = max(doc_lens[doc_idx], 1)
+            denom = tf + k1 * (1.0 - b + b * (dl / avgdl))
+            if denom <= 0:
+                continue
+            score = term_idf * (tf * (k1 + 1.0)) / denom
+            scores[doc_idx] = scores.get(doc_idx, 0.0) + score
+
+    if not scores:
+        return []
+
+    ranked = sorted(scores.items(), key=lambda x: (-x[1], x[0]))[:top_k]
+    return [functions[idx] for idx, _ in ranked]
+
 # ファイルのハッシュ計算関数
 def file_hash(path):
     h = hashlib.sha256()
@@ -1092,7 +1227,8 @@ def search_functions_for_queries(
     max_workers: int = 8,
     include_paths: Optional[List[str]] = None,
     exclude_paths: Optional[List[str]] = None,
-    strip_comments_for_embeddings: bool = False
+    strip_comments_for_embeddings: bool = False,
+    search_mode: str = "semantic"
 ):
     results, file_count, _ = build_index(
         directory,
@@ -1118,9 +1254,10 @@ def search_functions_for_queries(
     print("file_ext:", global_index_state.file_ext)
     embeddings = global_index_state.embeddings
     faiss_index = global_index_state.faiss_index
+    normalized_search_mode = normalize_search_mode(search_mode)
 
     cleaned_queries = [q.strip() for q in queries if isinstance(q, str) and q.strip()]
-    if not results or embeddings is None or faiss_index is None:
+    if not results:
         return {
             "items": [{"query": q, "results": []} for q in cleaned_queries],
             "num_functions": len(results),
@@ -1129,6 +1266,27 @@ def search_functions_for_queries(
         }
     if not cleaned_queries:
         return {"items": [], "num_functions": len(results), "num_files": file_count}
+
+    if normalized_search_mode == "bm25":
+        items = []
+        for query in cleaned_queries:
+            found = bm25_search_functions(
+                results,
+                query,
+                top_k,
+                file_ext=file_ext,
+                strip_comments_for_embeddings=strip_comments_for_embeddings
+            )
+            items.append({"query": query, "results": found})
+        return {"items": items, "num_functions": len(results), "num_files": file_count, "search_mode": "bm25"}
+
+    if embeddings is None or faiss_index is None:
+        return {
+            "items": [{"query": q, "results": []} for q in cleaned_queries],
+            "num_functions": len(results),
+            "num_files": file_count,
+            "message": "No embedding index found."
+        }
 
     items = []
     for query in cleaned_queries:
@@ -1140,7 +1298,7 @@ def search_functions_for_queries(
             if 0 <= idx < len(results):
                 found.append(results[idx])
         items.append({"query": query, "results": found})
-    return {"items": items, "num_functions": len(results), "num_files": file_count}
+    return {"items": items, "num_functions": len(results), "num_files": file_count, "search_mode": "semantic"}
 
 
 def build_index_and_search(
@@ -1151,7 +1309,8 @@ def build_index_and_search(
     max_workers: int = 8,
     include_paths: Optional[List[str]] = None,
     exclude_paths: Optional[List[str]] = None,
-    strip_comments_for_embeddings: bool = False
+    strip_comments_for_embeddings: bool = False,
+    search_mode: str = "semantic"
 ):
     searched = search_functions_for_queries(
         directory=directory,
@@ -1161,14 +1320,16 @@ def build_index_and_search(
         max_workers=max_workers,
         include_paths=include_paths,
         exclude_paths=exclude_paths,
-        strip_comments_for_embeddings=strip_comments_for_embeddings
+        strip_comments_for_embeddings=strip_comments_for_embeddings,
+        search_mode=search_mode
     )
     items = searched.get("items", [])
     first_results = items[0]["results"] if items else []
     payload = {
         "results": first_results,
         "num_functions": searched.get("num_functions", 0),
-        "num_files": searched.get("num_files", 0)
+        "num_files": searched.get("num_files", 0),
+        "search_mode": searched.get("search_mode", normalize_search_mode(search_mode))
     }
     if "message" in searched:
         payload["message"] = searched["message"]
@@ -1184,7 +1345,8 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
             top_k=req.top_k,
             include_paths=req.include_paths,
             exclude_paths=req.exclude_paths,
-            strip_comments_for_embeddings=req.strip_comments_for_embeddings
+            strip_comments_for_embeddings=req.strip_comments_for_embeddings,
+            search_mode=req.search_mode
         )
 
 
@@ -1198,7 +1360,8 @@ async def search_functions_batch_api(req: BatchSearchFunctionsRequest):
             top_k=req.top_k,
             include_paths=req.include_paths,
             exclude_paths=req.exclude_paths,
-            strip_comments_for_embeddings=req.strip_comments_for_embeddings
+            strip_comments_for_embeddings=req.strip_comments_for_embeddings,
+            search_mode=req.search_mode
         )
 
 
@@ -1214,7 +1377,8 @@ async def get_class_stats(request: ClassStatsRequest):
                 file_ext=request.file_ext,
                 include_paths=request.include_paths,
                 exclude_paths=request.exclude_paths,
-                strip_comments_for_embeddings=request.strip_comments_for_embeddings
+                strip_comments_for_embeddings=request.strip_comments_for_embeddings,
+                search_mode=request.search_mode
             )
             all_functions, _, _ = build_index(
                 request.directory,

@@ -574,7 +574,8 @@ input[type=text]:focus {
 }
 
 #includePathsInput,
-#excludePathsInput {
+#excludePathsInput,
+#searchModeSelect {
   width: 100%;
   box-sizing: border-box;
   padding: 0.4em;

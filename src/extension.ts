@@ -16,6 +16,7 @@ type BatchHistoryRun = {
         id?: number | string;
         timestamp?: string;
         language?: string;
+        searchMode?: string;
         includePaths?: string[];
         excludePaths?: string[];
         stripCommentsFromEmbeddings?: boolean;
@@ -44,6 +45,7 @@ function historyToCsv(
                 'run_id',
                 'timestamp',
                 'language',
+                'search_mode',
                 'folder_path',
                 'include_paths',
                 'exclude_paths',
@@ -63,6 +65,7 @@ function historyToCsv(
         ];
         const rows: string[] = [header.join(',')];
         for (const run of runs) {
+                const searchMode = typeof run.searchMode === 'string' ? run.searchMode : 'semantic';
                 const includePaths = Array.isArray(run.includePaths) ? run.includePaths.join('|') : '';
                 const excludePaths = Array.isArray(run.excludePaths) ? run.excludePaths.join('|') : '';
                 const stripComments = !!run.stripCommentsFromEmbeddings;
@@ -72,6 +75,7 @@ function historyToCsv(
                                 safeCsvValue(run.id ?? ''),
                                 safeCsvValue(run.timestamp ?? ''),
                                 safeCsvValue(run.language ?? ''),
+                                safeCsvValue(searchMode),
                                 safeCsvValue(run.folderPath ?? ''),
                                 safeCsvValue(includePaths),
                                 safeCsvValue(excludePaths),
@@ -100,6 +104,7 @@ function historyToCsv(
                                         safeCsvValue(run.id ?? ''),
                                         safeCsvValue(run.timestamp ?? ''),
                                         safeCsvValue(run.language ?? ''),
+                                        safeCsvValue(searchMode),
                                         safeCsvValue(run.folderPath ?? ''),
                                         safeCsvValue(includePaths),
                                         safeCsvValue(excludePaths),
@@ -124,6 +129,7 @@ function historyToCsv(
                                         safeCsvValue(run.id ?? ''),
                                         safeCsvValue(run.timestamp ?? ''),
                                         safeCsvValue(run.language ?? ''),
+                                        safeCsvValue(searchMode),
                                         safeCsvValue(run.folderPath ?? ''),
                                         safeCsvValue(includePaths),
                                         safeCsvValue(excludePaths),
@@ -603,6 +609,13 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                 const normalizeBoolean = (value: unknown, fallback = false): boolean => {
                         return typeof value === 'boolean' ? value : fallback;
                 };
+                const normalizeSearchMode = (value: unknown): 'semantic' | 'bm25' => {
+                        if (typeof value !== 'string') {
+                                return 'semantic';
+                        }
+                        const mode = value.trim().toLowerCase();
+                        return mode === 'bm25' ? 'bm25' : 'semantic';
+                };
                 const normalizeHistoryRuns = (value: unknown): BatchHistoryRun[] => {
                         if (!Array.isArray(value)) {
                                 return [];
@@ -874,6 +887,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                 const includePaths = normalizeStringList(msg.includePaths);
                                 const excludePaths = normalizeStringList(msg.excludePaths);
                                 const stripCommentsForEmbeddings = normalizeBoolean(msg.stripCommentsFromEmbeddings, false);
+                                const searchMode = normalizeSearchMode(msg.searchMode);
 				const workspaceFolders = vscode.workspace.workspaceFolders;
 				if (!workspaceFolders || workspaceFolders.length === 0) {
 					webviewView.webview.postMessage({ type: 'error', message: 'No workspace folder found' });
@@ -892,7 +906,8 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                                 file_ext: fileExt,
                                                 include_paths: includePaths,
                                                 exclude_paths: scope.requestExclude,
-                                                strip_comments_for_embeddings: stripCommentsForEmbeddings
+                                                strip_comments_for_embeddings: stripCommentsForEmbeddings,
+                                                search_mode: searchMode
                                         })
 				});
 				const data: any = await res.json();
@@ -921,6 +936,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                 const includePaths = normalizeStringList(msg.includePaths);
                 const excludePaths = normalizeStringList(msg.excludePaths);
                 const stripCommentsForEmbeddings = normalizeBoolean(msg.stripCommentsFromEmbeddings, false);
+                const searchMode = normalizeSearchMode(msg.searchMode);
                 const scope = resolveScope(folderPath, excludePaths);
 				webviewView.webview.postMessage({ type: 'status', message: 'Loading class statistics...' });
 				try {
@@ -934,7 +950,8 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                                         file_ext: fileExt,
                                                         include_paths: includePaths,
                                                         exclude_paths: scope.requestExclude,
-                                                        strip_comments_for_embeddings: stripCommentsForEmbeddings
+                                                        strip_comments_for_embeddings: stripCommentsForEmbeddings,
+                                                        search_mode: searchMode
                                                 })
 					});
 					const data: any = await res.json();
@@ -973,6 +990,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                 const includePaths = normalizeStringList(msg.includePaths);
                                 const excludePaths = normalizeStringList(msg.excludePaths);
                                 const stripCommentsForEmbeddings = normalizeBoolean(msg.stripCommentsFromEmbeddings, false);
+                                const searchMode = normalizeSearchMode(msg.searchMode);
                                 const folderPath = workspaceFolders[0].uri.fsPath;
                                 const scope = resolveScope(folderPath, excludePaths);
                                 const translatedQueries: string[] = [];
@@ -990,7 +1008,8 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                                         file_ext: fileExt,
                                                         include_paths: includePaths,
                                                         exclude_paths: scope.requestExclude,
-                                                        strip_comments_for_embeddings: stripCommentsForEmbeddings
+                                                        strip_comments_for_embeddings: stripCommentsForEmbeddings,
+                                                        search_mode: searchMode
                                                 })
                                         });
                                         const data: any = await res.json();
@@ -1274,6 +1293,11 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
   <details id="scopeDetails" class="scope-collapsible">
     <summary>Scope (.owlignore + optional GUI filters)</summary>
     <div class="scope-settings">
+      <label for="searchModeSelect">Search Mode</label>
+      <select id="searchModeSelect">
+        <option value="semantic">Semantic (Embeddings)</option>
+        <option value="bm25">BM25 (Keyword)</option>
+      </select>
       <label><input type="checkbox" id="stripCommentsToggle"> Embed w/o comments</label>
       <input id="includePathsInput" type="text" placeholder="Include folders/patterns (comma or newline separated), e.g. src,lib/**" />
       <input id="excludePathsInput" type="text" placeholder="Exclude folders/patterns, e.g. dist,node_modules/**" />
