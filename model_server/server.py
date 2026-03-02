@@ -1,21 +1,17 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from sentence_transformers import SentenceTransformer
 import torch
 from threading import Lock
 import os
 from typing import List, Dict, Optional
 import fnmatch
 from concurrent.futures import ThreadPoolExecutor
-import pathlib
 from tqdm import tqdm
 import faiss
 import numpy as np
 from pathspec import PathSpec
 from pathspec.patterns import GitWildMatchPattern
 import sys
-from functools import partial
-from pathlib import Path
 import json
 import hashlib
 import io
@@ -24,6 +20,7 @@ import tokenize
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 import shutil
+import time
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
 
@@ -31,34 +28,12 @@ OWL_INDEX_DIR = ".owl_index"
 
 from extractors import extract_functions
 from indexer import CodeIndexer
-import hashlib
-import sys
-import os
-import time
-import torch
-import faiss
-import numpy as np
 
 # モデル管理を model.py から import
 from model import get_model, get_current_device, cleanup_memory, encode_code, DEFAULT_MODEL, get_device
 
 # グローバル変数
 model_name = os.environ.get("OWL_MODEL_NAME", DEFAULT_MODEL)
-
-# 互換性のため、一時的なダミー関数
-def get_device_and_prepare():
-    """後方互換性のためのダミー関数 - get_model()が自動的にデバイス管理を行う"""
-    pass
-
-def encode_with_memory_management(codes: list[str], batch_size: int = None, max_retries: int = 3, show_progress: bool = True):
-    """後方互換性のためのラッパー関数"""
-    if batch_size is None:
-        batch_size = 8
-    return encode_code(codes, batch_size, max_retries, show_progress)
-
-# 互換性のため、model変数を追加
-model = get_model()
-model_device = get_current_device()
 
 app = FastAPI()
 
@@ -70,15 +45,6 @@ class OwlSettings(BaseSettings):
         env_prefix = "OWL_"  # 環境変数はOWL_BATCH_SIZEで設定可能
 
 settings = OwlSettings()
-
-# ✅ リクエスト用の Pydantic モデル
-class EmbedRequest(BaseModel):
-    texts: list[str]
-
-class IndexAndSearchRequest(BaseModel):
-    source_code: str
-    query_code: str
-    top_k: int = 5
 
 class IndexStatus(BaseModel):
     directory: str
@@ -116,9 +82,6 @@ class BatchSearchFunctionsRequest(BaseModel):
     strip_comments_for_embeddings: bool = False
     search_mode: str = "semantic"
 
-class FunctionRangeRequest(BaseModel):
-    file: str
-    func_name: str
 
 # クラス統計表示用のリクエストモデル
 class ClassStatsRequest(BaseModel):
@@ -144,7 +107,6 @@ class OwlIgnoreUpdateRequest(BaseModel):
 
 # サーバー全体で1つのインデックスを保持
 index_lock = Lock()
-global_indexer = None
 
 # インデックス情報を保持するクラス
 class GlobalIndexerState:
@@ -172,8 +134,6 @@ class GlobalIndexerState:
         }
 
     def set_index_dir(self, directory: str, file_ext: str = ".py"):
-        # Hash the directory name to make it unique
-        import hashlib
         dir_hash = hashlib.md5(os.path.abspath(directory).encode()).hexdigest()[:16]
         safe_dir = os.path.basename(os.path.abspath(directory))
         ext_dir = file_ext.lstrip(".")
@@ -839,7 +799,6 @@ def build_index(
     exclude_paths: Optional[List[str]] = None,
     strip_comments_for_embeddings: bool = False
 ):
-    import hashlib
     def func_id(func):
         # ファイルパス・関数名・lineno・end_linenoを組み合わせて一意なIDを生成
         key = f"{func.get('file','')}|{func.get('name','')}|{func.get('lineno','')}|{func.get('end_lineno','')}"
@@ -1094,28 +1053,6 @@ def build_index(
         indexer.add_functions_without_embedding(results)  # 埋め込み計算なしで関数リストのみ追加
     return results, len(file_paths), indexer
 
-@app.post("/embed")
-async def embed(req: EmbedRequest):
-    print("/embed called")
-    embeddings = encode_with_memory_management(req.texts, settings.batch_size)
-    return {"embeddings": embeddings.tolist()}
-
-@app.post("/index_and_search")
-async def index_and_search(req: IndexAndSearchRequest):
-    print("/index_and_search called")
-    global global_indexer
-    with index_lock:
-        if global_indexer is None:
-            # 初回のみインデックス作成
-            functions = extract_functions(req.source_code)
-            if not functions:
-                return {"results": []}
-            global_indexer = CodeIndexer()
-            global_indexer.add_functions(functions)
-        # 既存インデックスで検索
-        results = global_indexer.search(req.query_code, top_k=req.top_k)
-    return {"results": results}
-
 @app.post("/build_index")
 async def build_index_api(req: BuildIndexRequest):
     print(f"/build_index called for directory: {req.directory}")
@@ -1208,15 +1145,6 @@ async def update_owlignore(req: OwlIgnoreUpdateRequest):
         "exists": True,
         "tree": build_directory_tree(directory, patterns, req.max_depth)
     }
-
-@app.post("/search")
-async def search_api(query: str, top_k: int = 5):
-    print(f"/search called with query: {query}")
-    with index_lock:
-        if not global_index_state.indexer:
-            return {"results": [], "error": "No index built."}
-        results = global_index_state.indexer.search(query, top_k=top_k)
-    return {"results": results}
 
 
 def search_functions_for_queries(
@@ -1529,8 +1457,7 @@ async def get_settings():
     """現在の設定値を返すAPI"""
     return {
         "batch_size": settings.batch_size,
-        "device": get_device(),
-        "model_device": model_device
+        "device": get_device()
     }
 
 class UpdateSettingsRequest(BaseModel):
@@ -1545,11 +1472,3 @@ async def update_settings(req: UpdateSettingsRequest):
         "message": "Settings updated",
         "batch_size": settings.batch_size
     }
-
-@app.post("/set_batch_size")
-async def set_batch_size(batch_size: int):
-    """
-    埋め込みバッチサイズを動的に変更するAPI
-    """
-    settings.batch_size = batch_size
-    return {"batch_size": settings.batch_size}

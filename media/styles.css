@@ -7,24 +7,32 @@ body {
   color: var(--vscode-foreground, #333333); 
 }
 
-.header { 
-  position: relative;
+.header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.8em 1em 0.5em 1em; 
-  font-size: 1.15em; 
-  font-weight: bold; 
-  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #e0e0e0); 
-  background: var(--vscode-sideBarSectionHeader-background, var(--vscode-sideBar-background, #f8f8f8)); 
+  padding: 0.6em 0.8em;
+  font-size: 1.1em;
+  font-weight: bold;
+  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #e0e0e0);
+  background: var(--vscode-sideBarSectionHeader-background, var(--vscode-sideBar-background, #f8f8f8));
   color: var(--vscode-sideBarTitle-foreground, var(--vscode-foreground, #333333));
-  letter-spacing: 0.05em; 
+  letter-spacing: 0.03em;
 }
 .header-btns {
   display: flex;
   align-items: center;
-  gap: 0.15em;
-  margin-left: 0.7em;
+  gap: 0.3em;
+}
+.translate-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.25em;
+  font-size: 0.72em;
+  font-weight: normal;
+  color: var(--vscode-descriptionForeground, #999);
+  cursor: pointer;
+  white-space: nowrap;
 }
 .owl-btn {
   background: transparent;
@@ -49,42 +57,25 @@ body {
   filter: brightness(1.2) drop-shadow(0 2px 6px rgba(0,120,212,0.18));
 }
 
-.actions { 
+.actions {
   display: flex;
-  flex-direction: column;
-  gap: 0.7em;
-  align-items: stretch;
-  padding: 1.2em 1em 1em 1em; 
-  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #e0e0e0); 
-  background: var(--vscode-sideBarSectionHeader-background, var(--vscode-sideBar-background, #f8f8f8)); 
-  margin-bottom: 1em;
-}
-.actions button {
-  width: 100%;
-  font-size: 1em;
-  padding: 0.7em 0;
-  border-radius: 6px;
-  margin: 0;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-
-.translation-settings {
-  display: flex;
-  flex-direction: column;
   gap: 0.5em;
-  padding: 0.8em 1em;
+  align-items: stretch;
+  padding: 0.6em 0.8em;
   border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #e0e0e0);
   background: var(--vscode-sideBarSectionHeader-background, var(--vscode-sideBar-background, #f8f8f8));
 }
-.translation-settings label {
-  display: flex;
-  align-items: center;
-  gap: 0.4em;
+.actions button {
+  flex: 1;
+  font-size: 0.85em;
+  padding: 0.45em 0;
+  border-radius: 4px;
+  margin: 0;
+  font-weight: 500;
 }
 
-button { 
+
+button {
   padding: 0.2em 0.8em; 
   border-radius: 4px; 
   border: 1px solid var(--vscode-button-border, transparent); 
@@ -225,45 +216,34 @@ input[type=text]:focus {
   position: relative;
 }
 .result-item {
-  margin: 0 0 0.4em 0;
-  padding: 0.6em 0.8em;
+  margin: 0 0 0.3em 0;
+  padding: 0.5em 0.7em;
   border-radius: 4px;
   background: transparent;
   cursor: pointer;
   border-left: 3px solid transparent;
   transition: background 0.15s, border 0.15s;
-  display: block;
-  position: static;
   width: 100%;
   box-sizing: border-box;
-  clear: both;
-  float: none;
-  z-index: auto;
-  min-height: auto;
-  height: auto;
 }
 .result-item:hover { background: var(--vscode-list-hoverBackground, #2a2d2e); border-left: 3px solid var(--vscode-list-activeSelectionForeground, #3794ff); }
-.result-title { 
-  font-weight: 500; 
-  color: var(--vscode-list-highlightForeground, #d7ba7d); 
-  white-space: nowrap; 
-  overflow: hidden; 
-  text-overflow: ellipsis; 
-  max-width: 100%; 
+.result-title {
+  font-weight: 500;
+  color: var(--vscode-list-highlightForeground, #d7ba7d);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
   box-sizing: border-box;
-  display: block;
-  position: static;
 }
-.result-path { 
-  font-size: 0.95em; 
-  color: var(--vscode-descriptionForeground, #999); 
-  white-space: nowrap; 
-  overflow: hidden; 
-  text-overflow: ellipsis; 
-  max-width: 100%; 
+.result-path {
+  font-size: 0.92em;
+  color: var(--vscode-descriptionForeground, #999);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
   box-sizing: border-box;
-  display: block;
-  position: static;
 }
 .result-snippet { 
   font-size: 0.95em; 
@@ -518,18 +498,6 @@ input[type=text]:focus {
   white-space: nowrap;
 }
 
-.stats-class-header {
-  padding: 0.8em 1em;
-  background: var(--vscode-sideBarSectionHeader-background, #252526);
-  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #333);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  border-radius: 6px 6px 0 0;
-  flex-wrap: wrap;
-  gap: 0.5em;
-}
-
 /* スマートフォン対応 */
 @media (max-width: 600px) {
   .stats-class-header {
@@ -548,14 +516,6 @@ input[type=text]:focus {
   gap: 0.4em;
   padding: 0.75em 1em;
   background: var(--vscode-sideBar-background, #1e1e1e);
-}
-
-.scope-toggle-row {
-  padding: 0.55em 1em 0.35em 1em;
-}
-
-#scopeManagerBtn {
-  width: 100%;
 }
 
 .scope-collapsible {

@@ -64,6 +64,43 @@ function historyToCsv(
                 'result_code'
         ];
         const rows: string[] = [header.join(',')];
+
+        const buildRow = (
+                run: BatchHistoryRun,
+                searchMode: string,
+                includePaths: string,
+                excludePaths: string,
+                stripComments: boolean,
+                queryIndex: unknown,
+                query: string,
+                translated: string,
+                resultRank: unknown,
+                result?: any
+        ): string => {
+                return [
+                        safeCsvValue(run.id ?? ''),
+                        safeCsvValue(run.timestamp ?? ''),
+                        safeCsvValue(run.language ?? ''),
+                        safeCsvValue(searchMode),
+                        safeCsvValue(run.folderPath ?? ''),
+                        safeCsvValue(includePaths),
+                        safeCsvValue(excludePaths),
+                        safeCsvValue(stripComments),
+                        safeCsvValue(owlIgnoreText),
+                        safeCsvValue(embeddingModelName),
+                        safeCsvValue(queryIndex),
+                        safeCsvValue(query),
+                        safeCsvValue(translated),
+                        safeCsvValue(resultRank),
+                        safeCsvValue(result?.function_name || result?.name || ''),
+                        safeCsvValue(result?.class_name || ''),
+                        safeCsvValue(result?.file_path || result?.file || ''),
+                        safeCsvValue(result?.lineno || result?.line_number || ''),
+                        safeCsvValue(result?.end_lineno || ''),
+                        safeCsvValue(result?.code || '')
+                ].join(',');
+        };
+
         for (const run of runs) {
                 const searchMode = typeof run.searchMode === 'string' ? run.searchMode : 'semantic';
                 const includePaths = Array.isArray(run.includePaths) ? run.includePaths.join('|') : '';
@@ -71,28 +108,7 @@ function historyToCsv(
                 const stripComments = !!run.stripCommentsFromEmbeddings;
                 const items = Array.isArray(run.items) ? run.items : [];
                 if (items.length === 0) {
-                        rows.push([
-                                safeCsvValue(run.id ?? ''),
-                                safeCsvValue(run.timestamp ?? ''),
-                                safeCsvValue(run.language ?? ''),
-                                safeCsvValue(searchMode),
-                                safeCsvValue(run.folderPath ?? ''),
-                                safeCsvValue(includePaths),
-                                safeCsvValue(excludePaths),
-                                safeCsvValue(stripComments),
-                                safeCsvValue(owlIgnoreText),
-                                safeCsvValue(embeddingModelName),
-                                safeCsvValue(''),
-                                safeCsvValue(''),
-                                safeCsvValue(''),
-                                safeCsvValue(''),
-                                safeCsvValue(''),
-                                safeCsvValue(''),
-                                safeCsvValue(''),
-                                safeCsvValue(''),
-                                safeCsvValue(''),
-                                safeCsvValue('')
-                        ].join(','));
+                        rows.push(buildRow(run, searchMode, includePaths, excludePaths, stripComments, '', '', ''));
                         continue;
                 }
                 items.forEach((item, queryIndex) => {
@@ -100,53 +116,11 @@ function historyToCsv(
                         const translated = item.translated_query || item.query || '';
                         const results = Array.isArray(item.results) ? item.results : [];
                         if (results.length === 0) {
-                                rows.push([
-                                        safeCsvValue(run.id ?? ''),
-                                        safeCsvValue(run.timestamp ?? ''),
-                                        safeCsvValue(run.language ?? ''),
-                                        safeCsvValue(searchMode),
-                                        safeCsvValue(run.folderPath ?? ''),
-                                        safeCsvValue(includePaths),
-                                        safeCsvValue(excludePaths),
-                                        safeCsvValue(stripComments),
-                                        safeCsvValue(owlIgnoreText),
-                                        safeCsvValue(embeddingModelName),
-                                        safeCsvValue(queryIndex + 1),
-                                        safeCsvValue(query),
-                                        safeCsvValue(translated),
-                                        safeCsvValue(''),
-                                        safeCsvValue(''),
-                                        safeCsvValue(''),
-                                        safeCsvValue(''),
-                                        safeCsvValue(''),
-                                        safeCsvValue(''),
-                                        safeCsvValue('')
-                                ].join(','));
+                                rows.push(buildRow(run, searchMode, includePaths, excludePaths, stripComments, queryIndex + 1, query, translated, ''));
                                 return;
                         }
                         results.forEach((result, resultIndex) => {
-                                rows.push([
-                                        safeCsvValue(run.id ?? ''),
-                                        safeCsvValue(run.timestamp ?? ''),
-                                        safeCsvValue(run.language ?? ''),
-                                        safeCsvValue(searchMode),
-                                        safeCsvValue(run.folderPath ?? ''),
-                                        safeCsvValue(includePaths),
-                                        safeCsvValue(excludePaths),
-                                        safeCsvValue(stripComments),
-                                        safeCsvValue(owlIgnoreText),
-                                        safeCsvValue(embeddingModelName),
-                                        safeCsvValue(queryIndex + 1),
-                                        safeCsvValue(query),
-                                        safeCsvValue(translated),
-                                        safeCsvValue(resultIndex + 1),
-                                        safeCsvValue(result?.function_name || result?.name || ''),
-                                        safeCsvValue(result?.class_name || ''),
-                                        safeCsvValue(result?.file_path || result?.file || ''),
-                                        safeCsvValue(result?.lineno || result?.line_number || ''),
-                                        safeCsvValue(result?.end_lineno || ''),
-                                        safeCsvValue(result?.code || '')
-                                ].join(','));
+                                rows.push(buildRow(run, searchMode, includePaths, excludePaths, stripComments, queryIndex + 1, query, translated, resultIndex + 1, result));
                         });
                 });
         }
@@ -463,8 +437,7 @@ async function getFunctionRangeByIndent(doc: vscode.TextDocument, startPos: vsco
 	
 	// 関数の終了行を見つける
 	let endLine = actualBodyStart;
-	const baseIndentForComparison = actualBodyIndent !== -1 ? defIndent : defIndent;
-	
+
 	for (let i = actualBodyStart + 1; i < lines.length; i++) {
 		const line = lines[i];
 		const trimmed = line.trim();
@@ -479,7 +452,7 @@ async function getFunctionRangeByIndent(doc: vscode.TextDocument, startPos: vsco
 		const currentIndent = line.length - line.trimStart().length;
 		
 		// インデントが関数定義と同じかそれより浅い場合、関数終了
-		if (currentIndent <= baseIndentForComparison) {
+		if (currentIndent <= defIndent) {
 			break;
 		}
 		
@@ -1261,18 +1234,16 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
   <div class="header">
     OwlSpotLight
     <div class="header-btns">
+      <label class="translate-toggle" title="Japanese to English translation"><input type="checkbox" id="translateToggle"> JP→EN</label>
       <button class="owl-btn" id="repoBtn" title="Open GitHub Repository">
         <img src="${owlPngUri}" alt="GitHub" style="height:1.6em;width:1.6em;vertical-align:middle;" />
       </button>
-      <button class="help-btn" id="helpBtn" title="Help"><span aria-label="help" role="img">💡</span></button>
+      <button class="help-btn" id="helpBtn" title="Help"><span aria-label="help" role="img">?</span></button>
     </div>
   </div>
   <div class="actions">
     <button id="startServerBtn">Start Server</button>
     <button id="clearCacheBtn">Clear Cache</button>
-  </div>
-  <div class="translation-settings">
-    <label><input type="checkbox" id="translateToggle"> JP→EN</label>
   </div>
   <!-- ヘルプモーダル -->
   <div id="helpModal">
@@ -1287,11 +1258,8 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
     <button class="tab-btn" data-tab="stats">Class Stats</button>
     <button class="tab-btn" data-tab="experimental">Experimental</button>
   </div>
-  <div class="scope-toggle-row">
-    <button id="scopeManagerBtn">Scope / .owlignore</button>
-  </div>
   <details id="scopeDetails" class="scope-collapsible">
-    <summary>Scope (.owlignore + optional GUI filters)</summary>
+    <summary>Scope / .owlignore</summary>
     <div class="scope-settings">
       <label for="searchModeSelect">Search Mode</label>
       <select id="searchModeSelect">
@@ -1299,9 +1267,9 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
         <option value="bm25">BM25 (Keyword)</option>
       </select>
       <label><input type="checkbox" id="stripCommentsToggle"> Embed w/o comments</label>
-      <input id="includePathsInput" type="text" placeholder="Include folders/patterns (comma or newline separated), e.g. src,lib/**" />
-      <input id="excludePathsInput" type="text" placeholder="Exclude folders/patterns, e.g. dist,node_modules/**" />
-      <label class="owlignore-current-label" for="owlignoreCurrentPatterns">Current server .owlignore patterns</label>
+      <input id="includePathsInput" type="text" placeholder="Include folders/patterns (comma separated)" />
+      <input id="excludePathsInput" type="text" placeholder="Exclude folders/patterns" />
+      <label class="owlignore-current-label" for="owlignoreCurrentPatterns">Current .owlignore patterns</label>
       <textarea id="owlignoreCurrentPatterns" class="owlignore-current-patterns" readonly></textarea>
       <div class="owlignore-toolbar">
         <button id="refreshScopeTreeBtn">Refresh Tree</button>
@@ -1552,7 +1520,6 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 		}
 		let terminal: vscode.Terminal | undefined;
-		let serverStartFailed = false;
 		try {
 			terminal = vscode.window.createTerminal({
 				name: 'OwlSpotlight Server',
@@ -1574,7 +1541,7 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 		// Listen for terminal exit (failure to start)
 		const disposable = vscode.window.onDidCloseTerminal((closedTerminal) => {
-			if (closedTerminal === terminal && !serverStartFailed) {
+			if (closedTerminal === terminal) {
 				vscode.window.showErrorMessage('OwlSpotlight server terminal was closed before startup completed. Please make sure you have created the Python virtual environment (e.g., run "OwlSpotlight: Setup Python Environment") and installed all dependencies.');
 			}
 		});

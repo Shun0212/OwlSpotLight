@@ -1,0 +1,12 @@
+{
+  "servers": {
+    "owl-cli": {
+      "command": "uvx",
+      "args": [
+        "--from", "git+https://github.com/Shun0212/Owl-CLI.git",
+        "owl", "mcp"
+      ],
+      "env": { "OWL_AUTO_ANNOTATE": "1" }
+    }
+  }
+}

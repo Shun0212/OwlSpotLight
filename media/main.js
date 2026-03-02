@@ -604,20 +604,10 @@ window.onload = function() {
         excludeInput.addEventListener('blur', saveState);
     }
 
-    const scopeManagerBtn = byId('scopeManagerBtn');
     const scopeDetails = byId('scopeDetails');
     const refreshScopeTreeBtn = byId('refreshScopeTreeBtn');
     const saveOwlIgnoreBtn = byId('saveOwlIgnoreBtn');
 
-    if (scopeManagerBtn && scopeDetails) {
-        scopeManagerBtn.onclick = () => {
-            scopeDetails.open = !scopeDetails.open;
-            if (scopeDetails.open) {
-                vscode.postMessage({ command: 'requestScopeManagerData', maxDepth: 4 });
-            }
-            saveState();
-        };
-    }
     if (scopeDetails) {
         scopeDetails.addEventListener('toggle', () => {
             if (scopeDetails.open) {
