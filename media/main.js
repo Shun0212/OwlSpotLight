@@ -193,6 +193,33 @@ window.onload = function() {
           };
         }
 
+        // サーバーステータスのポーリング（Extension Host経由）
+        function checkServerStatus() {
+            vscode.postMessage({ command: 'checkServerStatus' });
+        }
+        function setServerStatus(online) {
+            const el = document.getElementById('serverStatus');
+            const txt = document.getElementById('serverStatusText');
+            if (!el || !txt) return;
+            if (online) {
+                el.className = 'server-status online';
+                txt.textContent = 'Online';
+            } else {
+                el.className = 'server-status offline';
+                txt.textContent = 'Offline';
+            }
+        }
+        checkServerStatus();
+        setInterval(checkServerStatus, 5000);
+
+        // ローディング表示ヘルパー
+        function showLoading(statusId) {
+            const el = document.getElementById(statusId);
+            if (el) {
+                el.innerHTML = '<span class="loading-spinner"></span> Searching...';
+            }
+        }
+
         // 翻訳設定のトグル
         const translateToggle = document.getElementById('translateToggle');
         if (translateToggle) {
@@ -208,8 +235,12 @@ window.onload = function() {
     document.getElementById('searchBtn').onclick = () => {
                 const text = (document.getElementById('searchInput')).value;
                 if (text) {
-                        currentSearchQuery = text; // 現在の検索クエリを保存
+                        currentSearchQuery = text;
                         const lang = document.getElementById('languageSelect')?.value || '.py';
+                        showLoading('status');
+                        // 空状態を非表示
+                        const empty = document.getElementById('emptyState');
+                        if (empty) empty.style.display = 'none';
                         vscode.postMessage({ command: 'search', text, lang });
                         saveState();
                 }
@@ -226,6 +257,7 @@ window.onload = function() {
                 const query = currentSearchQuery || document.getElementById('searchInput').value || '';
                 console.log('Loading class stats with query:', query);
                 const lang = document.getElementById('languageSelect')?.value || '.py';
+                showLoading('stats-status');
                 vscode.postMessage({ command: 'getClassStats', query: query, lang });
                 saveState();
         };
@@ -402,11 +434,27 @@ window.onload = function() {
     function renderResults(results, folderPath) {
         const resultsContainer = document.getElementById('results');
         const statusEl = document.getElementById('status');
-        if (statusEl) statusEl.textContent = results.length ? 'Search Results:' : 'No matching functions found';
-        if (!resultsContainer) return;
-        resultsContainer.innerHTML = '';
+        const emptyEl = document.getElementById('emptyState');
 
-        results.forEach(function(r) {
+        if (results.length) {
+            if (statusEl) statusEl.innerHTML = '<span class="result-count-badge">' + results.length + ' results</span>';
+            if (emptyEl) emptyEl.style.display = 'none';
+        } else {
+            if (statusEl) statusEl.textContent = 'No matching functions found';
+            if (emptyEl) emptyEl.style.display = 'flex';
+        }
+        if (!resultsContainer) return;
+
+        // 空状態以外をクリア
+        const children = Array.from(resultsContainer.children);
+        children.forEach(c => {
+            if (c.id !== 'emptyState') resultsContainer.removeChild(c);
+        });
+
+        // スコアの最大値を取得（バー表示の正規化用）
+        const maxScore = results.reduce((max, r) => Math.max(max, r.score || r.similarity || 0), 0);
+
+        results.forEach(function(r, index) {
             let relPath = r.file_path || r.file || '';
             if (relPath && folderPath && relPath.startsWith(folderPath)) {
                 relPath = relPath.substring(folderPath.length);
@@ -437,10 +485,35 @@ window.onload = function() {
 
             resultDiv.className = itemClass;
 
+            // スコアバッジ
+            const score = r.score || r.similarity || 0;
+            let scoreClass = 'score-low';
+            let barClass = 'bar-low';
+            if (score >= 0.7) { scoreClass = 'score-high'; barClass = 'bar-high'; }
+            else if (score >= 0.4) { scoreClass = 'score-mid'; barClass = 'bar-mid'; }
+            const scoreBadge = score > 0
+                ? '<span class="score-badge ' + scoreClass + '">' + (score * 100).toFixed(0) + '%</span>'
+                : '';
+
+            // ランクバッジ
+            const rankClass = index < 3 ? 'result-rank rank-top' : 'result-rank';
+            const rankBadge = '<span class="' + rankClass + '">' + (index + 1) + '</span>';
+
+            // スコアバー
+            const barWidth = maxScore > 0 ? ((score / maxScore) * 100).toFixed(1) : '0';
+            const scoreBar = score > 0
+                ? '<div class="score-bar-wrapper"><div class="score-bar ' + barClass + '" style="width:' + barWidth + '%;"></div></div>'
+                : '';
+
             resultDiv.innerHTML = 
-                '<div class="' + titleClass + '">' + displayTitle + '</div>' +
+                '<div class="result-header">' +
+                  rankBadge +
+                  '<div class="' + titleClass + '">' + displayTitle + '</div>' +
+                  scoreBadge +
+                '</div>' +
                 '<div class="result-path">' + relPath + ':' + (r.lineno || r.line_number || 1) + '</div>' +
-                '<div class="result-snippet">' + (r.code ? r.code.split('\n').slice(0,2).join(' ') : '') + '</div>';
+                '<div class="result-snippet">' + (r.code ? r.code.split('\n').slice(0,2).join(' ') : '') + '</div>' +
+                scoreBar;
 
             resultDiv.onclick = function() {
                 const jumpData = {
@@ -474,27 +547,50 @@ window.onload = function() {
                         const tToggle = document.getElementById('translateToggle');
                         if (tToggle) { tToggle.checked = !!msg.enable; }
                 }
+                if (msg.type === 'translatedQuery') {
+                        const el = document.getElementById('translatedQuery');
+                        if (el && msg.original !== msg.translated) {
+                                el.innerHTML = 'Translated: <strong>' + msg.translated + '</strong>';
+                                el.style.display = 'block';
+                        } else if (el) {
+                                el.style.display = 'none';
+                        }
+                }
+                if (msg.type === 'serverStatus') {
+                        setServerStatus(msg.online);
+                }
                 if (msg.type === 'status') {
-                        document.getElementById('status').textContent = msg.message;
+                        const statusEl = document.getElementById('status');
+                        if (statusEl) {
+                                if (msg.message && msg.message.toLowerCase().includes('search')) {
+                                        statusEl.innerHTML = '<span class="loading-spinner"></span> ' + msg.message;
+                                } else {
+                                        statusEl.textContent = msg.message;
+                                }
+                        }
                         saveState();
                 }
         if (msg.type === 'error') {
-            document.getElementById('status').textContent = msg.message;
-            document.getElementById('results').innerHTML = '';
+            const statusEl = document.getElementById('status');
+            if (statusEl) statusEl.textContent = msg.message;
+            const emptyEl = document.getElementById('emptyState');
+            if (emptyEl) emptyEl.style.display = 'flex';
             saveState();
         }
         if (msg.type === 'classStats') {
             currentStatsData = msg.data;
             currentFolderPath = msg.folderPath;
             console.log('Class stats received:', currentStatsData);
+            const statsEmpty = document.getElementById('statsEmptyState');
+            if (statsEmpty) statsEmpty.style.display = 'none';
 			
 			// ステータス表示
 			const statsStatus = document.getElementById('stats-status');
 			if (statsStatus) {
 				const queryInfo = currentStatsData.search_query ? 
-					` (based on search: "${currentStatsData.search_query}")` : 
+					` (query: "${currentStatsData.search_query}")` : 
 					' (no search query)';
-				statsStatus.textContent = `Class statistics loaded${queryInfo}`;
+				statsStatus.textContent = `Statistics loaded${queryInfo}`;
 			}
             
             applyStatsFilter();

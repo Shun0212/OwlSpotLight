@@ -5,96 +5,153 @@ body {
   padding: 0; 
   background: var(--vscode-sideBar-background, #f3f3f3); 
   color: var(--vscode-foreground, #333333); 
+  line-height: 1.5;
 }
 
+/* ===== Header ===== */
 .header { 
   position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.8em 1em 0.5em 1em; 
-  font-size: 1.15em; 
-  font-weight: bold; 
+  padding: 0.7em 1em;
+  font-size: 1.1em; 
+  font-weight: 700; 
   border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #e0e0e0); 
   background: var(--vscode-sideBarSectionHeader-background, var(--vscode-sideBar-background, #f8f8f8)); 
   color: var(--vscode-sideBarTitle-foreground, var(--vscode-foreground, #333333));
-  letter-spacing: 0.05em; 
+  letter-spacing: 0.03em;
+}
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
 }
 .header-btns {
   display: flex;
   align-items: center;
-  gap: 0.15em;
-  margin-left: 0.7em;
+  gap: 0.3em;
+  margin-left: 0.5em;
 }
+
+/* サーバーステータスインジケーター */
+.server-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  font-size: 0.7em;
+  font-weight: 500;
+  padding: 0.15em 0.55em;
+  border-radius: 10px;
+  background: rgba(128, 128, 128, 0.15);
+  color: var(--vscode-descriptionForeground, #999);
+  letter-spacing: 0;
+  transition: all 0.3s ease;
+}
+.server-status .status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #888;
+  transition: background 0.3s ease;
+}
+.server-status.online { 
+  background: rgba(0, 180, 80, 0.15); 
+  color: #2ea043; 
+}
+.server-status.online .status-dot { 
+  background: #2ea043;
+  box-shadow: 0 0 4px rgba(46, 160, 67, 0.5);
+}
+.server-status.offline { 
+  background: rgba(200, 80, 60, 0.15); 
+  color: #cf222e; 
+}
+.server-status.offline .status-dot { 
+  background: #cf222e; 
+}
+
 .owl-btn {
   background: transparent;
   border: none;
-  padding: 0 0.1em;
+  padding: 0.15em;
   cursor: pointer;
-  transition: filter 0.2s;
+  transition: transform 0.2s, filter 0.2s;
   height: 1.6em;
   width: 1.6em;
   display: flex;
   align-items: center;
   justify-content: center;
+  border-radius: 4px;
+}
+.owl-btn:hover {
+  transform: scale(1.1);
 }
 .owl-btn img {
-  height: 1.45em;
-  width: 1.45em;
+  height: 1.4em;
+  width: 1.4em;
   filter: drop-shadow(0 1px 2px rgba(0,0,0,0.08));
   display: block;
   margin: auto;
 }
 .owl-btn:hover img {
-  filter: brightness(1.2) drop-shadow(0 2px 6px rgba(0,120,212,0.18));
+  filter: brightness(1.15) drop-shadow(0 2px 6px rgba(0,120,212,0.2));
 }
 
+/* ===== Actions ===== */
 .actions { 
   display: flex;
-  flex-direction: column;
-  gap: 0.7em;
+  flex-direction: row;
+  gap: 0.5em;
   align-items: stretch;
-  padding: 1.2em 1em 1em 1em; 
+  padding: 0.7em 0.8em;
   border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #e0e0e0); 
   background: var(--vscode-sideBarSectionHeader-background, var(--vscode-sideBar-background, #f8f8f8)); 
-  margin-bottom: 1em;
 }
 .actions button {
-  width: 100%;
-  font-size: 1em;
-  padding: 0.7em 0;
-  border-radius: 6px;
+  flex: 1;
+  font-size: 0.85em;
+  padding: 0.5em 0.4em;
+  border-radius: 5px;
   margin: 0;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+  box-shadow: none;
   font-weight: 600;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
 }
 
+/* ===== Translation settings ===== */
 .translation-settings {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 0.5em;
-  padding: 0.8em 1em;
+  padding: 0.45em 0.8em;
   border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #e0e0e0);
   background: var(--vscode-sideBarSectionHeader-background, var(--vscode-sideBar-background, #f8f8f8));
+  font-size: 0.85em;
 }
 .translation-settings label {
   display: flex;
   align-items: center;
-  gap: 0.4em;
+  gap: 0.35em;
+  cursor: pointer;
+  user-select: none;
+}
+.translation-settings input[type="checkbox"] {
+  accent-color: var(--vscode-button-background, #0078d4);
 }
 
+/* ===== Buttons ===== */
 button { 
-  padding: 0.2em 0.8em; 
-  border-radius: 4px; 
+  padding: 0.35em 0.8em; 
+  border-radius: 5px; 
   border: 1px solid var(--vscode-button-border, transparent); 
   background: var(--vscode-button-background, #0078d4); 
   color: var(--vscode-button-foreground, #ffffff); 
   font-weight: 500; 
   font-size: 0.85em; 
   cursor: pointer; 
-  transition: background 0.2s, border 0.2s, box-shadow 0.2s; 
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  transition: background 0.15s, box-shadow 0.15s, transform 0.1s; 
+  box-shadow: none;
   min-width: 0;
   white-space: nowrap;
   flex-shrink: 1;
@@ -102,15 +159,18 @@ button {
 
 button:hover { 
   background: var(--vscode-button-hoverBackground, #106ebe); 
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+
+button:active {
+  transform: scale(0.97);
 }
 
 button:focus {
   outline: 1px solid var(--vscode-focusBorder, #0078d4);
-  outline-offset: 2px;
+  outline-offset: 1px;
 }
 
-/* Special button styles */
 #clearCacheBtn, #clearCacheLocalBtn {
   background: var(--vscode-button-secondaryBackground, #5a5d5e);
   color: var(--vscode-button-secondaryForeground, #ffffff);
@@ -120,24 +180,23 @@ button:focus {
   background: var(--vscode-button-secondaryHoverBackground, #6c7172);
 }
 
-/* ヘルプボタン */
+/* ===== Help button ===== */
 .help-btn {
   position: static;
-  margin-left: 0.1em;
+  margin-left: 0;
   background: transparent;
   border: none;
-  font-size: 1.15em;
-  color: var(--vscode-editor-foreground, #888);
+  font-size: 1.1em;
+  color: var(--vscode-descriptionForeground, #888);
   cursor: pointer;
-  transition: color 0.2s;
-  z-index: 10;
-  padding: 0 0.1em;
-  align-self: center;
-  height: 1.45em;
-  width: 1.45em;
+  transition: color 0.2s, transform 0.2s;
+  padding: 0.15em;
+  height: 1.5em;
+  width: 1.5em;
   display: flex;
   align-items: center;
   justify-content: center;
+  border-radius: 4px;
 }
 .help-btn span {
   display: flex;
@@ -146,31 +205,42 @@ button:focus {
   font-size: 1em;
 }
 .help-btn:hover {
-  color: var(--vscode-editor-foreground, #0078d4);
+  color: var(--vscode-button-background, #0078d4);
+  transform: scale(1.1);
 }
 
-/* ヘルプモーダル */
+/* ===== Help modal ===== */
 #helpModal {
   display: none;
   position: fixed;
   z-index: 1000;
   left: 0; top: 0; width: 100vw; height: 100vh;
-  background: rgba(0,0,0,0.25);
+  background: rgba(0,0,0,0.35);
   justify-content: center;
   align-items: center;
+  animation: fadeIn 0.15s ease;
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 #helpModal .modal-content {
   background: var(--vscode-editor-background, #fff);
   color: var(--vscode-editor-foreground, #222);
-  padding: 2em 2.5em;
-  border-radius: 12px;
+  padding: 1.5em 2em;
+  border-radius: 10px;
   max-width: 480px;
   width: 90vw;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.25);
   position: relative;
   max-height: 80vh;
   display: flex;
   flex-direction: column;
+  animation: slideUp 0.2s ease;
+}
+@keyframes slideUp {
+  from { transform: translateY(10px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
 }
 #helpModal #helpContent {
   overflow-y: auto;
@@ -178,29 +248,42 @@ button:focus {
 }
 #helpModal .close {
   position: absolute;
-  top: 0.7em;
-  right: 1.2em;
+  top: 0.5em;
+  right: 0.8em;
   font-size: 1.5em;
   color: #888;
   cursor: pointer;
+  transition: color 0.15s;
 }
 #helpModal .close:hover {
   color: #d73a49;
 }
 
+/* ===== Search bar ===== */
 .searchbar { 
   display: flex; 
-  gap: 0.5em; 
-  padding: 0.8em 1em 0.5em 1em; 
+  gap: 0.4em; 
+  padding: 0.6em 0.8em;
   background: var(--vscode-sideBar-background, #f8f8f8); 
+  align-items: center;
+}
+
+.searchbar select {
+  padding: 0.4em 0.3em;
+  border-radius: 5px;
+  border: 1px solid var(--vscode-input-border, #c8c8c8);
+  background: var(--vscode-input-background, #ffffff);
+  color: var(--vscode-input-foreground, #333333);
+  font-size: 0.9em;
+  min-width: 3.5em;
 }
 
 input[type=text] { 
   flex: 1; 
-  padding: 0.4em; 
-  border-radius: 4px; 
+  padding: 0.45em 0.6em; 
+  border-radius: 5px; 
   border: 1px solid var(--vscode-input-border, #c8c8c8); 
-  font-size: 1em; 
+  font-size: 0.92em; 
   background: var(--vscode-input-background, #ffffff); 
   color: var(--vscode-input-foreground, #333333); 
   transition: border-color 0.2s, box-shadow 0.2s;
@@ -211,51 +294,146 @@ input[type=text]:focus {
   border-color: var(--vscode-focusBorder, #0078d4);
   box-shadow: 0 0 0 1px var(--vscode-focusBorder, #0078d4);
 }
-.status { 
-  padding: 0.5em 1em 0.2em 1em; 
-  color: var(--vscode-descriptionForeground, #666666); 
-  font-size: 0.97em; 
+
+input[type=text]::placeholder {
+  color: var(--vscode-input-placeholderForeground, #999);
+  font-size: 0.92em;
 }
+
+/* ===== Status ===== */
+.status { 
+  padding: 0.4em 0.8em 0.25em 0.8em;
+  color: var(--vscode-descriptionForeground, #666666); 
+  font-size: 0.88em;
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  min-height: 1.5em;
+}
+
+/* ===== Loading spinner ===== */
+.loading-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--vscode-descriptionForeground, #666);
+  border-top-color: var(--vscode-button-background, #0078d4);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ===== Results ===== */
 .results {
-  padding: 0.2em 0.5em 0.5em 0.5em;
+  padding: 0.3em 0.5em 0.5em 0.5em;
   max-width: 100%;
   display: block;
   overflow-y: auto;
   height: auto;
   position: relative;
 }
+
+/* 結果件数バッジ */
+.result-count-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  font-size: 0.8em;
+  color: var(--vscode-descriptionForeground, #999);
+  padding: 0.15em 0.5em;
+  border-radius: 8px;
+  background: var(--vscode-textCodeBlock-background, rgba(128,128,128,0.1));
+  font-weight: 500;
+}
+
 .result-item {
-  margin: 0 0 0.4em 0;
-  padding: 0.6em 0.8em;
-  border-radius: 4px;
+  margin: 0 0 0.35em 0;
+  padding: 0.55em 0.7em;
+  border-radius: 5px;
   background: transparent;
   cursor: pointer;
   border-left: 3px solid transparent;
-  transition: background 0.15s, border 0.15s;
+  transition: background 0.12s, border-color 0.12s, transform 0.1s;
   display: block;
   position: static;
   width: 100%;
   box-sizing: border-box;
-  clear: both;
-  float: none;
-  z-index: auto;
-  min-height: auto;
-  height: auto;
 }
-.result-item:hover { background: var(--vscode-list-hoverBackground, #2a2d2e); border-left: 3px solid var(--vscode-list-activeSelectionForeground, #3794ff); }
+.result-item:hover { 
+  background: var(--vscode-list-hoverBackground, #2a2d2e); 
+  border-left-color: var(--vscode-list-activeSelectionForeground, #3794ff); 
+}
+.result-item:active {
+  transform: scale(0.99);
+}
+
+/* 結果ヘッダー行（タイトル + スコア） */
+.result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5em;
+}
+
 .result-title { 
-  font-weight: 500; 
+  font-weight: 600; 
   color: var(--vscode-list-highlightForeground, #d7ba7d); 
   white-space: nowrap; 
   overflow: hidden; 
   text-overflow: ellipsis; 
-  max-width: 100%; 
-  box-sizing: border-box;
-  display: block;
-  position: static;
+  flex: 1;
+  min-width: 0;
+  font-size: 0.95em;
 }
+
+/* 類似度スコアバッジ */
+.score-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25em;
+  font-size: 0.72em;
+  font-weight: 600;
+  font-family: var(--vscode-editor-font-family, monospace);
+  padding: 0.1em 0.45em;
+  border-radius: 8px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.score-badge.score-high {
+  background: rgba(46, 160, 67, 0.2);
+  color: #3fb950;
+}
+.score-badge.score-mid {
+  background: rgba(210, 153, 34, 0.2);
+  color: #d29922;
+}
+.score-badge.score-low {
+  background: rgba(128, 128, 128, 0.15);
+  color: var(--vscode-descriptionForeground, #999);
+}
+
+/* 類似度バー */
+.score-bar-wrapper {
+  height: 3px;
+  background: rgba(128,128,128,0.12);
+  border-radius: 2px;
+  margin-top: 0.3em;
+  overflow: hidden;
+}
+.score-bar {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+.score-bar.bar-high { background: #3fb950; }
+.score-bar.bar-mid { background: #d29922; }
+.score-bar.bar-low { background: #666; }
+
 .result-path { 
-  font-size: 0.95em; 
+  font-size: 0.82em; 
   color: var(--vscode-descriptionForeground, #999); 
   white-space: nowrap; 
   overflow: hidden; 
@@ -263,24 +441,74 @@ input[type=text]:focus {
   max-width: 100%; 
   box-sizing: border-box;
   display: block;
-  position: static;
+  margin-top: 0.15em;
 }
 .result-snippet { 
-  font-size: 0.95em; 
+  font-size: 0.82em; 
   color: var(--vscode-foreground, #d4d4d4); 
+  opacity: 0.8;
   margin-top: 0.2em; 
   word-break: break-word; 
   white-space: pre-line; 
-  max-height: 2.8em; 
+  max-height: 2.6em; 
   overflow: hidden; 
   display: -webkit-box; 
   -webkit-line-clamp: 2; 
   line-clamp: 2;
   -webkit-box-orient: vertical; 
-  box-sizing: border-box; 
+  box-sizing: border-box;
+  font-family: var(--vscode-editor-font-family, 'Courier New', monospace);
+  line-height: 1.4;
 }
 
-/* クラス内関数とトップレベル関数のスタイル */
+/* 結果ランク番号 */
+.result-rank {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4em;
+  height: 1.4em;
+  font-size: 0.7em;
+  font-weight: 700;
+  border-radius: 50%;
+  background: rgba(128,128,128,0.15);
+  color: var(--vscode-descriptionForeground, #999);
+  flex-shrink: 0;
+  margin-right: 0.3em;
+}
+.result-rank.rank-top { 
+  background: rgba(55, 148, 255, 0.2); 
+  color: #58a6ff; 
+}
+
+/* ===== Empty state ===== */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2em 1em;
+  color: var(--vscode-descriptionForeground, #999);
+  text-align: center;
+}
+.empty-state .empty-icon {
+  font-size: 2.5em;
+  margin-bottom: 0.3em;
+  opacity: 0.6;
+}
+.empty-state .empty-title {
+  font-size: 0.95em;
+  font-weight: 600;
+  margin-bottom: 0.3em;
+  color: var(--vscode-foreground, #ccc);
+}
+.empty-state .empty-hint {
+  font-size: 0.82em;
+  opacity: 0.7;
+  line-height: 1.5;
+}
+
+/* ===== Symbol type colors ===== */
 .method-title .class-name {
   color: var(--vscode-symbolIcon-classForeground, #4EC9B0);
   font-weight: 600;
@@ -296,14 +524,13 @@ input[type=text]:focus {
   font-weight: 500;
 }
 
-/* クラス内関数の result-item に異なる背景色を適用 */
 .result-item.method-item {
   border-left: 3px solid var(--vscode-symbolIcon-classForeground, #4EC9B0);
 }
 
 .result-item.method-item:hover {
   background: var(--vscode-list-hoverBackground, #2a2d2e);
-  border-left: 3px solid var(--vscode-symbolIcon-classForeground, #4EC9B0);
+  border-left-color: var(--vscode-symbolIcon-classForeground, #4EC9B0);
 }
 
 .result-item.function-item {
@@ -312,42 +539,46 @@ input[type=text]:focus {
 
 .result-item.function-item:hover {
   background: var(--vscode-list-hoverBackground, #2a2d2e);
-  border-left: 3px solid var(--vscode-symbolIcon-functionForeground, #D19A66);
+  border-left-color: var(--vscode-symbolIcon-functionForeground, #D19A66);
 }
 
-/* タブスタイル */
+/* ===== Tabs ===== */
 .tabs {
   display: flex;
   background: var(--vscode-sideBarSectionHeader-background, var(--vscode-sideBar-background, #f8f8f8));
   margin: 0;
   padding: 0;
-  border-bottom: none;
+  border-bottom: 2px solid var(--vscode-sideBarSectionHeader-border, #333);
 }
 
 .tab-btn {
-  padding: 0.8em 1.5em;
+  flex: 1;
+  padding: 0.6em 1em;
   border: none;
-  background: var(--vscode-tab-inactiveBackground, rgba(128, 128, 128, 0.1));
-  color: var(--vscode-tab-inactiveForeground, rgba(255, 255, 255, 0.7));
+  background: transparent;
+  color: var(--vscode-tab-inactiveForeground, rgba(255, 255, 255, 0.55));
   cursor: pointer;
   font-weight: 500;
-  border-radius: 6px 6px 0 0;
-  margin-right: 2px;
-  transition: all 0.2s ease;
+  font-size: 0.88em;
+  border-radius: 0;
+  margin: 0;
+  transition: color 0.15s, background 0.15s;
   position: relative;
-  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #333);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  text-align: center;
 }
 
 .tab-btn:hover {
-  background: var(--vscode-tab-hoverBackground, rgba(255, 255, 255, 0.12));
-  color: var(--vscode-tab-hoverForeground, rgba(255, 255, 255, 0.9));
+  color: var(--vscode-tab-hoverForeground, rgba(255, 255, 255, 0.8));
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .tab-btn.active {
-  background: var(--vscode-tab-activeBackground, var(--vscode-editor-background, #1e1e1e));
   color: var(--vscode-tab-activeForeground, var(--vscode-foreground, #ffffff));
-  border-bottom: 1px solid var(--vscode-tab-activeBackground, var(--vscode-editor-background, #1e1e1e));
-  z-index: 1;
+  background: transparent;
+  border-bottom: 2px solid var(--vscode-button-background, #0078d4);
+  font-weight: 600;
 }
 
 .tab-content {
@@ -358,81 +589,83 @@ input[type=text]:focus {
   display: block;
 }
 
-/* クラス統計用のスタイル */
+/* ===== Class stats ===== */
 .stats-filter {
-  padding: 0.8em 1em;
+  padding: 0.55em 0.8em;
   background: var(--vscode-sideBarSectionHeader-background, var(--vscode-sideBar-background, #f8f8f8));
   border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #e0e0e0);
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
 }
 
 .stats-filter select {
+  flex: 1;
   padding: 0.4em;
-  border-radius: 4px;
+  border-radius: 5px;
   border: 1px solid var(--vscode-input-border, #c8c8c8);
   background: var(--vscode-input-background, #ffffff);
   color: var(--vscode-input-foreground, #333333);
-  font-size: 0.95em;
-  height: 2.2em;
+  font-size: 0.88em;
+  height: 2em;
 }
 
 #loadStatsBtn {
-  font-size: 1.05em;
-  padding: 0.4em 1.4em;
-  min-width: 3.5em;
-  height: 2.2em;
-  margin-left: 0.6em;
-  vertical-align: middle;
-  border-radius: 4px;
+  font-size: 0.88em;
+  padding: 0.35em 1em;
+  min-width: 3em;
+  height: 2em;
+  border-radius: 5px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
 
 .stats-results {
-  padding: 0.5em;
+  padding: 0.4em;
   overflow-y: auto;
 }
 
 .stats-class-item {
-  margin-bottom: 1em;
+  margin-bottom: 0.7em;
   border: 1px solid var(--vscode-sideBarSectionHeader-border, #333);
   border-radius: 6px;
   background: var(--vscode-editor-background, #1e1e1e);
+  overflow: hidden;
 }
 
 .stats-class-header {
-  padding: 0.8em 1em;
+  padding: 0.6em 0.8em;
   background: var(--vscode-sideBarSectionHeader-background, #252526);
   border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #333);
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-radius: 6px 6px 0 0;
   flex-wrap: wrap;
-  gap: 0.5em;
+  gap: 0.35em;
 }
 
 .class-name {
   color: var(--vscode-symbolIcon-classForeground, #4EC9B0);
   font-weight: 600;
-  font-size: 1.1em;
+  font-size: 1em;
 }
 
 .method-count {
   color: var(--vscode-descriptionForeground, #999);
-  font-size: 0.9em;
+  font-size: 0.8em;
 }
 
 .stats-methods {
-  padding: 0.5em;
+  padding: 0.35em;
 }
 
 .stats-method-item {
-  padding: 0.5em 0.8em;
-  margin-bottom: 0.3em;
+  padding: 0.4em 0.7em;
+  margin-bottom: 0.2em;
   border-radius: 4px;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background 0.12s;
   border-left: 3px solid var(--vscode-symbolIcon-methodForeground, #DCDCAA);
 }
 
@@ -443,52 +676,53 @@ input[type=text]:focus {
 .method-name {
   color: var(--vscode-symbolIcon-methodForeground, #DCDCAA);
   font-weight: 500;
+  font-size: 0.92em;
 }
 
 .method-path {
   color: var(--vscode-descriptionForeground, #999);
-  font-size: 0.9em;
-  margin-top: 0.2em;
+  font-size: 0.8em;
+  margin-top: 0.1em;
 }
 
 .stats-functions-section {
-  margin-bottom: 1em;
+  margin-bottom: 0.7em;
   border: 1px solid var(--vscode-sideBarSectionHeader-border, #333);
   border-radius: 6px;
   background: var(--vscode-editor-background, #1e1e1e);
+  overflow: hidden;
 }
 
 .stats-section-header {
-  padding: 0.8em 1em;
+  padding: 0.6em 0.8em;
   background: var(--vscode-sideBarSectionHeader-background, #252526);
   border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #333);
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-radius: 6px 6px 0 0;
 }
 
 .section-title {
   color: var(--vscode-symbolIcon-functionForeground, #D19A66);
   font-weight: 600;
-  font-size: 1.1em;
+  font-size: 1em;
 }
 
 .function-count {
   color: var(--vscode-descriptionForeground, #999);
-  font-size: 0.9em;
+  font-size: 0.8em;
 }
 
 .stats-functions-list {
-  padding: 0.5em;
+  padding: 0.35em;
 }
 
 .stats-function-item {
-  padding: 0.5em 0.8em;
-  margin-bottom: 0.3em;
+  padding: 0.4em 0.7em;
+  margin-bottom: 0.2em;
   border-radius: 4px;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background 0.12s;
   border-left: 3px solid var(--vscode-symbolIcon-functionForeground, #D19A66);
 }
 
@@ -499,45 +733,47 @@ input[type=text]:focus {
 .function-name {
   color: var(--vscode-symbolIcon-functionForeground, #D19A66);
   font-weight: 500;
+  font-size: 0.92em;
 }
 
 .function-path {
   color: var(--vscode-descriptionForeground, #999);
-  font-size: 0.9em;
-  margin-top: 0.2em;
+  font-size: 0.8em;
+  margin-top: 0.1em;
 }
 
 /* 重み付けスコア表示のスタイル */
 .class-score {
   color: var(--vscode-textPreformat-foreground, #d7ba7d);
-  font-size: 0.85em;
+  font-size: 0.75em;
   font-family: var(--vscode-editor-font-family, 'Courier New', monospace);
   background: var(--vscode-textCodeBlock-background, #3c3c3c);
-  padding: 0.2em 0.5em;
-  border-radius: 3px;
+  padding: 0.15em 0.45em;
+  border-radius: 4px;
   white-space: nowrap;
 }
 
-.stats-class-header {
-  padding: 0.8em 1em;
-  background: var(--vscode-sideBarSectionHeader-background, #252526);
-  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #333);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  border-radius: 6px 6px 0 0;
-  flex-wrap: wrap;
-  gap: 0.5em;
+/* ===== Translated query display ===== */
+.translated-query {
+  padding: 0.3em 0.8em;
+  font-size: 0.78em;
+  color: var(--vscode-descriptionForeground, #999);
+  background: rgba(128,128,128,0.06);
+  border-left: 2px solid var(--vscode-button-background, #0078d4);
+  margin: 0.3em 0.8em 0;
+  border-radius: 0 4px 4px 0;
+}
+.translated-query strong {
+  color: var(--vscode-foreground, #ccc);
 }
 
-/* スマートフォン対応 */
+/* ===== Responsive ===== */
 @media (max-width: 600px) {
   .stats-class-header {
     flex-direction: column;
     align-items: flex-start;
   }
-  
   .class-score {
-    font-size: 0.8em;
+    font-size: 0.7em;
   }
 }
