@@ -108,7 +108,7 @@ function historyToCsv(
                 const stripComments = !!run.stripCommentsFromEmbeddings;
                 const items = Array.isArray(run.items) ? run.items : [];
                 if (items.length === 0) {
-                        rows.push(buildRow(run, searchMode, includePaths, excludePaths, stripComments, '', '', ''));
+                        rows.push(buildRow(run, searchMode, includePaths, excludePaths, stripComments, '', '', '', ''));
                         continue;
                 }
                 items.forEach((item, queryIndex) => {
