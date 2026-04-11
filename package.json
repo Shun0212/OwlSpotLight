@@ -59,6 +59,10 @@
         "title": "OwlSpotlight: Start Server"
       },
       {
+        "command": "owlspotlight.stopServer",
+        "title": "OwlSpotlight: Stop Server"
+      },
+      {
         "command": "owlspotlight.searchCode",
         "title": "OwlSpotlight: Code Search"
       },
@@ -81,7 +85,7 @@
       "properties": {
         "owlspotlight.modelName": {
           "type": "string",
-          "default": "Shuu12121/CodeSearch-ModernBERT-Owl-2.0-Plus",
+          "default": "Shuu12121/Owl-ph2-len2048",
           "description": "Hugging Face model name used for embeddings"
         },
         "owlspotlight.batchSize": {
@@ -160,6 +164,11 @@
           "type": "string",
           "default": "",
           "description": "Google Gemini API key for translation"
+        },
+        "owlspotlight.autoStartServer": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically start the search server when the extension activates (requires .venv to be set up)"
         }
       }
     }

@@ -1160,6 +1160,14 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				// Webviewからのサーバー起動要求はコマンド経由で実行
 				void vscode.commands.executeCommand('owlspotlight.startServer');
 			}
+			if (msg.command === 'checkServerStatus') {
+				try {
+					const res = await fetch('http://localhost:8000/index_status');
+					webviewView.webview.postMessage({ type: 'serverStatus', online: res.ok });
+				} catch {
+					webviewView.webview.postMessage({ type: 'serverStatus', online: false });
+				}
+			}
 			if (msg.command === 'clearCache') {
 				const workspaceFolders = vscode.workspace.workspaceFolders;
 				if (!workspaceFolders || workspaceFolders.length === 0) {
@@ -1485,8 +1493,31 @@ export function activate(context: vscode.ExtensionContext) {
 		})
 	);
 
-	// サーバー起動コマンドはそのまま
+	// サーバー起動コマンド（child_processで直接起動 - ターミナル干渉を完全回避）
+	let serverProcess: cp.ChildProcess | undefined;
+	let isServerStarting = false;
+	const serverOutputChannel = vscode.window.createOutputChannel('OwlSpotlight Server');
+
 	const startServerDisposable = vscode.commands.registerCommand('owlspotlight.startServer', async () => {
+		// 二重起動防止
+		if (isServerStarting) {
+			vscode.window.showInformationMessage('Server is already starting. Please wait...');
+			return;
+		}
+
+		// サーバーが既に起動中かチェック
+		try {
+			const res = await fetch('http://localhost:8000/index_status');
+			if (res.ok) {
+				vscode.window.showInformationMessage('Server is already running.');
+				return;
+			}
+		} catch {
+			// サーバー未起動 → 続行
+		}
+
+		isServerStarting = true;
+
 		const config = vscode.workspace.getConfiguration('owlspotlight');
 		const cacheSettings = config.get<any>('cacheSettings', {});
 		const autoClearCache = cacheSettings.autoClearCache || false;
@@ -1496,6 +1527,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 		// 仮想環境がなければ作成を促す
 		if (!fs.existsSync(venvDir)) {
+			isServerStarting = false;
 			const result = await vscode.window.showWarningMessage(
 				'No Python virtual environment (.venv) found. Would you like to set it up now?',
 				{ modal: true },
@@ -1506,7 +1538,7 @@ export function activate(context: vscode.ExtensionContext) {
 				await vscode.commands.executeCommand('owlspotlight.setupEnv');
 				return;
 			} else {
-				vscode.window.showInformationMessage('Server start cancelled. Please set up the Python virtual environment before starting the server.');
+				vscode.window.showInformationMessage('Server start cancelled.');
 				return;
 			}
 		}
@@ -1514,40 +1546,122 @@ export function activate(context: vscode.ExtensionContext) {
 		if (autoClearCache) {
 			try {
 				await vscode.commands.executeCommand('owlspotlight.clearCache');
-				vscode.window.showInformationMessage('Cache cleared automatically before starting server.');
 			} catch (error) {
 				vscode.window.showWarningMessage(`Failed to auto-clear cache: ${error}`);
 			}
 		}
-		let terminal: vscode.Terminal | undefined;
-		try {
-			terminal = vscode.window.createTerminal({
-				name: 'OwlSpotlight Server',
-				cwd: serverDir
-			});
-			const platform = os.platform();
-			if (platform === 'win32') {
-				terminal.sendText('.\\.venv\\Scripts\\activate', true);
-				terminal.sendText('uvicorn server:app --host 127.0.0.1 --port 8000 --reload', true);
-			} else {
-				terminal.sendText('source .venv/bin/activate', true);
-				terminal.sendText('uvicorn server:app --host 127.0.0.1 --port 8000 --reload', true);
-			}
-			terminal.show();
-			vscode.window.showInformationMessage('OwlSpotlight server started in a new terminal.');
-		} catch (err) {
-			vscode.window.showErrorMessage('Failed to launch the OwlSpotlight server terminal. Please make sure you have created the Python virtual environment (e.g., run "OwlSpotlight: Setup Python Environment") and installed all dependencies.');
+
+		// venvのPythonバイナリを直接使用してuvicornを起動
+		const platform = os.platform();
+		const pythonBin = platform === 'win32'
+			? path.join(venvDir, 'Scripts', 'python.exe')
+			: path.join(venvDir, 'bin', 'python');
+
+		if (!fs.existsSync(pythonBin)) {
+			isServerStarting = false;
+			vscode.window.showErrorMessage(`Python binary not found: ${pythonBin}`);
 			return;
 		}
-		// Listen for terminal exit (failure to start)
-		const disposable = vscode.window.onDidCloseTerminal((closedTerminal) => {
-			if (closedTerminal === terminal) {
-				vscode.window.showErrorMessage('OwlSpotlight server terminal was closed before startup completed. Please make sure you have created the Python virtual environment (e.g., run "OwlSpotlight: Setup Python Environment") and installed all dependencies.');
+
+		try {
+			// 既存のプロセスがあれば停止
+			if (serverProcess && !serverProcess.killed) {
+				serverProcess.kill();
+				serverProcess = undefined;
 			}
-		});
-		context.subscriptions.push(disposable);
+
+			serverOutputChannel.clear();
+			serverOutputChannel.show(true);
+			serverOutputChannel.appendLine(`[OwlSpotlight] Starting server...`);
+			serverOutputChannel.appendLine(`[OwlSpotlight] Python: ${pythonBin}`);
+			serverOutputChannel.appendLine(`[OwlSpotlight] Working dir: ${serverDir}`);
+			serverOutputChannel.appendLine('---');
+
+			serverProcess = cp.spawn(
+				pythonBin,
+				['-m', 'uvicorn', 'server:app', '--host', '127.0.0.1', '--port', '8000', '--reload'],
+				{
+					cwd: serverDir,
+					env: {
+						...process.env,
+						VIRTUAL_ENV: venvDir,
+						PATH: (platform === 'win32'
+							? path.join(venvDir, 'Scripts')
+							: path.join(venvDir, 'bin'))
+							+ path.delimiter + (process.env.PATH || '')
+					}
+				}
+			);
+
+			serverProcess.stdout?.on('data', (data: Buffer) => {
+				serverOutputChannel.append(data.toString());
+			});
+			serverProcess.stderr?.on('data', (data: Buffer) => {
+				serverOutputChannel.append(data.toString());
+			});
+			serverProcess.on('close', (code: number | null) => {
+				serverOutputChannel.appendLine(`\n[OwlSpotlight] Server process exited (code: ${code})`);
+				isServerStarting = false;
+				serverProcess = undefined;
+			});
+			serverProcess.on('error', (err: Error) => {
+				serverOutputChannel.appendLine(`\n[OwlSpotlight] Failed to start: ${err.message}`);
+				isServerStarting = false;
+				serverProcess = undefined;
+				vscode.window.showErrorMessage(`Failed to start server: ${err.message}`);
+			});
+
+			vscode.window.showInformationMessage('OwlSpotlight server starting...');
+		} catch (err) {
+			isServerStarting = false;
+			vscode.window.showErrorMessage(`Failed to start server: ${err}`);
+			return;
+		}
+
+		// サーバー起動完了を待って通知（最大90秒 - モデルロード考慮）
+		const maxRetries = 18;
+		let retries = 0;
+		const checkInterval = setInterval(async () => {
+			retries++;
+			try {
+				const res = await fetch('http://localhost:8000/index_status');
+				if (res.ok) {
+					clearInterval(checkInterval);
+					isServerStarting = false;
+					vscode.window.showInformationMessage('OwlSpotlight server is ready.');
+				}
+			} catch {
+				if (retries >= maxRetries) {
+					clearInterval(checkInterval);
+					isServerStarting = false;
+				}
+			}
+		}, 5000);
 	});
 	context.subscriptions.push(startServerDisposable);
+
+	// サーバー停止コマンド
+	const stopServerDisposable = vscode.commands.registerCommand('owlspotlight.stopServer', () => {
+		if (serverProcess && !serverProcess.killed) {
+			serverProcess.kill();
+			serverProcess = undefined;
+			isServerStarting = false;
+			serverOutputChannel.appendLine('\n[OwlSpotlight] Server stopped by user.');
+			vscode.window.showInformationMessage('OwlSpotlight server stopped.');
+		} else {
+			vscode.window.showInformationMessage('No server process is running.');
+		}
+	});
+	context.subscriptions.push(stopServerDisposable);
+
+	// 拡張機能終了時にサーバーを停止
+	context.subscriptions.push({
+		dispose: () => {
+			if (serverProcess && !serverProcess.killed) {
+				serverProcess.kill();
+			}
+		}
+	});
 
 	// --- 環境セットアップコマンドを追加 ---
 	const setupEnvDisposable = vscode.commands.registerCommand('owlspotlight.setupEnv', async () => {
@@ -1778,6 +1892,24 @@ export function activate(context: vscode.ExtensionContext) {
 	);
 	// 拡張機能起動時にも反映
 	updatePythonServerConfig();
+
+	// サーバー自動起動（少し遅延を入れてVS Code起動完了を待つ）
+	const autoStart = vscode.workspace.getConfiguration('owlspotlight').get<boolean>('autoStartServer', false);
+	if (autoStart) {
+		setTimeout(async () => {
+			try {
+				const res = await fetch('http://localhost:8000/index_status');
+				if (res.ok) {
+					console.log('[OwlSpotlight] Server already running, skipping auto-start.');
+					return;
+				}
+			} catch {
+				// サーバー未起動
+			}
+			console.log('[OwlSpotlight] Auto-starting server...');
+			vscode.commands.executeCommand('owlspotlight.startServer');
+		}, 3000);
+	}
 
 	// デコレーションリスナーのセットアップ
 	setupDecorationListeners();
