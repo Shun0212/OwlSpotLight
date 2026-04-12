@@ -423,6 +423,176 @@ window.onload = function() {
         });
     }
 
+    function renderDocstringsResults(data, folderPath) {
+        const container = byId('exp-results');
+        const expStatus = byId('exp-status');
+        if (!container) { return; }
+        container.innerHTML = '';
+
+        const items = Array.isArray(data.items) ? data.items : [];
+        if (expStatus) {
+            expStatus.textContent = `Docstrings: ${data.with_docstring || 0}/${data.total || 0} functions documented (${data.num_files || 0} files)`;
+        }
+
+        if (items.length === 0) {
+            container.textContent = 'No functions found.';
+            return;
+        }
+
+        // ファイルごとにグルーピング
+        const byFile = {};
+        items.forEach((item) => {
+            const key = item.file || '';
+            if (!byFile[key]) { byFile[key] = []; }
+            byFile[key].push(item);
+        });
+
+        // コピー用テキストを組み立て
+        function buildCopyText(itemsList, basePath) {
+            const lines = [];
+            const grouped = {};
+            itemsList.forEach((item) => {
+                const key = item.file || '';
+                if (!grouped[key]) { grouped[key] = []; }
+                grouped[key].push(item);
+            });
+            Object.keys(grouped).sort().forEach((fp) => {
+                let rel = fp;
+                if (basePath && rel.startsWith(basePath)) {
+                    rel = rel.substring(basePath.length);
+                    if (rel.startsWith('/') || rel.startsWith('\\')) { rel = rel.slice(1); }
+                }
+                lines.push('## ' + rel);
+                grouped[fp].forEach((func) => {
+                    const qual = func.class_name
+                        ? func.class_name + '.' + func.function_name
+                        : func.function_name;
+                    lines.push('');
+                    lines.push('### ' + qual + '  (L' + func.lineno + ')');
+                    if (func.docstring) {
+                        lines.push('');
+                        lines.push(func.docstring);
+                    } else {
+                        lines.push('');
+                        lines.push('_(no docstring)_');
+                    }
+                });
+                lines.push('');
+            });
+            return lines.join('\n');
+        }
+
+        const copyText = buildCopyText(items, folderPath);
+
+        // ツールバー：Copy All / Export
+        const toolbar = document.createElement('div');
+        toolbar.className = 'docstring-toolbar';
+
+        const copyBtn = document.createElement('button');
+        copyBtn.textContent = 'Copy All';
+        copyBtn.className = 'docstring-action-btn';
+        copyBtn.onclick = () => {
+            navigator.clipboard.writeText(copyText).then(() => {
+                copyBtn.textContent = 'Copied!';
+                setTimeout(() => { copyBtn.textContent = 'Copy All'; }, 1500);
+            });
+        };
+        toolbar.appendChild(copyBtn);
+
+        const exportBtn = document.createElement('button');
+        exportBtn.textContent = 'Export File';
+        exportBtn.className = 'docstring-action-btn';
+        exportBtn.onclick = () => {
+            vscode.postMessage({ command: 'exportDocstrings', text: copyText });
+        };
+        toolbar.appendChild(exportBtn);
+
+        container.appendChild(toolbar);
+
+        Object.keys(byFile).sort().forEach((filePath) => {
+            const funcs = byFile[filePath];
+            const fileCard = document.createElement('div');
+            fileCard.className = 'exp-query-card';
+
+            let relPath = filePath;
+            if (folderPath && relPath.startsWith(folderPath)) {
+                relPath = relPath.substring(folderPath.length);
+                if (relPath.startsWith('/') || relPath.startsWith('\\')) {
+                    relPath = relPath.slice(1);
+                }
+            }
+            const fileTitle = document.createElement('div');
+            fileTitle.className = 'exp-query-title';
+            fileTitle.textContent = relPath;
+            fileCard.appendChild(fileTitle);
+
+            const meta = document.createElement('div');
+            meta.className = 'exp-query-meta';
+            const withDoc = funcs.filter((f) => f.has_docstring).length;
+            meta.textContent = `${withDoc}/${funcs.length} documented`;
+            fileCard.appendChild(meta);
+
+            const list = document.createElement('div');
+            list.className = 'exp-query-results';
+
+            funcs.forEach((func) => {
+                const row = document.createElement('div');
+                row.className = 'result-item' + (func.has_docstring ? '' : ' missing-docstring');
+                row.setAttribute('data-file', func.file || '');
+                row.setAttribute('data-line', func.lineno || 1);
+
+                const displayName = func.class_name
+                    ? '<span class="class-name">' + func.class_name + '</span>.<span class="method-name">' + func.function_name + '</span>'
+                    : '<span class="function-name">' + func.function_name + '</span>';
+
+                const docPreview = func.docstring
+                    ? '<div class="docstring-preview">' + escapeHtml(func.docstring.split('\n')[0].slice(0, 120)) + '</div>'
+                    : '<div class="docstring-preview missing">No docstring</div>';
+
+                row.innerHTML =
+                    '<div class="result-title">' + displayName + ' <span class="result-line">L' + func.lineno + '</span></div>' +
+                    docPreview;
+
+                if (func.docstring) {
+                    const details = document.createElement('details');
+                    details.className = 'result-code-details';
+                    details.addEventListener('click', (e) => e.stopPropagation());
+                    const summary = document.createElement('summary');
+                    summary.textContent = 'Full docstring';
+                    const pre = document.createElement('pre');
+                    pre.className = 'result-code-block';
+                    pre.textContent = func.docstring;
+                    details.appendChild(summary);
+                    details.appendChild(pre);
+                    row.appendChild(details);
+                }
+
+                row.onclick = function() {
+                    vscode.postMessage({
+                        command: 'jump',
+                        file: this.getAttribute('data-file'),
+                        line: this.getAttribute('data-line'),
+                        functionName: func.function_name,
+                        className: func.class_name || null,
+                        startLine: func.lineno || 1,
+                        endLine: null
+                    });
+                };
+
+                list.appendChild(row);
+            });
+
+            fileCard.appendChild(list);
+            container.appendChild(fileCard);
+        });
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
     function restoreCoreState(state) {
         if (state.searchInput && byId('searchInput')) {
             byId('searchInput').value = state.searchInput;
@@ -737,6 +907,19 @@ window.onload = function() {
         };
     }
 
+    const collectDocstringsBtn = byId('collectDocstringsBtn');
+    if (collectDocstringsBtn) {
+        collectDocstringsBtn.onclick = () => {
+            const expStatus = byId('exp-status');
+            if (expStatus) {
+                expStatus.textContent = 'Collecting docstrings...';
+            }
+            const scope = getScopeFilters();
+            vscode.postMessage({ command: 'collectDocstrings', ...scope });
+            saveState();
+        };
+    }
+
     const statsFilter = byId('statsFilter');
     if (statsFilter) {
         statsFilter.addEventListener('change', (e) => {
@@ -992,6 +1175,29 @@ window.onload = function() {
             const expStatus = byId('exp-status');
             if (expStatus) {
                 expStatus.textContent = msg.message || 'Batch search failed.';
+            }
+            saveState();
+            return;
+        }
+        if (msg.type === 'docstringsResults') {
+            currentFolderPath = msg.folderPath || currentFolderPath;
+            renderDocstringsResults(msg.data || {}, currentFolderPath || '');
+            setExperimentalMode('run');
+            saveState();
+            return;
+        }
+        if (msg.type === 'docstringsError') {
+            const expStatus = byId('exp-status');
+            if (expStatus) {
+                expStatus.textContent = msg.message || 'Failed to collect docstrings.';
+            }
+            saveState();
+            return;
+        }
+        if (msg.type === 'docstringsExported') {
+            const expStatus = byId('exp-status');
+            if (expStatus) {
+                expStatus.textContent = `Docstrings exported: ${msg.path || ''}`;
             }
             saveState();
             return;

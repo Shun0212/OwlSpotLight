@@ -105,6 +105,11 @@ class OwlIgnoreUpdateRequest(BaseModel):
     patterns: List[str] = Field(default_factory=list)
     max_depth: int = 4
 
+class CollectDocstringsRequest(BaseModel):
+    directory: str
+    include_paths: List[str] = Field(default_factory=list)
+    exclude_paths: List[str] = Field(default_factory=list)
+
 # サーバー全体で1つのインデックスを保持
 index_lock = Lock()
 
@@ -1471,4 +1476,56 @@ async def update_settings(req: UpdateSettingsRequest):
     return {
         "message": "Settings updated",
         "batch_size": settings.batch_size
+    }
+
+
+@app.post("/collect_docstrings")
+async def collect_docstrings_api(req: CollectDocstringsRequest):
+    """ディレクトリ内の .py ファイルから関数/メソッドの docstring を収集"""
+    directory = os.path.abspath(req.directory)
+    if not os.path.isdir(directory):
+        raise HTTPException(status_code=400, detail=f"Directory not found: {directory}")
+
+    include_patterns = normalize_scope_patterns(req.include_paths)
+    exclude_patterns = normalize_scope_patterns(req.exclude_paths)
+    ignore_spec = load_ignore_spec(directory, exclude_patterns)
+
+    py_files = []
+    for root, dirs, files in os.walk(directory):
+        dirs[:] = [d for d in dirs if not d.startswith('.')]
+        for fname in files:
+            if not fname.endswith('.py'):
+                continue
+            fpath = os.path.join(root, fname)
+            if is_ignored(fpath, ignore_spec, directory):
+                continue
+            if include_patterns and not is_included(fpath, directory, include_patterns):
+                continue
+            py_files.append(fpath)
+
+    items = []
+    for fpath in sorted(py_files):
+        try:
+            funcs = extract_functions(fpath)
+        except Exception:
+            continue
+        for func in funcs:
+            doc = func.get("docstring") or ""
+            items.append({
+                "file": fpath,
+                "function_name": func.get("name", ""),
+                "class_name": func.get("class_name"),
+                "lineno": func.get("lineno", 1),
+                "docstring": doc,
+                "has_docstring": bool(doc),
+            })
+
+    total = len(items)
+    with_doc = sum(1 for i in items if i["has_docstring"])
+    return {
+        "items": items,
+        "total": total,
+        "with_docstring": with_doc,
+        "without_docstring": total - with_doc,
+        "num_files": len(py_files),
     }

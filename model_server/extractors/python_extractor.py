@@ -47,6 +47,7 @@ def extract_python_functions(source_bytes: bytes) -> list[dict]:
     for _, capture_dict in func_matches:
         name_nodes = capture_dict.get("func.name", [])
         func_def_nodes = capture_dict.get("func.def", [])
+        func_body_nodes = capture_dict.get("func.body", [])
         if not name_nodes or not func_def_nodes:
             continue
         name_node = name_nodes[0]
@@ -58,6 +59,30 @@ def extract_python_functions(source_bytes: bytes) -> list[dict]:
             "utf-8", errors="replace"
         )
 
+        # docstring: body の最初の expression_statement > string を取得
+        docstring = None
+        if func_body_nodes:
+            body_node = func_body_nodes[0]
+            for child in body_node.children:
+                if child.type == "expression_statement":
+                    for sub in child.children:
+                        if sub.type == "string":
+                            raw = source_bytes[sub.start_byte:sub.end_byte].decode(
+                                "utf-8", errors="replace"
+                            )
+                            # 引用符を除去
+                            if raw.startswith(('"""', "'''")):
+                                docstring = raw[3:-3].strip()
+                            elif raw.startswith(('"', "'")):
+                                docstring = raw[1:-1].strip()
+                            else:
+                                docstring = raw.strip()
+                    break
+                elif child.type in ("comment",):
+                    continue
+                else:
+                    break
+
         func_start = func_def_node.start_point
         belonging_class = None
         for class_name, class_range in class_ranges.items():
@@ -65,13 +90,14 @@ def extract_python_functions(source_bytes: bytes) -> list[dict]:
                 belonging_class = class_name
                 break
 
-        results.append(
-            {
-                "name": func_name,
-                "code": func_code,
-                "lineno": func_def_node.start_point[0] + 1,
-                "end_lineno": func_def_node.end_point[0] + 1,
-                "class_name": belonging_class,
-            }
-        )
+        item = {
+            "name": func_name,
+            "code": func_code,
+            "lineno": func_def_node.start_point[0] + 1,
+            "end_lineno": func_def_node.end_point[0] + 1,
+            "class_name": belonging_class,
+        }
+        if docstring:
+            item["docstring"] = docstring
+        results.append(item)
     return results

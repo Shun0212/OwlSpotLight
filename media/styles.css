@@ -710,3 +710,45 @@ input[type=text]:focus {
   white-space: pre;
   font-size: 0.85em;
 }
+
+/* Docstring collection */
+.docstring-preview {
+  font-size: 0.85em;
+  color: var(--vscode-descriptionForeground, #999);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.docstring-preview.missing {
+  color: var(--vscode-editorWarning-foreground, #cca700);
+  font-style: italic;
+}
+.result-item.missing-docstring {
+  border-left: 3px solid var(--vscode-editorWarning-foreground, #cca700);
+}
+.result-line {
+  font-size: 0.8em;
+  color: var(--vscode-descriptionForeground, #888);
+  margin-left: 0.4em;
+}
+#collectDocstringsBtn {
+  margin-left: 4px;
+}
+.docstring-toolbar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.docstring-action-btn {
+  padding: 4px 10px;
+  font-size: 0.85em;
+  cursor: pointer;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 3px;
+  background: var(--vscode-button-secondaryBackground, #3a3d41);
+  color: var(--vscode-button-secondaryForeground, #ccc);
+}
+.docstring-action-btn:hover {
+  background: var(--vscode-button-secondaryHoverBackground, #505357);
+}

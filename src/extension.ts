@@ -1004,6 +1004,53 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                         webviewView.webview.postMessage({ type: 'batchError', message: 'Batch search failed. Make sure the server is running.' });
                                 }
                         }
+			if (msg.command === 'collectDocstrings') {
+				const workspaceFolders = vscode.workspace.workspaceFolders;
+				if (!workspaceFolders || workspaceFolders.length === 0) {
+					webviewView.webview.postMessage({ type: 'docstringsError', message: 'No workspace folder found' });
+					return;
+				}
+				const folderPath = workspaceFolders[0].uri.fsPath;
+				const includePaths = normalizeStringList(msg.includePaths);
+				const excludePaths = normalizeStringList(msg.excludePaths);
+				const scope = resolveScope(folderPath, excludePaths);
+				try {
+					const res = await fetch('http://localhost:8000/collect_docstrings', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							directory: folderPath,
+							include_paths: includePaths,
+							exclude_paths: scope.requestExclude,
+						})
+					});
+					const data = await res.json();
+					webviewView.webview.postMessage({
+						type: 'docstringsResults',
+						data,
+						folderPath
+					});
+				} catch (error) {
+					webviewView.webview.postMessage({ type: 'docstringsError', message: 'Failed to collect docstrings. Make sure the server is running.' });
+				}
+			}
+			if (msg.command === 'exportDocstrings') {
+				const text = msg.text || '';
+				const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+				const defaultFileName = `docstrings-${stamp}.md`;
+				const defaultWorkspace = vscode.workspace.workspaceFolders?.[0]?.uri;
+				const defaultUri = defaultWorkspace
+					? vscode.Uri.joinPath(defaultWorkspace, defaultFileName)
+					: undefined;
+				const saveUri = await vscode.window.showSaveDialog({
+					defaultUri,
+					filters: { 'Markdown': ['md'], 'Text': ['txt'] }
+				});
+				if (saveUri) {
+					await vscode.workspace.fs.writeFile(saveUri, Buffer.from(text, 'utf-8'));
+					webviewView.webview.postMessage({ type: 'docstringsExported', path: saveUri.fsPath });
+				}
+			}
 			if (msg.command === 'jump') {
 				const file = msg.file;
 				const line = msg.line;
@@ -1323,6 +1370,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
     <div class="experimental-panel active" id="exp-run-panel">
       <textarea id="batchQueriesInput" placeholder="One query per line..."></textarea>
       <button id="runBatchBtn">Run Batch</button>
+      <button id="collectDocstringsBtn">Collect Docstrings</button>
       <div class="status" id="exp-status"></div>
       <div class="results" id="exp-results"></div>
     </div>
