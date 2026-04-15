@@ -294,11 +294,23 @@ window.onload = function() {
         return resultDiv;
     }
 
-    function renderResults(results, folderPath) {
+    function renderResults(results, folderPath, timing) {
         const resultsContainer = byId('results');
         const statusEl = byId('status');
         if (statusEl) {
-            statusEl.textContent = results.length ? 'Search Results:' : 'No matching functions found';
+            let statusText = results.length ? 'Search Results:' : 'No matching functions found';
+            if (timing && typeof timing.embedding_time_ms === 'number') {
+                const parts = [];
+                if (timing.index_embedding_time_ms > 0) {
+                    parts.push(`index: ${timing.index_embedding_time_ms.toFixed(1)}ms`);
+                }
+                if (timing.query_embedding_time_ms > 0) {
+                    parts.push(`query: ${timing.query_embedding_time_ms.toFixed(1)}ms`);
+                }
+                const detail = parts.length ? ` (${parts.join(', ')})` : '';
+                statusText += `  ${timing.embedding_time_ms.toFixed(1)}ms${detail}`;
+            }
+            statusEl.textContent = statusText;
         }
         if (!resultsContainer) {
             return;
@@ -1139,7 +1151,11 @@ window.onload = function() {
         if (msg.type === 'results') {
             currentResults = Array.isArray(msg.results) ? msg.results : [];
             currentFolderPath = msg.folderPath || currentFolderPath;
-            renderResults(currentResults, currentFolderPath || '');
+            renderResults(currentResults, currentFolderPath || '', {
+                embedding_time_ms: msg.embedding_time_ms,
+                index_embedding_time_ms: msg.index_embedding_time_ms,
+                query_embedding_time_ms: msg.query_embedding_time_ms
+            });
             return;
         }
         if (msg.type === 'batchResults') {
@@ -1165,7 +1181,11 @@ window.onload = function() {
             const expStatus = byId('exp-status');
             if (expStatus) {
                 const count = Array.isArray(runRecord.items) ? runRecord.items.length : 0;
-                expStatus.textContent = `Batch finished: ${count} queries`;
+                let statusText = `Batch finished: ${count} queries`;
+                if (typeof currentBatchResult.embedding_time_ms === 'number') {
+                    statusText += `  ${currentBatchResult.embedding_time_ms.toFixed(1)}ms`;
+                }
+                expStatus.textContent = statusText;
             }
             setExperimentalMode('run');
             saveState();

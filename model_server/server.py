@@ -835,7 +835,8 @@ def build_index(
             return (
                 global_index_state.indexer.functions, 
                 len(global_index_state.file_info), 
-                global_index_state.indexer)
+                global_index_state.indexer,
+                0.0)
     
     # 2. メモリキャッシュが無効な場合、ディスクからロード
     global_index_state.load(directory, file_ext)
@@ -862,10 +863,12 @@ def build_index(
         return (
             global_index_state.indexer.functions, 
             len(global_index_state.file_info), 
-            global_index_state.indexer)
+            global_index_state.indexer,
+            0.0)
     
     # 5. ここに到達する場合のみ再構築が必要
     print("[build_index] Cache is invalid or outdated, rebuilding index")
+    embedding_time_ms = 0.0
     
     # モデル設定やモデル名の不一致でキャッシュクリア
     if global_index_state.model_config != current_model_config:
@@ -925,6 +928,7 @@ def build_index(
             global_index_state.indexer.functions,
             len(global_index_state.file_info),
             global_index_state.indexer,
+            0.0,
         )
     
     print(f"[build_index] File changes detected: added/modified={len(added_or_modified)}, deleted={len(deleted)}, unchanged={len(unchanged)}")
@@ -1003,7 +1007,7 @@ def build_index(
                     for i in new_func_indices
                 ]
                 print(f"Generating embeddings for {len(new_codes)} new/modified functions...")
-                new_embeddings = encode_code(new_codes, settings.batch_size, show_progress=True)
+                new_embeddings, embedding_time_ms = encode_code(new_codes, settings.batch_size, show_progress=True)
                 # 埋め込みを順序通りに合成
                 embeddings = np.zeros((len(results), new_embeddings.shape[1]), dtype=new_embeddings.dtype)
                 # 既存分
@@ -1031,7 +1035,7 @@ def build_index(
                     for code in codes
                 ]
                 print(f"Generating embeddings for {len(codes)} functions (full rebuild)...")
-                embeddings = encode_code(codes, settings.batch_size, show_progress=True)
+                embeddings, embedding_time_ms = encode_code(codes, settings.batch_size, show_progress=True)
                 faiss_index = faiss.IndexFlatL2(embeddings.shape[1])
                 faiss_index.add(embeddings)
                 global_index_state.embeddings = embeddings
@@ -1056,13 +1060,12 @@ def build_index(
     else:
         indexer = CodeIndexer()
         indexer.add_functions_without_embedding(results)  # 埋め込み計算なしで関数リストのみ追加
-    return results, len(file_paths), indexer
-
+    return results, len(file_paths), indexer, embedding_time_ms
 @app.post("/build_index")
 async def build_index_api(req: BuildIndexRequest):
     print(f"/build_index called for directory: {req.directory}")
     with index_lock:
-        results, file_count, _ = build_index(
+        results, file_count, _, embedding_time_ms = build_index(
             req.directory,
             req.file_ext,
             update_state=True,
@@ -1070,7 +1073,7 @@ async def build_index_api(req: BuildIndexRequest):
             exclude_paths=req.exclude_paths,
             strip_comments_for_embeddings=req.strip_comments_for_embeddings
         )
-    return {"num_functions": len(results), "num_files": file_count}
+    return {"num_functions": len(results), "num_files": file_count, "embedding_time_ms": round(embedding_time_ms, 1)}
 
 @app.post("/force_rebuild_index")
 async def force_rebuild_index_api(req: BuildIndexRequest):
@@ -1078,7 +1081,7 @@ async def force_rebuild_index_api(req: BuildIndexRequest):
     print(f"/force_rebuild_index called for directory: {req.directory}")
     with index_lock:
         global_index_state.clear_cache(clear_disk=True)
-        results, file_count, _ = build_index(
+        results, file_count, _, embedding_time_ms = build_index(
             req.directory,
             req.file_ext,
             update_state=True,
@@ -1086,7 +1089,7 @@ async def force_rebuild_index_api(req: BuildIndexRequest):
             exclude_paths=req.exclude_paths,
             strip_comments_for_embeddings=req.strip_comments_for_embeddings
         )
-    return {"num_functions": len(results), "num_files": file_count, "message": "Index forcefully rebuilt"}
+    return {"num_functions": len(results), "num_files": file_count, "embedding_time_ms": round(embedding_time_ms, 1), "message": "Index forcefully rebuilt"}
 
 @app.get("/index_status")
 async def index_status():
@@ -1163,7 +1166,7 @@ def search_functions_for_queries(
     strip_comments_for_embeddings: bool = False,
     search_mode: str = "semantic"
 ):
-    results, file_count, _ = build_index(
+    results, file_count, _, index_embedding_time_ms = build_index(
         directory,
         file_ext,
         max_workers,
@@ -1195,10 +1198,11 @@ def search_functions_for_queries(
             "items": [{"query": q, "results": []} for q in cleaned_queries],
             "num_functions": len(results),
             "num_files": file_count,
-            "message": "No functions found."
+            "message": "No functions found.",
+            "embedding_time_ms": round(index_embedding_time_ms, 1)
         }
     if not cleaned_queries:
-        return {"items": [], "num_functions": len(results), "num_files": file_count}
+        return {"items": [], "num_functions": len(results), "num_files": file_count, "embedding_time_ms": round(index_embedding_time_ms, 1)}
 
     if normalized_search_mode == "bm25":
         items = []
@@ -1211,27 +1215,39 @@ def search_functions_for_queries(
                 strip_comments_for_embeddings=strip_comments_for_embeddings
             )
             items.append({"query": query, "results": found})
-        return {"items": items, "num_functions": len(results), "num_files": file_count, "search_mode": "bm25"}
+        return {"items": items, "num_functions": len(results), "num_files": file_count, "search_mode": "bm25", "embedding_time_ms": round(index_embedding_time_ms, 1)}
 
     if embeddings is None or faiss_index is None:
         return {
             "items": [{"query": q, "results": []} for q in cleaned_queries],
             "num_functions": len(results),
             "num_files": file_count,
-            "message": "No embedding index found."
+            "message": "No embedding index found.",
+            "embedding_time_ms": round(index_embedding_time_ms, 1)
         }
 
     items = []
+    total_query_embedding_time_ms = 0.0
     for query in cleaned_queries:
         embedding_query = prepare_text_for_embedding(query, file_ext, strip_comments_for_embeddings)
-        query_embedding = encode_code([embedding_query], batch_size=1, show_progress=False)
+        query_embedding, query_embedding_time_ms = encode_code([embedding_query], batch_size=1, show_progress=False)
+        total_query_embedding_time_ms += query_embedding_time_ms
         _, indices = faiss_index.search(query_embedding, top_k)
         found = []
         for idx in indices[0]:
             if 0 <= idx < len(results):
                 found.append(results[idx])
         items.append({"query": query, "results": found})
-    return {"items": items, "num_functions": len(results), "num_files": file_count, "search_mode": "semantic"}
+    total_embedding_time_ms = index_embedding_time_ms + total_query_embedding_time_ms
+    return {
+        "items": items,
+        "num_functions": len(results),
+        "num_files": file_count,
+        "search_mode": "semantic",
+        "embedding_time_ms": round(total_embedding_time_ms, 1),
+        "index_embedding_time_ms": round(index_embedding_time_ms, 1),
+        "query_embedding_time_ms": round(total_query_embedding_time_ms, 1)
+    }
 
 
 def build_index_and_search(
@@ -1262,7 +1278,10 @@ def build_index_and_search(
         "results": first_results,
         "num_functions": searched.get("num_functions", 0),
         "num_files": searched.get("num_files", 0),
-        "search_mode": searched.get("search_mode", normalize_search_mode(search_mode))
+        "search_mode": searched.get("search_mode", normalize_search_mode(search_mode)),
+        "embedding_time_ms": searched.get("embedding_time_ms", 0.0),
+        "index_embedding_time_ms": searched.get("index_embedding_time_ms", 0.0),
+        "query_embedding_time_ms": searched.get("query_embedding_time_ms", 0.0)
     }
     if "message" in searched:
         payload["message"] = searched["message"]
@@ -1313,7 +1332,7 @@ async def get_class_stats(request: ClassStatsRequest):
                 strip_comments_for_embeddings=request.strip_comments_for_embeddings,
                 search_mode=request.search_mode
             )
-            all_functions, _, _ = build_index(
+            all_functions, _, _, _ = build_index(
                 request.directory,
                 request.file_ext,
                 update_state=True,

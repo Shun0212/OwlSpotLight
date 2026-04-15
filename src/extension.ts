@@ -885,13 +885,16 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				});
 				const data: any = await res.json();
                                 const rawResults = Array.isArray(data?.results) ? data.results : [];
+                                const embeddingTimeMs = data?.embedding_time_ms ?? null;
+                                const indexEmbeddingTimeMs = data?.index_embedding_time_ms ?? null;
+                                const queryEmbeddingTimeMs = data?.query_embedding_time_ms ?? null;
                                 const visibleResults = scope.applyOnDisplay
                                         ? filterSearchResultsByPatterns(rawResults, folderPath, scope.displayExclude)
                                         : rawResults;
 				if (visibleResults.length > 0) {
-					webviewView.webview.postMessage({ type: 'results', results: visibleResults, folderPath });
+					webviewView.webview.postMessage({ type: 'results', results: visibleResults, folderPath, embedding_time_ms: embeddingTimeMs, index_embedding_time_ms: indexEmbeddingTimeMs, query_embedding_time_ms: queryEmbeddingTimeMs });
 				} else {
-					webviewView.webview.postMessage({ type: 'results', results: [], folderPath });
+					webviewView.webview.postMessage({ type: 'results', results: [], folderPath, embedding_time_ms: embeddingTimeMs, index_embedding_time_ms: indexEmbeddingTimeMs, query_embedding_time_ms: queryEmbeddingTimeMs });
 				}
 			}
 			if (msg.command === 'getClassStats') {

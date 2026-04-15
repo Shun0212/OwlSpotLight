@@ -1,6 +1,7 @@
 from sentence_transformers import SentenceTransformer
 import numpy as np
 import os
+import time
 import torch
 import gc
 import warnings
@@ -95,8 +96,10 @@ def get_model():
         load_model_with_device_fallback()
     return model
 
-def encode_code(codes: list[str], batch_size: int = 8, max_retries: int = 3, show_progress: bool = True) -> np.ndarray:
-    """コードをエンコードし、メモリエラー時は自動的にバッチサイズを調整"""
+def encode_code(codes: list[str], batch_size: int = 8, max_retries: int = 3, show_progress: bool = True) -> tuple[np.ndarray, float]:
+    """コードをエンコードし、メモリエラー時は自動的にバッチサイズを調整。
+    Returns (embeddings, elapsed_ms) のタプル。
+    """
     from tqdm import tqdm
     import sys
 
@@ -111,13 +114,17 @@ def encode_code(codes: list[str], batch_size: int = 8, max_retries: int = 3, sho
 
     for attempt in range(max_retries):
         try:
-            return current_model.encode(
+            t0 = time.perf_counter()
+            result = current_model.encode(
                 codes,
                 batch_size=batch_size,
                 normalize_embeddings=True,
                 show_progress_bar=progress_enabled,
                 convert_to_numpy=True
             )
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            print(f"⏱️ Embedding completed: {len(codes)} items in {elapsed_ms:.1f}ms (batch_size={batch_size})")
+            return result, elapsed_ms
         
         except (RuntimeError, torch.cuda.OutOfMemoryError) as e:
             error_msg = str(e).lower()
