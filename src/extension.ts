@@ -888,13 +888,26 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                 const embeddingTimeMs = data?.embedding_time_ms ?? null;
                                 const indexEmbeddingTimeMs = data?.index_embedding_time_ms ?? null;
                                 const queryEmbeddingTimeMs = data?.query_embedding_time_ms ?? null;
+                                const numFiles = data?.num_files ?? null;
+                                const numFunctions = data?.num_functions ?? null;
                                 const visibleResults = scope.applyOnDisplay
                                         ? filterSearchResultsByPatterns(rawResults, folderPath, scope.displayExclude)
                                         : rawResults;
+                                const searchMeta = {
+                                        embedding_time_ms: embeddingTimeMs,
+                                        index_embedding_time_ms: indexEmbeddingTimeMs,
+                                        query_embedding_time_ms: queryEmbeddingTimeMs,
+                                        num_files: numFiles,
+                                        num_functions: numFunctions,
+                                        directory: folderPath,
+                                        file_ext: fileExt,
+                                        include_paths: includePaths,
+                                        exclude_paths: excludePaths
+                                };
 				if (visibleResults.length > 0) {
-					webviewView.webview.postMessage({ type: 'results', results: visibleResults, folderPath, embedding_time_ms: embeddingTimeMs, index_embedding_time_ms: indexEmbeddingTimeMs, query_embedding_time_ms: queryEmbeddingTimeMs });
+					webviewView.webview.postMessage({ type: 'results', results: visibleResults, folderPath, ...searchMeta });
 				} else {
-					webviewView.webview.postMessage({ type: 'results', results: [], folderPath, embedding_time_ms: embeddingTimeMs, index_embedding_time_ms: indexEmbeddingTimeMs, query_embedding_time_ms: queryEmbeddingTimeMs });
+					webviewView.webview.postMessage({ type: 'results', results: [], folderPath, ...searchMeta });
 				}
 			}
 			if (msg.command === 'getClassStats') {
@@ -1000,7 +1013,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                         }));
                                         webviewView.webview.postMessage({
                                                 type: 'batchResults',
-                                                data: { ...data, items: mergedItems },
+                                                data: { ...data, items: mergedItems, directory: folderPath, file_ext: fileExt, include_paths: includePaths, exclude_paths: excludePaths },
                                                 folderPath
                                         });
                                 } catch (error) {

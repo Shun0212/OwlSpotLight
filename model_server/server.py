@@ -1227,11 +1227,15 @@ def search_functions_for_queries(
         }
 
     items = []
-    total_query_embedding_time_ms = 0.0
-    for query in cleaned_queries:
-        embedding_query = prepare_text_for_embedding(query, file_ext, strip_comments_for_embeddings)
-        query_embedding, query_embedding_time_ms = encode_code([embedding_query], batch_size=1, show_progress=False)
-        total_query_embedding_time_ms += query_embedding_time_ms
+    embedding_queries = [
+        prepare_text_for_embedding(q, file_ext, strip_comments_for_embeddings)
+        for q in cleaned_queries
+    ]
+    all_query_embeddings, total_query_embedding_time_ms = encode_code(
+        embedding_queries, batch_size=len(embedding_queries), show_progress=False
+    )
+    for i, query in enumerate(cleaned_queries):
+        query_embedding = all_query_embeddings[i:i+1]
         _, indices = faiss_index.search(query_embedding, top_k)
         found = []
         for idx in indices[0]:

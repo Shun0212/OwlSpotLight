@@ -46,6 +46,35 @@ window.onload = function() {
         return relPath;
     }
 
+    function formatScopeInfo(meta, folderPath) {
+        if (!meta) { return ''; }
+        const parts = [];
+        // ディレクトリ名（末尾のフォルダ名のみ表示）
+        const dir = meta.directory || folderPath || '';
+        if (dir) {
+            const dirName = dir.split('/').filter(Boolean).pop() || dir;
+            parts.push(`📂 ${dirName}`);
+        }
+        // ファイル拡張子
+        if (meta.file_ext) {
+            parts.push(meta.file_ext);
+        }
+        // ファイル数・関数数
+        if (typeof meta.num_files === 'number' && typeof meta.num_functions === 'number') {
+            parts.push(`${meta.num_files} files / ${meta.num_functions} functions`);
+        }
+        // include/exclude パス
+        const inc = Array.isArray(meta.include_paths) ? meta.include_paths.filter(Boolean) : [];
+        const exc = Array.isArray(meta.exclude_paths) ? meta.exclude_paths.filter(Boolean) : [];
+        if (inc.length) {
+            parts.push(`include: ${inc.join(', ')}`);
+        }
+        if (exc.length) {
+            parts.push(`exclude: ${exc.join(', ')}`);
+        }
+        return parts.join(' | ');
+    }
+
     function normalizePattern(pattern) {
         if (!pattern || typeof pattern !== 'string') {
             return '';
@@ -294,23 +323,30 @@ window.onload = function() {
         return resultDiv;
     }
 
-    function renderResults(results, folderPath, timing) {
+    function renderResults(results, folderPath, meta) {
         const resultsContainer = byId('results');
         const statusEl = byId('status');
         if (statusEl) {
             let statusText = results.length ? 'Search Results:' : 'No matching functions found';
-            if (timing && typeof timing.embedding_time_ms === 'number') {
+            if (meta && typeof meta.embedding_time_ms === 'number') {
                 const parts = [];
-                if (timing.index_embedding_time_ms > 0) {
-                    parts.push(`index: ${timing.index_embedding_time_ms.toFixed(1)}ms`);
+                if (meta.index_embedding_time_ms > 0) {
+                    parts.push(`index: ${meta.index_embedding_time_ms.toFixed(1)}ms`);
                 }
-                if (timing.query_embedding_time_ms > 0) {
-                    parts.push(`query: ${timing.query_embedding_time_ms.toFixed(1)}ms`);
+                if (meta.query_embedding_time_ms > 0) {
+                    parts.push(`query: ${meta.query_embedding_time_ms.toFixed(1)}ms`);
                 }
                 const detail = parts.length ? ` (${parts.join(', ')})` : '';
-                statusText += `  ${timing.embedding_time_ms.toFixed(1)}ms${detail}`;
+                statusText += ` ⏱️ ${meta.embedding_time_ms.toFixed(1)}ms${detail}`;
             }
             statusEl.textContent = statusText;
+        }
+        const scopeInfoEl = byId('scope-info');
+        if (scopeInfoEl && meta) {
+            scopeInfoEl.textContent = formatScopeInfo(meta, folderPath);
+            scopeInfoEl.style.display = scopeInfoEl.textContent ? '' : 'none';
+        } else if (scopeInfoEl) {
+            scopeInfoEl.style.display = 'none';
         }
         if (!resultsContainer) {
             return;
