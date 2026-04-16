@@ -47,3 +47,4 @@ typing_extensions==4.13.2
 python-dotenv==1.0.1
 urllib3==2.4.0
 uvicorn==0.34.2
+psutil>=5.9.0

@@ -207,6 +207,12 @@ input[type=text]:focus {
   color: var(--vscode-descriptionForeground, #666666); 
   font-size: 0.97em; 
 }
+.scope-info {
+  padding: 0.1em 1em 0.3em 1em;
+  color: var(--vscode-descriptionForeground, #888888);
+  font-size: 0.85em;
+  opacity: 0.85;
+}
 .results {
   padding: 0.2em 0.5em 0.5em 0.5em;
   max-width: 100%;

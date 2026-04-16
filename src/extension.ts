@@ -902,7 +902,8 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                         directory: folderPath,
                                         file_ext: fileExt,
                                         include_paths: includePaths,
-                                        exclude_paths: excludePaths
+                                        exclude_paths: excludePaths,
+                                        memory_usage_mb: data?.memory_usage_mb ?? null
                                 };
 				if (visibleResults.length > 0) {
 					webviewView.webview.postMessage({ type: 'results', results: visibleResults, folderPath, ...searchMeta });
@@ -1360,6 +1361,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
       <button id="searchBtn">Search</button>
     </div>
     <div class="status" id="status"></div>
+    <div class="scope-info" id="scope-info" style="display:none;"></div>
     <div class="results" id="results"></div>
   </div>
   <!-- クラス統計タブ -->
@@ -1388,6 +1390,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
       <button id="runBatchBtn">Run Batch</button>
       <button id="collectDocstringsBtn">Collect Docstrings</button>
       <div class="status" id="exp-status"></div>
+      <div class="scope-info" id="exp-scope-info" style="display:none;"></div>
       <div class="results" id="exp-results"></div>
     </div>
     <div class="experimental-panel" id="exp-history-panel">
