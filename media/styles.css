@@ -1,4 +1,122 @@
 /* styles.css */
+
+/* ============================================================
+   OwlSpotlight Design System — color & type tokens
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap');
+
+:root {
+  /* ---------- Type families ---------- */
+  --font-ui: var(--vscode-font-family, 'Inter', 'Noto Sans JP', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+  --font-mono: var(--vscode-editor-font-family, 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Courier New', monospace);
+  --font-jp: 'Noto Sans JP', var(--font-ui);
+
+  /* ---------- Base type scale ---------- */
+  --fs-11: 0.72rem;
+  --fs-12: 0.78rem;
+  --fs-13: 0.82rem;
+  --fs-14: 0.88rem;
+  --fs-15: 0.92rem;
+  --fs-16: 0.95rem;
+  --fs-17: 1rem;
+  --fs-18: 1.1rem;
+  --fs-24: 1.5rem;
+  --fs-40: 2.5rem;
+
+  --lh-tight: 1.25;
+  --lh-ui:    1.4;
+  --lh-body:  1.5;
+
+  --fw-regular: 400;
+  --fw-medium:  500;
+  --fw-semi:    600;
+  --fw-bold:    700;
+
+  --ls-tight: 0;
+  --ls-ui:    0.01em;
+  --ls-header:0.03em;
+
+  /* ---------- Foreground ---------- */
+  --fg-1:        var(--vscode-foreground, #d4d4d4);
+  --fg-2:        var(--vscode-descriptionForeground, #999999);
+  --fg-3:        #6b6b6b;
+  --fg-title:    var(--vscode-sideBarTitle-foreground, #ffffff);
+  --fg-on-accent:var(--vscode-button-foreground, #ffffff);
+
+  /* ---------- Background surfaces ---------- */
+  --bg-sidebar:        var(--vscode-sideBar-background, #252526);
+  --bg-sidebar-section:var(--vscode-sideBarSectionHeader-background, #2d2d2e);
+  --bg-editor:         var(--vscode-editor-background, #1e1e1e);
+  --bg-input:          var(--vscode-input-background, #3c3c3c);
+  --bg-hover:          var(--vscode-list-hoverBackground, #2a2d2e);
+  --bg-code:           var(--vscode-textCodeBlock-background, rgba(128,128,128,0.10));
+  --bg-scrim:          rgba(0, 0, 0, 0.35);
+
+  /* ---------- Brand & accent ---------- */
+  --accent:         var(--vscode-button-background, #0078d4);
+  --accent-hover:   var(--vscode-button-hoverBackground, #106ebe);
+  --accent-soft:    rgba(55, 148, 255, 0.20);
+  --accent-focus:   var(--vscode-focusBorder, #0078d4);
+  --rank-top:       #58a6ff;
+
+  --secondary:      var(--vscode-button-secondaryBackground, #5a5d5e);
+  --secondary-hover:var(--vscode-button-secondaryHoverBackground, #6c7172);
+
+  /* ---------- Semantic ---------- */
+  --ok:       #4a8f5c;  --ok-soft:    rgba(74, 143, 92, 0.14);
+  --ok-bright:#6fae7d;  --ok-soft2:   rgba(74, 143, 92, 0.16);
+  --warn:     #b8935a;  --warn-soft:  rgba(184, 147, 90, 0.14);
+  --danger:   #b86060;  --danger-soft:rgba(184, 96, 96, 0.14);
+  --muted:    #888888;  --muted-soft: rgba(128,128,128,0.12);
+
+  /* ---------- Code symbol colors (desaturated for calmer UI) ---------- */
+  --sym-class:    var(--vscode-symbolIcon-classForeground, #7FB5AB);
+  --sym-method:   var(--vscode-symbolIcon-methodForeground, #C8C3A0);
+  --sym-function: var(--vscode-symbolIcon-functionForeground, #C49A78);
+  --sym-highlight:var(--vscode-list-highlightForeground, #c2b08a);
+
+  /* ---------- Borders ---------- */
+  --border-1: var(--vscode-sideBarSectionHeader-border, #333333);
+  --border-2: var(--vscode-input-border, #3c3c3c);
+  --border-accent: var(--accent);
+
+  /* ---------- Radii ---------- */
+  --r-xs: 2px;
+  --r-sm: 4px;
+  --r-md: 5px;
+  --r-lg: 6px;
+  --r-xl: 8px;
+  --r-pill: 10px;
+  --r-modal: 10px;
+
+  /* ---------- Shadows ---------- */
+  --sh-button:  0 1px 4px rgba(0, 0, 0, 0.12);
+  --sh-modal:   0 8px 32px rgba(0, 0, 0, 0.25);
+  --sh-logo:    drop-shadow(0 1px 2px rgba(0,0,0,0.08));
+  --sh-logo-hv: drop-shadow(0 2px 6px rgba(0, 120, 212, 0.2));
+  --sh-dot-ok:  0 0 4px rgba(46, 160, 67, 0.5);
+
+  /* ---------- Spacing ---------- */
+  --sp-1: 0.15em;
+  --sp-2: 0.25em;
+  --sp-3: 0.35em;
+  --sp-4: 0.5em;
+  --sp-5: 0.6em;
+  --sp-6: 0.7em;
+  --sp-7: 0.8em;
+  --sp-8: 1em;
+  --sp-10: 1.5em;
+  --sp-12: 2em;
+
+  /* ---------- Motion ---------- */
+  --dur-instant: 0.1s;
+  --dur-fast:    0.12s;
+  --dur-base:    0.15s;
+  --dur-slow:    0.3s;
+  --ease:        ease;
+}
+
 body { 
   font-family: var(--vscode-font-family, sans-serif); 
   margin: 0; 
@@ -380,7 +498,7 @@ input[type=text]::placeholder {
 
 .result-title { 
   font-weight: 600; 
-  color: var(--vscode-list-highlightForeground, #d7ba7d); 
+  color: var(--sym-highlight); 
   white-space: nowrap; 
   overflow: hidden; 
   text-overflow: ellipsis; 
@@ -443,23 +561,6 @@ input[type=text]::placeholder {
   display: block;
   margin-top: 0.15em;
 }
-.result-snippet { 
-  font-size: 0.82em; 
-  color: var(--vscode-foreground, #d4d4d4); 
-  opacity: 0.8;
-  margin-top: 0.2em; 
-  word-break: break-word; 
-  white-space: pre-line; 
-  max-height: 2.6em; 
-  overflow: hidden; 
-  display: -webkit-box; 
-  -webkit-line-clamp: 2; 
-  line-clamp: 2;
-  -webkit-box-orient: vertical; 
-  box-sizing: border-box;
-  font-family: var(--vscode-editor-font-family, 'Courier New', monospace);
-  line-height: 1.4;
-}
 
 /* 結果ランク番号 */
 .result-rank {
@@ -510,36 +611,36 @@ input[type=text]::placeholder {
 
 /* ===== Symbol type colors ===== */
 .method-title .class-name {
-  color: var(--vscode-symbolIcon-classForeground, #4EC9B0);
+  color: var(--sym-class);
   font-weight: 600;
 }
 
 .method-title .method-name {
-  color: var(--vscode-symbolIcon-methodForeground, #DCDCAA);
+  color: var(--sym-method);
   font-weight: 500;
 }
 
 .function-title .function-name {
-  color: var(--vscode-symbolIcon-functionForeground, #D19A66);
+  color: var(--sym-function);
   font-weight: 500;
 }
 
 .result-item.method-item {
-  border-left: 3px solid var(--vscode-symbolIcon-classForeground, #4EC9B0);
+  border-left: 3px solid var(--sym-class);
 }
 
 .result-item.method-item:hover {
-  background: var(--vscode-list-hoverBackground, #2a2d2e);
-  border-left-color: var(--vscode-symbolIcon-classForeground, #4EC9B0);
+  background: var(--bg-hover);
+  border-left-color: var(--sym-class);
 }
 
 .result-item.function-item {
-  border-left: 3px solid var(--vscode-symbolIcon-functionForeground, #D19A66);
+  border-left: 3px solid var(--sym-function);
 }
 
 .result-item.function-item:hover {
-  background: var(--vscode-list-hoverBackground, #2a2d2e);
-  border-left-color: var(--vscode-symbolIcon-functionForeground, #D19A66);
+  background: var(--bg-hover);
+  border-left-color: var(--sym-function);
 }
 
 /* ===== Tabs ===== */
@@ -646,7 +747,7 @@ input[type=text]::placeholder {
 }
 
 .class-name {
-  color: var(--vscode-symbolIcon-classForeground, #4EC9B0);
+  color: var(--sym-class);
   font-weight: 600;
   font-size: 1em;
 }
@@ -666,7 +767,7 @@ input[type=text]::placeholder {
   border-radius: 4px;
   cursor: pointer;
   transition: background 0.12s;
-  border-left: 3px solid var(--vscode-symbolIcon-methodForeground, #DCDCAA);
+  border-left: 3px solid var(--sym-method);
 }
 
 .stats-method-item:hover {
@@ -674,7 +775,7 @@ input[type=text]::placeholder {
 }
 
 .method-name {
-  color: var(--vscode-symbolIcon-methodForeground, #DCDCAA);
+  color: var(--sym-method);
   font-weight: 500;
   font-size: 0.92em;
 }
@@ -703,7 +804,7 @@ input[type=text]::placeholder {
 }
 
 .section-title {
-  color: var(--vscode-symbolIcon-functionForeground, #D19A66);
+  color: var(--sym-function);
   font-weight: 600;
   font-size: 1em;
 }
@@ -723,7 +824,7 @@ input[type=text]::placeholder {
   border-radius: 4px;
   cursor: pointer;
   transition: background 0.12s;
-  border-left: 3px solid var(--vscode-symbolIcon-functionForeground, #D19A66);
+  border-left: 3px solid var(--sym-function);
 }
 
 .stats-function-item:hover {
@@ -731,7 +832,7 @@ input[type=text]::placeholder {
 }
 
 .function-name {
-  color: var(--vscode-symbolIcon-functionForeground, #D19A66);
+  color: var(--sym-function);
   font-weight: 500;
   font-size: 0.92em;
 }

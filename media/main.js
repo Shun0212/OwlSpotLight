@@ -512,7 +512,6 @@ window.onload = function() {
                   scoreBadge +
                 '</div>' +
                 '<div class="result-path">' + relPath + ':' + (r.lineno || r.line_number || 1) + '</div>' +
-                '<div class="result-snippet">' + (r.code ? r.code.split('\n').slice(0,2).join(' ') : '') + '</div>' +
                 scoreBar;
 
             resultDiv.onclick = function() {
