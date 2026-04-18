@@ -116,7 +116,7 @@ class GlobalIndexerState:
         self.last_indexed: float = 0.0
         self.file_ext: str = ".py"
         self.embeddings: Optional[np.ndarray] = None  # 追加: 関数埋め込み
-        self.faiss_index: Optional[faiss.IndexFlatL2] = None  # 追加: FAISSインデックス
+        self.faiss_index: Optional[faiss.IndexFlatIP] = None  # FAISSインデックス (cosine similarity)
         self.index_dir = None  # ディレクトリごとに動的に設定
         self.model_name: Optional[str] = None  # 追加: インデックス構築に使用したモデル名
         self.model_config: dict = {}  # 追加: モデル構成情報
@@ -297,6 +297,11 @@ class GlobalIndexerState:
             self.embeddings = None
         try:
             self.faiss_index = faiss.read_index(os.path.join(self.index_dir, "faiss.index"))
+            # Rebuild as IndexFlatIP if loaded index is not inner-product
+            if self.embeddings is not None and not isinstance(self.faiss_index, faiss.IndexFlatIP):
+                print("[load] Rebuilding FAISS index as IndexFlatIP (was L2)")
+                self.faiss_index = faiss.IndexFlatIP(self.embeddings.shape[1])
+                self.faiss_index.add(self.embeddings)
             loaded_items.append(f"faiss({self.faiss_index.ntotal})")
         except Exception as e:
             print(f"[load] Failed to load faiss.index: {e}")
@@ -529,7 +534,7 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
             else:
                 embeddings = kept_embeddings
             if embeddings is not None and embeddings.shape[0] > 0:
-                faiss_index = faiss.IndexFlatL2(embeddings.shape[1])
+                faiss_index = faiss.IndexFlatIP(embeddings.shape[1])
                 faiss_index.add(embeddings)
             else:
                 faiss_index = None
@@ -542,7 +547,7 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
             if codes:
                 print(f"Generating embeddings for {len(codes)} functions (full rebuild)...")
                 embeddings = encode_code(codes, settings.batch_size, show_progress=True)
-                faiss_index = faiss.IndexFlatL2(embeddings.shape[1])
+                faiss_index = faiss.IndexFlatIP(embeddings.shape[1])
                 faiss_index.add(embeddings)
                 global_index_state.embeddings = embeddings
                 global_index_state.faiss_index = faiss_index
@@ -677,9 +682,8 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
         for i, idx in enumerate(I[0]):
             if 0 <= idx < len(results):
                 item = dict(results[idx])
-                # L2 distance → cosine similarity (normalized vectors)
-                l2_dist = float(D[0][i])
-                item["score"] = max(0.0, 1.0 - l2_dist / 2.0)
+                # Inner product score = cosine similarity (normalized vectors)
+                item["score"] = max(0.0, float(D[0][i]))
                 found.append(item)
         return {"results": found, "num_functions": len(results), "num_files": file_count}
 
