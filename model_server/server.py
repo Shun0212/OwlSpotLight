@@ -674,9 +674,13 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
         query_emb = encode_code([req.query], batch_size=1)  # クエリは1つなのでバッチサイズ1
         D, I = faiss_index.search(query_emb, req.top_k)
         found = []
-        for idx in I[0]:
+        for i, idx in enumerate(I[0]):
             if 0 <= idx < len(results):
-                found.append(results[idx])
+                item = dict(results[idx])
+                # L2 distance → cosine similarity (normalized vectors)
+                l2_dist = float(D[0][i])
+                item["score"] = max(0.0, 1.0 - l2_dist / 2.0)
+                found.append(item)
         return {"results": found, "num_functions": len(results), "num_files": file_count}
 
 
