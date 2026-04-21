@@ -4,16 +4,15 @@ from sentence_transformers import SentenceTransformer
 import torch
 from threading import Lock
 import os
+import time
 from typing import List, Dict, Optional
 from concurrent.futures import ThreadPoolExecutor
-import pathlib
 from tqdm import tqdm
 import faiss
 import numpy as np
 from pathspec import PathSpec
 from pathspec.patterns import GitWildMatchPattern
 import sys
-from functools import partial
 from pathlib import Path
 import json
 import hashlib
@@ -27,24 +26,12 @@ OWL_INDEX_DIR = ".owl_index"
 
 from extractors import extract_functions
 from indexer import CodeIndexer
-import hashlib
-import sys
-import os
-import time
-import torch
-import faiss
-import numpy as np
 
 # モデル管理を model.py から import
 from model import get_model, get_current_device, cleanup_memory, encode_code, DEFAULT_MODEL, get_device
 
 # グローバル変数
 model_name = os.environ.get("OWL_MODEL_NAME", DEFAULT_MODEL)
-
-# 互換性のため、一時的なダミー関数
-def get_device_and_prepare():
-    """後方互換性のためのダミー関数 - get_model()が自動的にデバイス管理を行う"""
-    pass
 
 def encode_with_memory_management(codes: list[str], batch_size: int = None, max_retries: int = 3, show_progress: bool = True):
     """後方互換性のためのラッパー関数"""
@@ -70,11 +57,6 @@ settings = OwlSettings()
 # ✅ リクエスト用の Pydantic モデル
 class EmbedRequest(BaseModel):
     texts: list[str]
-
-class IndexAndSearchRequest(BaseModel):
-    source_code: str
-    query_code: str
-    top_k: int = 5
 
 class IndexStatus(BaseModel):
     directory: str
@@ -105,7 +87,6 @@ class ClassStatsRequest(BaseModel):
 
 # サーバー全体で1つのインデックスを保持
 index_lock = Lock()
-global_indexer = None
 
 # インデックス情報を保持するクラス
 class GlobalIndexerState:
@@ -555,7 +536,7 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
         global_index_state.indexer = indexer
         global_index_state.directory = os.path.abspath(directory)
         global_index_state.file_ext = file_ext
-        global_index_state.last_indexed = float(__import__('time').time())
+        global_index_state.last_indexed = float(time.time())
         global_index_state.file_info = new_info
         global_index_state.model_name = model_name
         global_index_state.save()
@@ -569,22 +550,6 @@ async def embed(req: EmbedRequest):
     print("/embed called")
     embeddings = encode_with_memory_management(req.texts, settings.batch_size)
     return {"embeddings": embeddings.tolist()}
-
-@app.post("/index_and_search")
-async def index_and_search(req: IndexAndSearchRequest):
-    print("/index_and_search called")
-    global global_indexer
-    with index_lock:
-        if global_indexer is None:
-            # 初回のみインデックス作成
-            functions = extract_functions(req.source_code)
-            if not functions:
-                return {"results": []}
-            global_indexer = CodeIndexer()
-            global_indexer.add_functions(functions)
-        # 既存インデックスで検索
-        results = global_indexer.search(req.query_code, top_k=req.top_k)
-    return {"results": results}
 
 @app.post("/build_index")
 async def build_index_api(req: BuildIndexRequest):
@@ -625,37 +590,6 @@ async def search_api(query: str, top_k: int = 5):
             return {"results": [], "error": "No index built."}
         results = global_index_state.indexer.search(query, top_k=top_k)
     return {"results": results}
-
-
-def build_index_and_search(directory: str, query: str, file_ext: str = ".py", top_k: int = 5, max_workers: int = 8):
-    # キャッシュが有効で最新なら、埋め込み計算をスキップ
-    if (
-        global_index_state.indexer is not None and
-        global_index_state.directory == directory and
-        global_index_state.file_ext == file_ext and
-        global_index_state.is_up_to_date(directory=directory) and
-        global_index_state.embeddings is not None and
-        global_index_state.faiss_index is not None
-    ):
-        print("[build_index_and_search] キャッシュが最新、検索のみ実行")
-        results = global_index_state.indexer.functions
-        embeddings = global_index_state.embeddings
-        faiss_index = global_index_state.faiss_index
-        file_count = len(global_index_state.file_info)
-    else:
-        print("[build_index_and_search] インデックス構築が必要")
-        results, file_count, indexer = build_index(directory, file_ext, max_workers, update_state=True)
-        embeddings = global_index_state.embeddings
-        faiss_index = global_index_state.faiss_index
-    if not results or embeddings is None or faiss_index is None:
-        return {"results": [], "message": "No functions found."}
-    query_emb = encode_code([query], batch_size=1)  # クエリは1つなのでバッチサイズ1
-    D, I = faiss_index.search(query_emb, top_k)
-    found = []
-    for idx in I[0]:
-        if 0 <= idx < len(results):
-            found.append(results[idx])
-    return {"results": found, "num_functions": len(results), "num_files": file_count}
 
 @app.post("/search_functions_simple")
 async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
@@ -869,11 +803,3 @@ async def update_settings(req: UpdateSettingsRequest):
         "message": "Settings updated",
         "batch_size": settings.batch_size
     }
-
-@app.post("/set_batch_size")
-async def set_batch_size(batch_size: int):
-    """
-    埋め込みバッチサイズを動的に変更するAPI
-    """
-    settings.batch_size = batch_size
-    return {"batch_size": settings.batch_size}

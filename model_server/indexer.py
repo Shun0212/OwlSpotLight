@@ -1,6 +1,5 @@
 import faiss
 import numpy as np
-import faiss
 from model import encode_code, get_model_embedding_dim
 
 class CodeIndexer:

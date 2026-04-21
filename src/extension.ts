@@ -11,8 +11,6 @@ async function translateJapaneseToEnglish(text: string): Promise<string> {
     // フラットな設定取得に対応
     const enabled = config.get<boolean>('enableJapaneseTranslation', false);
     const geminiApiKey = config.get<string>('geminiApiKey', '');
-    // 追加設定を取得 (将来の拡張用)
-    const tSettings = config.get<any>('translationSettings', {});
     
     if (!enabled) {
         return text;
@@ -23,13 +21,12 @@ async function translateJapaneseToEnglish(text: string): Promise<string> {
         return text;
     }
     
-    return await translateWithGemini(text, { ...tSettings, geminiApiKey });
+    return await translateWithGemini(text, geminiApiKey);
 }
 
 // Gemini APIを使用した翻訳
-async function translateWithGemini(text: string, tSettings: any): Promise<string> {
+async function translateWithGemini(text: string, geminiApiKey: string): Promise<string> {
     try {
-        const geminiApiKey = tSettings.geminiApiKey || tSettings.translationApiKey || '';
         
         if (!geminiApiKey) {
             vscode.window.showWarningMessage('Gemini API key is not configured. Please set it in settings.');
