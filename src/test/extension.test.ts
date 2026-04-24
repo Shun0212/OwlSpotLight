@@ -25,6 +25,7 @@ suite('Extension Test Suite', () => {
             'owlspotlight.startServer',
             'owlspotlight.stopServer',
             'owlspotlight.searchCode',
+            'owlspotlight.findSimilarSelection',
             'owlspotlight.setupEnv',
             'owlspotlight.clearCache',
             'owlspotlight.removeVenv'

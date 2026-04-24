@@ -73,6 +73,7 @@ class SearchFunctionsSimpleRequest(BaseModel):
     query: str
     top_k: int = 5
     file_ext: str = ".py"
+    include_files: Optional[List[str]] = None
 
 class FunctionRangeRequest(BaseModel):
     file: str
@@ -84,6 +85,7 @@ class ClassStatsRequest(BaseModel):
     query: str  # 検索クエリ
     top_k: int = 50  # 上位何件の関数を取得するか
     file_ext: str = ".py"
+    include_files: Optional[List[str]] = None
 
 # サーバー全体で1つのインデックスを保持
 index_lock = Lock()
@@ -605,13 +607,60 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
         faiss_index = global_index_state.faiss_index
         if not results or embeddings is None or faiss_index is None:
             return {"results": [], "message": "No functions found."}
+        search_results = results
+        search_embeddings = embeddings
+        index_to_result_index = list(range(len(results)))
+        if req.include_files:
+            include_files = {os.path.abspath(path) for path in req.include_files}
+            scoped_indices = [
+                index
+                for index, func in enumerate(results)
+                if os.path.abspath(func.get("file", func.get("file_path", ""))) in include_files
+            ]
+            if not scoped_indices:
+                return {
+                    "results": [],
+                    "message": "No functions found in the selected file scope.",
+                    "num_functions": len(results),
+                    "num_files": file_count,
+                    "scoped_files": len(include_files),
+                }
+            search_results = [results[index] for index in scoped_indices]
+            search_embeddings = embeddings[scoped_indices]
+            scoped_faiss_index = faiss.IndexFlatL2(search_embeddings.shape[1])
+            scoped_faiss_index.add(search_embeddings)
+            faiss_index = scoped_faiss_index
+            index_to_result_index = scoped_indices
         query_emb = encode_code([req.query], batch_size=1)  # クエリは1つなのでバッチサイズ1
-        D, I = faiss_index.search(query_emb, req.top_k)
+        D, I = faiss_index.search(query_emb, min(req.top_k, len(search_results)))
+        valid_distances = [
+            float(distance)
+            for distance, idx in zip(D[0], I[0])
+            if 0 <= idx < len(results) and np.isfinite(distance)
+        ]
+        min_distance = min(valid_distances) if valid_distances else 0.0
+        max_distance = max(valid_distances) if valid_distances else 0.0
         found = []
-        for idx in I[0]:
-            if 0 <= idx < len(results):
-                found.append(results[idx])
-        return {"results": found, "num_functions": len(results), "num_files": file_count}
+        for rank, (distance, idx) in enumerate(zip(D[0], I[0]), start=1):
+            if 0 <= idx < len(search_results):
+                result_index = index_to_result_index[idx]
+                item = dict(results[result_index])
+                distance_value = float(distance)
+                if max_distance > min_distance and np.isfinite(distance_value):
+                    score = max(0.0, min(1.0, 1.0 - ((distance_value - min_distance) / (max_distance - min_distance))))
+                else:
+                    score = 1.0
+                item["rank"] = rank
+                item["distance"] = distance_value
+                item["score"] = score
+                item["similarity"] = score
+                found.append(item)
+        return {
+            "results": found,
+            "num_functions": len(results),
+            "num_files": file_count,
+            "scoped_files": len(req.include_files or []),
+        }
 
 
 
@@ -623,7 +672,8 @@ async def get_class_stats(request: ClassStatsRequest):
             directory=request.directory,
             query=request.query,
             top_k=request.top_k,
-            file_ext=request.file_ext
+            file_ext=request.file_ext,
+            include_files=request.include_files,
         )
         search_response = await search_functions_simple_api(search_request)
         search_results = search_response["results"]
@@ -633,16 +683,26 @@ async def get_class_stats(request: ClassStatsRequest):
         directory = request.directory
         ignore_spec = load_gitignore_spec(directory)
         
-        files = []
-        for root, dirs, filenames in os.walk(directory):
-            # .gitignoreのパターンでディレクトリをフィルタ
-            dirs[:] = [d for d in dirs if not is_ignored(os.path.join(root, d), ignore_spec, directory)]
-            
-            for filename in filenames:
-                if filename.endswith(request.file_ext):
-                    file_path = os.path.join(root, filename)
-                    if not is_ignored(file_path, ignore_spec, directory):
-                        files.append(file_path)
+        if request.include_files:
+            include_files = {os.path.abspath(path) for path in request.include_files}
+            files = [
+                file_path
+                for file_path in include_files
+                if file_path.endswith(request.file_ext)
+                and os.path.exists(file_path)
+                and not is_ignored(file_path, ignore_spec, directory)
+            ]
+        else:
+            files = []
+            for root, dirs, filenames in os.walk(directory):
+                # .gitignoreのパターンでディレクトリをフィルタ
+                dirs[:] = [d for d in dirs if not is_ignored(os.path.join(root, d), ignore_spec, directory)]
+                
+                for filename in filenames:
+                    if filename.endswith(request.file_ext):
+                        file_path = os.path.join(root, filename)
+                        if not is_ignored(file_path, ignore_spec, directory):
+                            files.append(file_path)
         
         for file_path in files:
             try:

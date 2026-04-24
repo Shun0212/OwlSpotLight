@@ -70,6 +70,14 @@ body {
 .server-status.offline .status-dot { 
   background: #cf222e; 
 }
+.server-status.pending {
+  background: rgba(210, 153, 34, 0.15);
+  color: #d29922;
+}
+.server-status.pending .status-dot {
+  background: #d29922;
+  box-shadow: 0 0 4px rgba(210, 153, 34, 0.45);
+}
 
 .owl-btn {
   background: transparent;
@@ -102,6 +110,7 @@ body {
 .actions { 
   display: flex;
   flex-direction: row;
+  flex-wrap: wrap;
   gap: 0.5em;
   align-items: stretch;
   padding: 0.7em 0.8em;
@@ -117,6 +126,18 @@ body {
   box-shadow: none;
   font-weight: 600;
   letter-spacing: 0.01em;
+}
+#setupAndStartBtn {
+  flex: 1.35;
+}
+#stopServerBtn {
+  background: var(--vscode-errorForeground, #cf222e);
+  color: #ffffff;
+  border-color: rgba(207, 34, 46, 0.65);
+}
+#stopServerBtn:hover {
+  background: #a40e18;
+  box-shadow: 0 1px 5px rgba(207, 34, 46, 0.24);
 }
 
 /* ===== Translation settings ===== */
@@ -268,7 +289,39 @@ button:focus {
   align-items: center;
 }
 
-.searchbar select {
+.searchbar input[type=text] {
+  min-width: 0;
+}
+
+.secondary-action {
+  background: var(--vscode-button-secondaryBackground, #5a5d5e);
+  color: var(--vscode-button-secondaryForeground, #ffffff);
+}
+
+.secondary-action:hover {
+  background: var(--vscode-button-secondaryHoverBackground, #6c7172);
+}
+
+.search-options {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.45em;
+  padding: 0 0.8em 0.65em 0.8em;
+  background: var(--vscode-sideBar-background, #f8f8f8);
+  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #e0e0e0);
+}
+
+.search-options label {
+  display: grid;
+  grid-template-columns: 4.8em minmax(0, 1fr);
+  align-items: center;
+  gap: 0.45em;
+  font-size: 0.82em;
+  color: var(--vscode-descriptionForeground, #999);
+}
+
+.searchbar select,
+.search-options select {
   padding: 0.4em 0.3em;
   border-radius: 5px;
   border: 1px solid var(--vscode-input-border, #c8c8c8);
@@ -540,6 +593,26 @@ input[type=text]::placeholder {
 .result-item.function-item:hover {
   background: var(--vscode-list-hoverBackground, #2a2d2e);
   border-left-color: var(--vscode-symbolIcon-functionForeground, #D19A66);
+}
+
+.result-item.codeblock-item {
+  border-left: 3px solid var(--vscode-symbolIcon-variableForeground, #75beff);
+}
+
+.result-item.codeblock-item:hover {
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+  border-left-color: var(--vscode-symbolIcon-variableForeground, #75beff);
+}
+
+.codeblock-title .function-name {
+  color: var(--vscode-symbolIcon-variableForeground, #75beff);
+}
+
+.codeblock-calls {
+  color: var(--vscode-descriptionForeground, #999);
+  font-size: 0.85em;
+  font-weight: 500;
+  margin-left: 0.35em;
 }
 
 /* ===== Tabs ===== */

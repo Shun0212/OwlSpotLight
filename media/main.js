@@ -14,6 +14,9 @@ window.onload = function() {
         const activeTab = activeTabBtn ? activeTabBtn.getAttribute('data-tab') : 'search';
         const searchInput = document.getElementById('searchInput')?.value || '';
         const language = document.getElementById('languageSelect')?.value || '.py';
+        const scope = document.getElementById('scopeSelect')?.value || 'all';
+        const resultTypeFilter = document.getElementById('resultTypeFilter')?.value || 'all';
+        const searchOptionsVisible = document.getElementById('searchOptions')?.style.display !== 'none';
         const statsFilter = document.getElementById('statsFilter')?.value || 'all';
         const statusText = document.getElementById('status')?.textContent || '';
         const statsStatusText = document.getElementById('stats-status')?.textContent || '';
@@ -24,6 +27,9 @@ window.onload = function() {
             activeTab,
             searchInput,
             language,
+            scope,
+            resultTypeFilter,
+            searchOptionsVisible,
             statsFilter,
             statusText,
             statsStatusText,
@@ -57,6 +63,17 @@ window.onload = function() {
             if (state.language && document.getElementById('languageSelect')) {
                 const sel = document.getElementById('languageSelect');
                 if (sel) sel.value = state.language;
+            }
+            if (state.scope && document.getElementById('scopeSelect')) {
+                const sel = document.getElementById('scopeSelect');
+                if (sel) sel.value = state.scope;
+            }
+            if (state.resultTypeFilter && document.getElementById('resultTypeFilter')) {
+                const sel = document.getElementById('resultTypeFilter');
+                if (sel) sel.value = state.resultTypeFilter;
+            }
+            if (typeof state.searchOptionsVisible === 'boolean' && document.getElementById('searchOptions')) {
+                document.getElementById('searchOptions').style.display = state.searchOptionsVisible ? 'grid' : 'none';
             }
             if (typeof state.translateEnabled === 'boolean') {
                 const tToggle = document.getElementById('translateToggle');
@@ -108,6 +125,17 @@ window.onload = function() {
             if (external.language && document.getElementById('languageSelect')) {
                 const sel = document.getElementById('languageSelect');
                 if (sel) sel.value = external.language;
+            }
+            if (external.scope && document.getElementById('scopeSelect')) {
+                const sel = document.getElementById('scopeSelect');
+                if (sel) sel.value = external.scope;
+            }
+            if (external.resultTypeFilter && document.getElementById('resultTypeFilter')) {
+                const sel = document.getElementById('resultTypeFilter');
+                if (sel) sel.value = external.resultTypeFilter;
+            }
+            if (typeof external.searchOptionsVisible === 'boolean' && document.getElementById('searchOptions')) {
+                document.getElementById('searchOptions').style.display = external.searchOptionsVisible ? 'grid' : 'none';
             }
             if (typeof external.translateEnabled === 'boolean') {
                 const tToggle = document.getElementById('translateToggle');
@@ -179,23 +207,35 @@ window.onload = function() {
 	}
 	
 	// 既存のボタンイベント
-    if (document.getElementById('startServerBtn')) {
-      document.getElementById('startServerBtn').onclick = () => {
-        console.log('startServerBtn clicked');
-        vscode.postMessage({ command: 'startServer' });
-      };
-    }
+        if (document.getElementById('setupAndStartBtn')) {
+          document.getElementById('setupAndStartBtn').onclick = () => {
+            console.log('setupAndStartBtn clicked');
+            const statusEl = document.getElementById('status');
+            if (statusEl) {
+              statusEl.innerHTML = '<span class="loading-spinner"></span> Checking environment...';
+            }
+            vscode.postMessage({ command: 'setupAndStart' });
+            saveState();
+          };
+        }
         if (document.getElementById('stopServerBtn')) {
           document.getElementById('stopServerBtn').onclick = () => {
             console.log('stopServerBtn clicked');
             vscode.postMessage({ command: 'stopServer' });
           };
         }
-        if (document.getElementById('clearCacheBtn')) {
-          document.getElementById('clearCacheBtn').onclick = () => {
-            console.log('clearCacheBtn clicked');
-            const lang = document.getElementById('languageSelect')?.value || '.py';
-            vscode.postMessage({ command: 'clearCache', lang });
+        if (document.getElementById('searchOptionsBtn')) {
+          document.getElementById('searchOptionsBtn').onclick = () => {
+            const options = document.getElementById('searchOptions');
+            if (!options) return;
+            options.style.display = options.style.display === 'none' ? 'grid' : 'none';
+            saveState();
+          };
+        }
+        if (document.getElementById('resultTypeFilter')) {
+          document.getElementById('resultTypeFilter').onchange = () => {
+            renderResults(currentResults, currentFolderPath || '');
+            saveState();
           };
         }
 
@@ -210,6 +250,9 @@ window.onload = function() {
             if (online) {
                 el.className = 'server-status online';
                 txt.textContent = port ? `Online (${port})` : 'Online';
+            } else if (typeof port === 'string' && port.length > 0) {
+                el.className = 'server-status pending';
+                txt.textContent = port;
             } else {
                 el.className = 'server-status offline';
                 txt.textContent = 'Offline';
@@ -243,11 +286,12 @@ window.onload = function() {
                 if (text) {
                         currentSearchQuery = text;
                         const lang = document.getElementById('languageSelect')?.value || '.py';
+                        const scope = document.getElementById('scopeSelect')?.value || 'all';
                         showLoading('status');
                         // 空状態を非表示
                         const empty = document.getElementById('emptyState');
                         if (empty) empty.style.display = 'none';
-                        vscode.postMessage({ command: 'search', text, lang });
+                        vscode.postMessage({ command: 'search', text, lang, scope });
                         saveState();
                 }
         };
@@ -263,8 +307,9 @@ window.onload = function() {
                 const query = currentSearchQuery || document.getElementById('searchInput').value || '';
                 console.log('Loading class stats with query:', query);
                 const lang = document.getElementById('languageSelect')?.value || '.py';
+                const scope = document.getElementById('scopeSelect')?.value || 'all';
                 showLoading('stats-status');
-                vscode.postMessage({ command: 'getClassStats', query: query, lang });
+                vscode.postMessage({ command: 'getClassStats', query: query, lang, scope });
                 saveState();
         };
 	
@@ -441,12 +486,22 @@ window.onload = function() {
         const resultsContainer = document.getElementById('results');
         const statusEl = document.getElementById('status');
         const emptyEl = document.getElementById('emptyState');
+        const resultTypeFilter = document.getElementById('resultTypeFilter')?.value || 'all';
+        const visibleResults = results.filter((r) => {
+            if (resultTypeFilter === 'functions') return !r.class_name && r.symbol_kind !== 'code_block';
+            if (resultTypeFilter === 'methods') return !!r.class_name || r.symbol_kind === 'method';
+            if (resultTypeFilter === 'codeblocks') return r.symbol_kind === 'code_block';
+            return true;
+        });
 
-        if (results.length) {
-            if (statusEl) statusEl.innerHTML = '<span class="result-count-badge">' + results.length + ' results</span>';
+        if (visibleResults.length) {
+            if (statusEl) {
+                const suffix = visibleResults.length === results.length ? '' : ' shown / ' + results.length + ' total';
+                statusEl.innerHTML = '<span class="result-count-badge">' + visibleResults.length + ' results' + suffix + '</span>';
+            }
             if (emptyEl) emptyEl.style.display = 'none';
         } else {
-            if (statusEl) statusEl.textContent = 'No matching functions found';
+            if (statusEl) statusEl.textContent = results.length ? 'No results match the selected type filter' : 'No matching functions found';
             if (emptyEl) emptyEl.style.display = 'flex';
         }
         if (!resultsContainer) return;
@@ -457,10 +512,10 @@ window.onload = function() {
             if (c.id !== 'emptyState') resultsContainer.removeChild(c);
         });
 
-        // スコアの最大値を取得（バー表示の正規化用）
-        const maxScore = results.reduce((max, r) => Math.max(max, r.score || r.similarity || 0), 0);
+        // 類似度の最大値を取得（バー表示の正規化用）
+        const maxSimilarity = visibleResults.reduce((max, r) => Math.max(max, r.similarity || r.score || 0), 0);
 
-        results.forEach(function(r, index) {
+        visibleResults.forEach(function(r, index) {
             let relPath = r.file_path || r.file || '';
             if (relPath && folderPath && relPath.startsWith(folderPath)) {
                 relPath = relPath.substring(folderPath.length);
@@ -479,7 +534,15 @@ window.onload = function() {
             let titleClass = 'result-title';
             let itemClass = 'result-item';
 
-            if (className) {
+            if (r.symbol_kind === 'code_block') {
+                const staticInfo = r.python_static || {};
+                const calls = Array.isArray(staticInfo.calls) && staticInfo.calls.length
+                    ? ' <span class="codeblock-calls">calls: ' + staticInfo.calls.slice(0, 3).join(', ') + '</span>'
+                    : '';
+                displayTitle = '<span class="function-name">CodeBlock</span>' + calls;
+                titleClass += ' codeblock-title';
+                itemClass += ' codeblock-item';
+            } else if (className) {
                 displayTitle = '<span class="class-name">' + className + '</span>.<span class="method-name">' + functionName + '</span>';
                 titleClass += ' method-title';
                 itemClass += ' method-item';
@@ -491,23 +554,24 @@ window.onload = function() {
 
             resultDiv.className = itemClass;
 
-            // スコアバッジ
-            const score = r.score || r.similarity || 0;
+            // 類似度バッジ
+            const hasScore = typeof r.score === 'number' || typeof r.similarity === 'number';
+            const similarity = hasScore ? (typeof r.similarity === 'number' ? r.similarity : r.score) : 0;
             let scoreClass = 'score-low';
             let barClass = 'bar-low';
-            if (score >= 0.7) { scoreClass = 'score-high'; barClass = 'bar-high'; }
-            else if (score >= 0.4) { scoreClass = 'score-mid'; barClass = 'bar-mid'; }
-            const scoreBadge = score > 0
-                ? '<span class="score-badge ' + scoreClass + '">' + (score * 100).toFixed(0) + '%</span>'
+            if (similarity >= 0.7) { scoreClass = 'score-high'; barClass = 'bar-high'; }
+            else if (similarity >= 0.4) { scoreClass = 'score-mid'; barClass = 'bar-mid'; }
+            const scoreBadge = hasScore
+                ? '<span class="score-badge ' + scoreClass + '" title="Relative similarity">Similarity ' + (similarity * 100).toFixed(0) + '%</span>'
                 : '';
 
             // ランクバッジ
             const rankClass = index < 3 ? 'result-rank rank-top' : 'result-rank';
             const rankBadge = '<span class="' + rankClass + '">' + (index + 1) + '</span>';
 
-            // スコアバー
-            const barWidth = maxScore > 0 ? ((score / maxScore) * 100).toFixed(1) : '0';
-            const scoreBar = score > 0
+            // 類似度バー
+            const barWidth = maxSimilarity > 0 ? ((similarity / maxSimilarity) * 100).toFixed(1) : '0';
+            const scoreBar = hasScore
                 ? '<div class="score-bar-wrapper"><div class="score-bar ' + barClass + '" style="width:' + barWidth + '%;"></div></div>'
                 : '';
 
@@ -563,7 +627,7 @@ window.onload = function() {
                         }
                 }
                 if (msg.type === 'serverStatus') {
-                        setServerStatus(msg.online, msg.port);
+                        setServerStatus(msg.online, msg.message || msg.port);
                 }
                 if (msg.type === 'status') {
                         const statusEl = document.getElementById('status');

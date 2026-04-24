@@ -19,8 +19,10 @@ def extract_functions(file_path: str | Path) -> list[dict]:
         return extract_python_functions(source_bytes)
     if ext == ".java":
         return extract_java_functions(source_bytes)
-    if ext == ".ts":
-        return extract_typescript_functions(source_bytes)
+    if ext in {".ts", ".tsx"}:
+        return extract_typescript_functions(source_bytes, "tsx" if ext == ".tsx" else "typescript")
+    if ext in {".js", ".jsx"}:
+        return extract_typescript_functions(source_bytes, "jsx" if ext == ".jsx" else "javascript")
     return []
 
 __all__ = ["extract_functions"]

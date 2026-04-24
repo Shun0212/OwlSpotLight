@@ -873,7 +873,10 @@ async function detectLanguages(): Promise<string[]> {
         const patterns = [
                 { glob: '**/*.py', ext: '.py' },
                 { glob: '**/*.java', ext: '.java' },
-                { glob: '**/*.ts', ext: '.ts' }
+                { glob: '**/*.ts', ext: '.ts' },
+                { glob: '**/*.tsx', ext: '.tsx' },
+                { glob: '**/*.js', ext: '.js' },
+                { glob: '**/*.jsx', ext: '.jsx' }
         ];
         const detected: string[] = [];
         for (const p of patterns) {
@@ -883,6 +886,110 @@ async function detectLanguages(): Promise<string[]> {
                 }
         }
         return detected;
+}
+
+type SearchScope = 'all' | 'source' | 'changed';
+
+const supportedSearchExtensions = new Set(['.py', '.java', '.ts', '.tsx', '.js', '.jsx']);
+const sourceDirectoryNames = new Set([
+	'src',
+	'app',
+	'lib',
+	'packages',
+	'components',
+	'server',
+	'client',
+	'backend',
+	'frontend'
+]);
+
+function getSupportedFileExtension(filePath: string): string | undefined {
+	const ext = path.extname(filePath).toLowerCase();
+	return supportedSearchExtensions.has(ext) ? ext : undefined;
+}
+
+function relativePathSegments(workspaceRoot: string, filePath: string): string[] {
+	const relPath = path.relative(workspaceRoot, filePath);
+	return relPath.split(/[\\/]+/).filter(Boolean);
+}
+
+function isLikelySourceFile(workspaceRoot: string, filePath: string): boolean {
+	const segments = relativePathSegments(workspaceRoot, filePath);
+	return segments.some((segment) => sourceDirectoryNames.has(segment.toLowerCase()));
+}
+
+function execFileText(command: string, args: string[], cwd: string): Promise<string> {
+	return new Promise((resolve) => {
+		cp.execFile(command, args, { cwd }, (error, stdout) => {
+			if (error) {
+				resolve('');
+				return;
+			}
+			resolve(stdout.toString());
+		});
+	});
+}
+
+async function findWorkspaceFilesByExtension(workspaceFolder: vscode.WorkspaceFolder, fileExt: string): Promise<string[]> {
+	const pattern = new vscode.RelativePattern(workspaceFolder, `**/*${fileExt}`);
+	const files = await vscode.workspace.findFiles(pattern, '**/{node_modules,.git,dist,build,out,coverage,.venv}/**');
+	return files.map((file) => file.fsPath);
+}
+
+async function findSourceFilesByExtension(workspaceFolder: vscode.WorkspaceFolder, fileExt: string): Promise<string[]> {
+	const workspaceRoot = workspaceFolder.uri.fsPath;
+	const files = await findWorkspaceFilesByExtension(workspaceFolder, fileExt);
+	return files.filter((file) => isLikelySourceFile(workspaceRoot, file));
+}
+
+async function findChangedFilesByExtension(workspaceFolder: vscode.WorkspaceFolder, fileExt: string): Promise<string[]> {
+	const workspaceRoot = workspaceFolder.uri.fsPath;
+	const changedOutput = await execFileText('git', ['diff', '--name-only', '--diff-filter=ACMR', 'HEAD'], workspaceRoot);
+	const untrackedOutput = await execFileText('git', ['ls-files', '--others', '--exclude-standard'], workspaceRoot);
+	const relPaths = [...changedOutput.split(/\r?\n/), ...untrackedOutput.split(/\r?\n/)]
+		.map((line) => line.trim())
+		.filter(Boolean);
+	const seen = new Set<string>();
+	const files: string[] = [];
+	for (const relPath of relPaths) {
+		const filePath = path.resolve(workspaceRoot, relPath);
+		if (!filePath.startsWith(workspaceRoot) || seen.has(filePath)) {
+			continue;
+		}
+		if (path.extname(filePath).toLowerCase() !== fileExt || !fs.existsSync(filePath)) {
+			continue;
+		}
+		seen.add(filePath);
+		files.push(filePath);
+	}
+	return files;
+}
+
+async function resolveSearchScopeFiles(
+	workspaceFolder: vscode.WorkspaceFolder,
+	fileExt: string,
+	scope: SearchScope
+): Promise<string[] | undefined> {
+	if (scope === 'source') {
+		const sourceFiles = await findSourceFilesByExtension(workspaceFolder, fileExt);
+		return sourceFiles.length > 0 ? sourceFiles : undefined;
+	}
+	if (scope === 'changed') {
+		return findChangedFilesByExtension(workspaceFolder, fileExt);
+	}
+	return undefined;
+}
+
+function formatSearchResultLabel(result: any): string {
+	const name = result.class_name
+		? `${result.class_name}.${result.function_name || result.name || 'unknown'}`
+		: result.symbol_kind === 'code_block'
+			? `${result.name || 'CodeBlock'}`
+			: `${result.function_name || result.name || 'unknown'}`;
+	const similarity = typeof result.similarity === 'number'
+		? `Similarity ${(result.similarity * 100).toFixed(0)}%`
+		: 'Similarity n/a';
+	return `${name} - ${similarity}`;
 }
 
 // WebviewViewProviderでサイドバーUIをリッチ化
@@ -1000,7 +1107,15 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					webviewView.webview.postMessage({ type: 'error', message: 'No workspace folder found' });
 					return;
 				}
-				const folderPath = workspaceFolders[0].uri.fsPath;
+				const workspaceFolder = workspaceFolders[0];
+				const folderPath = workspaceFolder.uri.fsPath;
+				const scope = (msg.scope === 'source' || msg.scope === 'changed') ? msg.scope as SearchScope : 'all';
+				const includeFiles = await resolveSearchScopeFiles(workspaceFolder, fileExt, scope);
+				if (scope === 'changed' && includeFiles && includeFiles.length === 0) {
+					webviewView.webview.postMessage({ type: 'results', results: [], folderPath });
+					webviewView.webview.postMessage({ type: 'status', message: `No changed ${fileExt} files found.` });
+					return;
+				}
 				webviewView.webview.postMessage({ type: 'status', message: 'Searching...' });
 				const serverPort = await resolveActiveServerPort();
 				if (serverPort === undefined) {
@@ -1010,7 +1125,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				const res = await fetch(getServerUrl('/search_functions_simple', serverPort), {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ directory: folderPath, query, top_k: 10, file_ext: fileExt })
+                                        body: JSON.stringify({ directory: folderPath, query, top_k: 10, file_ext: fileExt, include_files: includeFiles })
 				});
 				const data: any = await res.json();
 				if (data && data.results && Array.isArray(data.results) && data.results.length > 0) {
@@ -1025,12 +1140,15 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					webviewView.webview.postMessage({ type: 'error', message: 'No workspace folder found' });
 					return;
 				}
-                const folderPath = workspaceFolders[0].uri.fsPath;
+                const workspaceFolder = workspaceFolders[0];
+                const folderPath = workspaceFolder.uri.fsPath;
                 let query = msg.query || '';
                 const originalQuery = query;
                 query = await translateJapaneseToEnglish(query);
                 webviewView.webview.postMessage({ type: 'translatedQuery', original: originalQuery, translated: query });
                 const fileExt = msg.lang || '.py';
+                const scope = (msg.scope === 'source' || msg.scope === 'changed') ? msg.scope as SearchScope : 'all';
+                const includeFiles = await resolveSearchScopeFiles(workspaceFolder, fileExt, scope);
 				webviewView.webview.postMessage({ type: 'status', message: 'Loading class statistics...' });
 				try {
 					const serverPort = await resolveActiveServerPort();
@@ -1039,9 +1157,9 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 						return;
 					}
 					const res = await fetch(getServerUrl('/get_class_stats', serverPort), {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify({ directory: folderPath, query: query, top_k: 50, file_ext: fileExt })
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({ directory: folderPath, query: query, top_k: 50, file_ext: fileExt, include_files: includeFiles })
 					});
 					const data: any = await res.json();
 					webviewView.webview.postMessage({ type: 'classStats', data, folderPath });
@@ -1202,6 +1320,34 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				// Webviewからのサーバー起動要求はコマンド経由で実行
 				void vscode.commands.executeCommand('owlspotlight.startServer');
 			}
+			if (msg.command === 'setupAndStart') {
+				const serverDir = path.join(this._context.extensionPath, 'model_server');
+				const venvDir = path.join(serverDir, '.venv');
+				const pythonBin = os.platform() === 'win32'
+					? path.join(venvDir, 'Scripts', 'python.exe')
+					: path.join(venvDir, 'bin', 'python');
+				try {
+					webviewView.webview.postMessage({ type: 'serverStatus', online: false, message: 'Checking setup...' });
+					if (!fs.existsSync(pythonBin)) {
+						webviewView.webview.postMessage({ type: 'status', message: 'Setting up Python environment...' });
+						const setupResult = await vscode.commands.executeCommand<boolean | undefined>('owlspotlight.setupEnv');
+						if (setupResult === false || !fs.existsSync(pythonBin)) {
+							webviewView.webview.postMessage({ type: 'error', message: 'Environment setup did not complete. Check the OwlSpotlight OUTPUT panel.' });
+							return;
+						}
+					}
+					webviewView.webview.postMessage({ type: 'status', message: 'Starting server...' });
+					await vscode.commands.executeCommand('owlspotlight.startServer');
+					const serverPort = await resolveActiveServerPort();
+					webviewView.webview.postMessage({ type: 'serverStatus', online: serverPort !== undefined, port: serverPort });
+					webviewView.webview.postMessage({
+						type: 'status',
+						message: serverPort !== undefined ? 'Server is ready. Enter a query to search.' : 'Server start requested. Waiting for model load...'
+					});
+				} catch {
+					webviewView.webview.postMessage({ type: 'error', message: 'Setup and start failed. Check the OwlSpotlight OUTPUT panel.' });
+				}
+			}
 			if (msg.command === 'stopServer') {
 				console.log('[OwlSpotlight] stopServer command received from Webview');
 				void vscode.commands.executeCommand('owlspotlight.stopServer');
@@ -1263,7 +1409,14 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 		const owlPngUri = webview.asWebviewUri(
 			vscode.Uri.joinPath(this._context.extensionUri, 'media', 'owl.png')
 		);
-                const langMap: { [key: string]: string } = { '.py': 'Python', '.java': 'Java', '.ts': 'TypeScript' };
+                const langMap: { [key: string]: string } = {
+                        '.py': 'Python',
+                        '.java': 'Java',
+                        '.ts': 'TypeScript',
+                        '.tsx': 'TypeScript React',
+                        '.js': 'JavaScript',
+                        '.jsx': 'JavaScript React'
+                };
                 const options = (languages.length ? languages : ['.py']).map(l => `<option value="${l}">${langMap[l] || l}</option>`).join('');
                 const selectStyle = (languages.length <= 1) ? 'style="display:none;"' : '';
 
@@ -1292,9 +1445,8 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
     </div>
   </div>
   <div class="actions">
-    <button id="startServerBtn">Start Server</button>
+    <button id="setupAndStartBtn">Setup / Start</button>
     <button id="stopServerBtn">Stop Server</button>
-    <button id="clearCacheBtn">Clear Cache</button>
   </div>
   <div class="translation-settings">
     <label><input type="checkbox" id="translateToggle"> JP → EN Translation</label>
@@ -1314,11 +1466,34 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
   <!-- 検索タブ -->
   <div class="tab-content active" id="search-tab">
     <div class="searchbar">
-      <select id="languageSelect" ${selectStyle}>
-        ${options}
-      </select>
       <input id="searchInput" type="text" placeholder="Describe what the code does..." />
       <button id="searchBtn">Search</button>
+      <button id="searchOptionsBtn" class="secondary-action" title="Show search options">Options</button>
+    </div>
+    <div class="search-options" id="searchOptions" style="display:none;">
+      <label>
+        <span>Language</span>
+        <select id="languageSelect" ${selectStyle}>
+          ${options}
+        </select>
+      </label>
+      <label>
+        <span>Scope</span>
+        <select id="scopeSelect" title="Search scope">
+          <option value="all">All</option>
+          <option value="source">Source</option>
+          <option value="changed">Changed</option>
+        </select>
+      </label>
+      <label>
+        <span>Type</span>
+        <select id="resultTypeFilter" title="Result type filter">
+          <option value="all">All</option>
+          <option value="functions">Functions</option>
+          <option value="methods">Methods</option>
+          <option value="codeblocks">CodeBlocks</option>
+        </select>
+      </label>
     </div>
     <div class="status" id="status"></div>
     <div id="translatedQuery" class="translated-query" style="display:none;"></div>
@@ -1328,7 +1503,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
           <img src="${owlPngUri}" alt="owl" style="height:2.2em;width:2.2em;opacity:0.5;" />
         </div>
         <div class="empty-title">Ready to search</div>
-        <div class="empty-hint">Enter a natural language query to find<br>functions, classes, and methods</div>
+        <div class="empty-hint">Enter a natural language query to find<br>functions, methods, and CodeBlocks</div>
       </div>
     </div>
   </div>
@@ -1496,6 +1671,64 @@ export function activate(context: vscode.ExtensionContext) {
 
 	// OUTPUT パネル: サーバー起動・環境構築のログを共通のチャネルに流す
 	const owlOutputChannel = vscode.window.createOutputChannel('OwlSpotlight');
+	const indexStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 90);
+	indexStatusBarItem.text = '$(sync~spin) OwlSpotlight indexing';
+	indexStatusBarItem.tooltip = 'OwlSpotlight is refreshing the semantic index';
+	context.subscriptions.push(indexStatusBarItem);
+
+	const pendingIndexTimers = new Map<string, NodeJS.Timeout>();
+	const scheduleIncrementalIndex = (uri: vscode.Uri) => {
+		const config = vscode.workspace.getConfiguration('owlspotlight');
+		if (!config.get<boolean>('autoIndexOnFileChange', true)) {
+			return;
+		}
+		const fileExt = getSupportedFileExtension(uri.fsPath);
+		if (!fileExt) {
+			return;
+		}
+		const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
+		if (!workspaceFolder) {
+			return;
+		}
+		const key = `${workspaceFolder.uri.fsPath}|${fileExt}`;
+		const existing = pendingIndexTimers.get(key);
+		if (existing) {
+			clearTimeout(existing);
+		}
+		const timer = setTimeout(async () => {
+			pendingIndexTimers.delete(key);
+			const serverPort = await resolveActiveServerPort();
+			if (serverPort === undefined) {
+				return;
+			}
+			indexStatusBarItem.show();
+			try {
+				const res = await fetch(getServerUrl('/build_index', serverPort), {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ directory: workspaceFolder.uri.fsPath, file_ext: fileExt })
+				});
+				if (res.ok) {
+					owlOutputChannel.appendLine(`[OwlSpotlight] Incremental index refreshed for ${fileExt}.`);
+				} else {
+					owlOutputChannel.appendLine(`[OwlSpotlight] Incremental index refresh failed for ${fileExt}: HTTP ${res.status}`);
+				}
+			} catch (error) {
+				owlOutputChannel.appendLine(`[OwlSpotlight] Incremental index refresh failed for ${fileExt}: ${error}`);
+			} finally {
+				indexStatusBarItem.hide();
+			}
+		}, 1500);
+		pendingIndexTimers.set(key, timer);
+	};
+
+	for (const ext of supportedSearchExtensions) {
+		const watcher = vscode.workspace.createFileSystemWatcher(`**/*${ext}`);
+		watcher.onDidCreate(scheduleIncrementalIndex, undefined, context.subscriptions);
+		watcher.onDidChange(scheduleIncrementalIndex, undefined, context.subscriptions);
+		watcher.onDidDelete(scheduleIncrementalIndex, undefined, context.subscriptions);
+		context.subscriptions.push(watcher);
+	}
 
 	// サイドバーWebviewViewProvider登録
 	context.subscriptions.push(
@@ -1512,6 +1745,98 @@ export function activate(context: vscode.ExtensionContext) {
 			await vscode.commands.executeCommand('workbench.view.extension.owlspotlight');
 			vscode.commands.executeCommand('owlspotlight.sidebar.focus');
 			vscode.window.showInformationMessage('Please use the sidebar to search.');
+		})
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('owlspotlight.findSimilarSelection', async () => {
+			const editor = vscode.window.activeTextEditor;
+			if (!editor) {
+				vscode.window.showWarningMessage('Open a file and select code to search for similar snippets.');
+				return;
+			}
+			const selection = editor.selection;
+			const query = editor.document.getText(selection).trim();
+			if (!query) {
+				vscode.window.showWarningMessage('Select code first, then run OwlSpotlight: Find Similar to Selection.');
+				return;
+			}
+			const fileExt = getSupportedFileExtension(editor.document.fileName);
+			if (!fileExt) {
+				vscode.window.showWarningMessage('The selected file type is not supported by OwlSpotlight search.');
+				return;
+			}
+			const workspaceFolder = vscode.workspace.getWorkspaceFolder(editor.document.uri) ?? vscode.workspace.workspaceFolders?.[0];
+			if (!workspaceFolder) {
+				vscode.window.showWarningMessage('No workspace folder found.');
+				return;
+			}
+			const scopePick = await vscode.window.showQuickPick(
+				[
+					{ label: 'All files', description: 'Search all indexed files for this language', value: 'all' as SearchScope },
+					{ label: 'Source files', description: 'Auto-detect src/app/lib/packages-like folders', value: 'source' as SearchScope },
+					{ label: 'Changed files', description: 'Search only git changed and untracked files', value: 'changed' as SearchScope }
+				],
+				{ placeHolder: 'Where should OwlSpotlight search?' }
+			);
+			if (!scopePick) {
+				return;
+			}
+			const includeFiles = await resolveSearchScopeFiles(workspaceFolder, fileExt, scopePick.value);
+			if (scopePick.value === 'changed' && includeFiles && includeFiles.length === 0) {
+				vscode.window.showInformationMessage(`No changed ${fileExt} files found.`);
+				return;
+			}
+			const serverPort = await resolveActiveServerPort();
+			if (serverPort === undefined) {
+				vscode.window.showWarningMessage('OwlSpotlight server is not running. Use Setup / Start first.');
+				return;
+			}
+			const folderPath = workspaceFolder.uri.fsPath;
+			const res = await fetch(getServerUrl('/search_functions_simple', serverPort), {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					directory: folderPath,
+					query,
+					top_k: 10,
+					file_ext: fileExt,
+					include_files: includeFiles
+				})
+			});
+			const data: any = await res.json();
+			const results = Array.isArray(data.results) ? data.results : [];
+			if (results.length === 0) {
+				vscode.window.showInformationMessage('No similar code found.');
+				return;
+			}
+			const picks: Array<vscode.QuickPickItem & { result: any }> = results.map((result: any) => {
+				const filePath = result.file_path || result.file;
+				const relPath = filePath ? path.relative(folderPath, filePath) : '';
+				return {
+					label: formatSearchResultLabel(result),
+					description: relPath ? `${relPath}:${result.lineno || result.line_number || 1}` : undefined,
+					detail: result.code ? String(result.code).split('\n').slice(0, 3).join(' ') : undefined,
+					result
+				};
+			});
+			const selected = await vscode.window.showQuickPick(picks, {
+				placeHolder: 'Select a similar code result to open'
+			});
+			if (!selected) {
+				return;
+			}
+			const result = selected.result;
+			const filePath = result.file_path || result.file;
+			if (!filePath) {
+				return;
+			}
+			const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+			const targetEditor = await vscode.window.showTextDocument(doc);
+			const line = Math.max(0, Number(result.lineno || result.line_number || 1) - 1);
+			const pos = new vscode.Position(line, 0);
+			targetEditor.selection = new vscode.Selection(pos, pos);
+			targetEditor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
 		})
 	);
 
@@ -1848,26 +2173,32 @@ export function activate(context: vscode.ExtensionContext) {
 		setupProcess.stderr?.on('data', (data: Buffer) => {
 			owlOutputChannel.append(data.toString());
 		});
-		setupProcess.on('close', (code: number | null) => {
-			owlOutputChannel.appendLine(`\n[OwlSpotlight] Setup process exited (code: ${code})`);
-			isSetupRunning = false;
-			setupProcess = undefined;
-			if (code === 0) {
-				vscode.window.showInformationMessage('OwlSpotlight Python environment setup completed. You can now start the server.');
-			} else {
-				vscode.window.showErrorMessage(`OwlSpotlight environment setup failed (exit code: ${code}). Check the OUTPUT panel for details.`);
-			}
-		});
-		setupProcess.on('error', (err: Error) => {
-			owlOutputChannel.appendLine(`\n[OwlSpotlight] Setup failed: ${err.message}`);
-			isSetupRunning = false;
-			setupProcess = undefined;
-			vscode.window.showErrorMessage(`Environment setup failed: ${err.message}`);
+		const setupCompleted = new Promise<boolean>((resolve) => {
+			setupProcess?.on('close', (code: number | null) => {
+				owlOutputChannel.appendLine(`\n[OwlSpotlight] Setup process exited (code: ${code})`);
+				isSetupRunning = false;
+				setupProcess = undefined;
+				if (code === 0) {
+					vscode.window.showInformationMessage('OwlSpotlight Python environment setup completed. You can now start the server.');
+					resolve(true);
+				} else {
+					vscode.window.showErrorMessage(`OwlSpotlight environment setup failed (exit code: ${code}). Check the OUTPUT panel for details.`);
+					resolve(false);
+				}
+			});
+			setupProcess?.on('error', (err: Error) => {
+				owlOutputChannel.appendLine(`\n[OwlSpotlight] Setup failed: ${err.message}`);
+				isSetupRunning = false;
+				setupProcess = undefined;
+				vscode.window.showErrorMessage(`Environment setup failed: ${err.message}`);
+				resolve(false);
+			});
 		});
 
 		vscode.window.showInformationMessage(
 			`OwlSpotlight uv environment setup started with ${torchChoice.label}. Progress is shown in the OUTPUT panel.`
 		);
+		return setupCompleted;
 		});
 	context.subscriptions.push(setupEnvDisposable);
 

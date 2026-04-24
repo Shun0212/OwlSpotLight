@@ -67,6 +67,10 @@
         "title": "OwlSpotlight: Code Search"
       },
       {
+        "command": "owlspotlight.findSimilarSelection",
+        "title": "OwlSpotlight: Find Similar to Selection"
+      },
+      {
         "command": "owlspotlight.setupEnv",
         "title": "OwlSpotlight: Setup Python Environment"
       },
@@ -153,6 +157,11 @@
           "default": false,
           "description": "Automatically start the search server when the extension activates (requires .venv to be set up)"
         },
+        "owlspotlight.autoIndexOnFileChange": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically refresh the incremental index when supported source files are created, changed, or deleted while the server is running"
+        },
         "owlspotlight.highlightColors": {
           "type": "object",
           "title": "Highlight Colors",
@@ -190,6 +199,13 @@
     }
   },
   "menus": {
+    "editor/context": [
+      {
+        "command": "owlspotlight.findSimilarSelection",
+        "when": "editorHasSelection",
+        "group": "navigation@10"
+      }
+    ],
     "view/item/context": [
       {
         "command": "owlspotlight.startServer",

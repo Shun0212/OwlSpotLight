@@ -1,16 +1,28 @@
-from tree_sitter import Language, Parser
-from tree_sitter_language_pack import get_parser 
+from tree_sitter_language_pack import get_parser
 import re
 
-# --- Initialize once ---
-_PARSER = get_parser("typescript")
-_LANGUAGE = _PARSER.language
+_PARSER_LANGUAGE_BY_KIND = {
+    "typescript": "typescript",
+    "tsx": "tsx",
+    "javascript": "javascript",
+    "jsx": "javascript",
+}
+
+_PARSER_CACHE = {}
 
 
-def _build_class_ranges(root_node, source_bytes):
+def _get_parser_and_language(language_kind: str):
+    parser_language = _PARSER_LANGUAGE_BY_KIND.get(language_kind, "typescript")
+    if parser_language not in _PARSER_CACHE:
+        parser = get_parser(parser_language)
+        _PARSER_CACHE[parser_language] = (parser, parser.language)
+    return _PARSER_CACHE[parser_language]
+
+
+def _build_class_ranges(root_node, source_bytes, language):
     class_ranges = {}
     try:
-        class_query = _LANGUAGE.query(
+        class_query = language.query(
             """
             (class_declaration
               name: (_) @class.name
@@ -27,7 +39,8 @@ def _build_class_ranges(root_node, source_bytes):
                 class_name = source_bytes[class_name_node.start_byte:class_name_node.end_byte].decode(
                     "utf-8", errors="replace"
                 )
-                class_ranges[class_name] = {
+                class_ranges[(class_name, class_def_node.start_byte, class_def_node.end_byte)] = {
+                    "name": class_name,
                     "start": class_def_node.start_point,
                     "end": class_def_node.end_point,
                 }
@@ -39,18 +52,19 @@ def _build_class_ranges(root_node, source_bytes):
 _JSDOC_PATTERN = re.compile(r"/\*\*([\s\S]*?)\*/", re.MULTILINE)
 
 
-def extract_typescript_functions(source_bytes: bytes) -> list[dict]:
-    """Extract TypeScript class methods and standalone functions.
+def extract_typescript_functions(source_bytes: bytes, language_kind: str = "typescript") -> list[dict]:
+    """Extract JS/TS class methods and standalone functions.
 
     Keep it simple and robust: mirror python_extractor by capturing only
     - function_declaration
     - method_definition (inside classes)
     and skip variable-assigned/arrow functions.
     """
-    tree = _PARSER.parse(source_bytes)
+    parser, language = _get_parser_and_language(language_kind)
+    tree = parser.parse(source_bytes)
     root_node = tree.root_node
 
-    class_ranges = _build_class_ranges(root_node, source_bytes)
+    class_ranges = _build_class_ranges(root_node, source_bytes, language)
 
     # Minimal, grammar-stable patterns
     query_src = """
@@ -71,7 +85,7 @@ def extract_typescript_functions(source_bytes: bytes) -> list[dict]:
     """
 
     try:
-        func_query = _LANGUAGE.query(query_src)
+        func_query = language.query(query_src)
         func_matches = func_query.matches(root_node)
     except Exception as e:
         print(f"[TS extractor] function query error: {e}")
@@ -115,9 +129,9 @@ def extract_typescript_functions(source_bytes: bytes) -> list[dict]:
 
         func_start = func_def_node.start_point
         belonging_class = None
-        for class_name, class_range in class_ranges.items():
+        for class_range in class_ranges.values():
             if class_range["start"][0] <= func_start[0] <= class_range["end"][0]:
-                belonging_class = class_name
+                belonging_class = class_range["name"]
                 break
 
         item = {

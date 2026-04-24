@@ -36,6 +36,9 @@ OwlSpotlight brings **semantic understanding** to VS Code code navigation. Inste
 | **Semantic Search** | Find code by intent, not keywords — powered by `Owl-ph2-len2048` (ModernBERT) |
 | **Incremental Indexing** | Only changed files are re-indexed for fast subsequent searches |
 | **Multi-symbol Support** | Search functions, classes, methods, and their relationships |
+| **Python CodeBlocks** | Search top-level Python logic outside functions, such as `if`, `for`, `with`, `try`, assignments, and expressions |
+| **Python Static Analysis** | Adds Python metadata such as params, return annotations, decorators, imports, calls, assigned names, and docstrings |
+| **Web Project Support** | Python, Java, TypeScript, TSX, JavaScript, and JSX symbol extraction |
 | **Class Statistics** | View class hierarchies ranked by relevance with method-level scoring |
 | **Japanese Translation** | Auto-translate Japanese queries to English via Gemini API |
 | **Smart Highlighting** | Jump to results with color-coded highlighting |
@@ -43,7 +46,7 @@ OwlSpotlight brings **semantic understanding** to VS Code code navigation. Inste
 | **Apple Silicon** | MPS acceleration on M-series chips |
 | **CUDA / GPU** | Auto-detects NVIDIA driver support and installs CUDA 12.8 / 12.4 when possible; otherwise uses the CPU build |
 | **Cross-platform** | Supported on macOS, Linux, and Windows |
-| **Similarity Scores** | Score badges and bars showing result relevance |
+| **Similarity Scores** | Similarity badges and bars showing result relevance |
 
 ---
 
@@ -69,15 +72,15 @@ OwlSpotlight brings **semantic understanding** to VS Code code navigation. Inste
 #### Option 1: Automatic Setup (Recommended)
 
 1. Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=Shun0212.owlspotlight)
-2. Open the Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`) and run:
+2. Open the OwlSpotlight sidebar and click **Setup / Start**.
+3. Choose the recommended PyTorch build when prompted.
+4. Start searching with natural-language queries.
+
+You can also run the setup manually from the Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`):
    ```
    OwlSpotlight: Setup Python Environment
-   ```
-3. Start the server:
-   ```
    OwlSpotlight: Start Server
    ```
-4. Open the OwlSpotlight sidebar and start searching.
 
 Server logs appear in **View → Output → OwlSpotlight Server**. No terminal window is opened.
 
@@ -196,8 +199,9 @@ If you want the extension to pick the safest GPU build automatically, use `--tor
 │  ┌─────────────┐  ┌──────────────┐  ┌───────────────┐  │
 │  │  Extractors  │  │  Embedding   │  │  FAISS Index  │  │
 │  │ (Tree-sitter)│  │  Model       │  │  (Similarity  │  │
-│  │  .py .java   │  │(Owl-ph2-2048)│  │   Search)     │  │
-│  │  .ts         │  │ MPS/CUDA/CPU │  │  Incremental  │  │
+│  │ .py .java    │  │(Owl-ph2-2048)│  │   Search)     │  │
+│  │ .ts .tsx     │  │ MPS/CUDA/CPU │  │  Incremental  │  │
+│  │ .js .jsx     │  │              │  │               │  │
 │  └─────────────┘  └──────────────┘  └───────────────┘  │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -227,6 +231,7 @@ If you want the extension to pick the safest GPU build automatically, use `--tor
 | `owlspotlight.modelName` | `Shuu12121/Owl-ph2-len2048` | Hugging Face embedding model |
 | `owlspotlight.batchSize` | `32` | Batch size for embedding |
 | `owlspotlight.autoStartServer` | `false` | Auto-start server when VS Code opens |
+| `owlspotlight.autoIndexOnFileChange` | `true` | Refresh the incremental index when supported files change |
 | `owlspotlight.enableJapaneseTranslation` | `false` | Enable Japanese to English auto-translation |
 | `owlspotlight.geminiApiKey` | `""` | Google Gemini API key for translation |
 | `owlspotlight.cacheSettings.autoClearCache` | `false` | Auto-clear cache on server start |
@@ -251,8 +256,54 @@ If you want the extension to pick the safest GPU build automatically, use `--tor
 | `OwlSpotlight: Stop Server` | Cleanly shut down the server |
 | `OwlSpotlight: Setup Python Environment` | Create or update the uv-managed Python venv |
 | `OwlSpotlight: Code Search` | Open the search panel |
+| `OwlSpotlight: Find Similar to Selection` | Search for code similar to the current editor selection |
 | `OwlSpotlight: Clear Cache` | Clear FAISS index and embedding cache |
 | `OwlSpotlight: Remove Virtual Environment` | Delete the `.venv` and start fresh |
+
+---
+
+### Search Scopes
+
+The sidebar search scope can be set to:
+
+| Scope | Description |
+|-------|-------------|
+| `All` | Search all indexed files for the selected language |
+| `Source` | Auto-detect source-like folders such as `src`, `app`, `lib`, `packages`, `client`, and `server` |
+| `Changed` | Search only git changed and untracked files |
+
+The editor context menu also provides **OwlSpotlight: Find Similar to Selection**. Select a code block, run the command, choose a scope, then jump directly to a similar result.
+
+---
+
+### MCP Server Mode
+
+OwlSpotlight includes a lightweight stdio MCP bridge for AI coding agents:
+
+```bash
+python model_server/mcp_server.py
+```
+
+Start the OwlSpotlight VS Code server first, then configure your MCP client to launch the script above. The MCP tool `owlspotlight.search_code` accepts `directory`, `query`, `file_ext`, `top_k`, and `scope` (`all`, `source`, or `changed`). Set `OWLSPOTLIGHT_SERVER_URL` if the local HTTP server is not using `http://127.0.0.1:8000`.
+
+Example `.mcp.json` for Claude Code or Cursor:
+
+```json
+{
+  "mcpServers": {
+    "owlspotlight": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["/absolute/path/to/owlspotlight/model_server/mcp_server.py"],
+      "env": {
+        "OWLSPOTLIGHT_SERVER_URL": "http://127.0.0.1:8000"
+      }
+    }
+  }
+}
+```
+
+For Cursor, use `.cursor/mcp.json` in the project or `~/.cursor/mcp.json` globally. For Claude Code, use `.mcp.json` or `claude mcp add-json`. For Cline, add the same `mcpServers.owlspotlight` entry in its MCP settings and include `"disabled": false` if your Cline config requires it.
 
 ---
 
@@ -273,7 +324,7 @@ The Python backend exposes these REST endpoints on the OwlSpotlight local server
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/search_functions_simple` | POST | Find functions by query |
+| `/search_functions_simple` | POST | Find functions by query, including relative `similarity` fields |
 | `/get_class_stats` | POST | Get class/method statistics |
 | `/build_index` | POST | Build FAISS index for a directory |
 | `/force_rebuild_index` | POST | Clear cache and rebuild index |
@@ -301,7 +352,7 @@ The Python backend exposes these REST endpoints on the OwlSpotlight local server
 <summary><strong>No search results</strong></summary>
 
 - Confirm the sidebar status indicator shows **Online**.
-- Verify your workspace contains `.py`, `.java`, or `.ts` files.
+- Verify your workspace contains `.py`, `.java`, `.ts`, `.tsx`, `.js`, or `.jsx` files.
 - Try `OwlSpotlight: Clear Cache` and rebuild the index.
 </details>
 
@@ -332,6 +383,7 @@ Since v0.4.0 the server runs as a background process — no terminal is used. If
 
 **Current**
 - [x] Natural language search for Python, Java, TypeScript
+- [x] JavaScript, JSX, and TSX symbol extraction
 - [x] Incremental indexing
 - [x] Apple Silicon and CUDA optimization
 - [x] Class statistics and hierarchy visualization
@@ -340,10 +392,13 @@ Since v0.4.0 the server runs as a background process — no terminal is used. If
 - [x] Similarity score visualization
 - [x] Background server with OUTPUT panel logging
 - [x] Auto-start server option
+- [x] Selection-based similar code search
+- [x] Source-only and changed-file search scopes
+- [x] MCP stdio bridge
+- [x] Python CodeBlock extraction and static metadata
 
 **Upcoming**
-- [ ] Multi-language support (JavaScript, C++, Go)
-- [ ] Real-time file watching
+- [ ] Multi-language support (C++, Go, Rust)
 - [ ] Class inheritance diagrams
 - [ ] Search history and bookmarks
 - [ ] Code preview on hover
@@ -389,6 +444,9 @@ OwlSpotlightは、VS CodeでPython・Java・TypeScriptコードを**自然言語
 | **意味的検索** | `Owl-ph2-len2048`（ModernBERT）によるコードの意図ベース検索 |
 | **高速インデックス** | 変更ファイルのみ再インデックス |
 | **マルチシンボル対応** | 関数・クラス・メソッドとその関係を検索 |
+| **Python CodeBlock** | 関数外の `if`、`for`、`with`、`try`、代入、式などのトップレベル処理も検索 |
+| **Python 静的解析** | params、return annotation、decorator、import、call、代入名、docstring などのメタデータを付与 |
+| **Webプロジェクト対応** | Python、Java、TypeScript、TSX、JavaScript、JSX のシンボル抽出 |
 | **クラス統計** | 関連度ランキング付きのクラス階層表示 |
 | **日本語対応** | Gemini API による日本語→英語自動翻訳 |
 | **スマートハイライト** | 色分けハイライトで結果箇所へジャンプ |
@@ -422,15 +480,15 @@ OwlSpotlightは、VS CodeでPython・Java・TypeScriptコードを**自然言語
 #### 方法1: 自動セットアップ（推奨）
 
 1. [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=Shun0212.owlspotlight) から拡張機能をインストール
-2. コマンドパレット（`Cmd+Shift+P` / `Ctrl+Shift+P`）で実行：
+2. OwlSpotlight サイドバーを開き、**Setup / Start** をクリック
+3. 表示された PyTorch ビルド選択で推奨項目を選択
+4. 自然言語クエリで検索開始
+
+手動で実行する場合は、コマンドパレット（`Cmd+Shift+P` / `Ctrl+Shift+P`）から次を実行します：
    ```
    OwlSpotlight: Setup Python Environment
-   ```
-3. サーバーを起動：
-   ```
    OwlSpotlight: Start Server
    ```
-4. OwlSpotlight サイドバーから検索を開始。
 
 サーバーのログは `表示 → 出力 → OwlSpotlight Server` に表示されます。ターミナルウィンドウは開きません。
 
@@ -510,8 +568,54 @@ uv run --no-project --python 3.11 bootstrap_env.py --python 3.11 --torch-mode au
 | `OwlSpotlight: Stop Server` | サーバーを安全に停止 |
 | `OwlSpotlight: Setup Python Environment` | uv 管理の Python 仮想環境を作成・更新 |
 | `OwlSpotlight: Code Search` | 検索パネルを開く |
+| `OwlSpotlight: Find Similar to Selection` | エディタの選択範囲に似たコードを検索 |
 | `OwlSpotlight: Clear Cache` | FAISS インデックスと埋め込みキャッシュをクリア |
 | `OwlSpotlight: Remove Virtual Environment` | `.venv` を削除してゼロから再構築 |
+
+---
+
+### 検索スコープ
+
+サイドバーの検索スコープは次から選べます。
+
+| スコープ | 説明 |
+|---------|------|
+| `All` | 選択中の言語の全インデックス対象を検索 |
+| `Source` | `src`、`app`、`lib`、`packages`、`client`、`server` などのソース系フォルダを自動検知して検索 |
+| `Changed` | git の変更済み・未追跡ファイルだけを検索 |
+
+エディタのコンテキストメニューから **OwlSpotlight: Find Similar to Selection** も実行できます。コードを選択してコマンドを実行し、検索スコープを選ぶと、類似した結果へジャンプできます。
+
+---
+
+### MCP Server Mode
+
+AI coding agent から使える軽量な stdio MCP ブリッジを同梱しています。
+
+```bash
+python model_server/mcp_server.py
+```
+
+先に OwlSpotlight の VS Code サーバーを起動してください。MCP クライアント側では上記スクリプトを起動するように設定します。MCP tool `owlspotlight.search_code` は `directory`、`query`、`file_ext`、`top_k`、`scope`（`all`、`source`、`changed`）を受け取ります。HTTP サーバーが `http://127.0.0.1:8000` 以外の場合は `OWLSPOTLIGHT_SERVER_URL` を設定してください。
+
+Claude Code / Cursor 向けの `.mcp.json` 例:
+
+```json
+{
+  "mcpServers": {
+    "owlspotlight": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["/absolute/path/to/owlspotlight/model_server/mcp_server.py"],
+      "env": {
+        "OWLSPOTLIGHT_SERVER_URL": "http://127.0.0.1:8000"
+      }
+    }
+  }
+}
+```
+
+Cursor はプロジェクトの `.cursor/mcp.json` またはグローバルの `~/.cursor/mcp.json` に設定できます。Claude Code は `.mcp.json` または `claude mcp add-json` を使えます。Cline は MCP 設定に同じ `mcpServers.owlspotlight` を追加し、必要なら `"disabled": false` を含めてください。
 
 ---
 
@@ -522,6 +626,7 @@ uv run --no-project --python 3.11 bootstrap_env.py --python 3.11 --torch-mode au
 | `owlspotlight.modelName` | `Shuu12121/Owl-ph2-len2048` | Hugging Face の埋め込みモデル |
 | `owlspotlight.batchSize` | `32` | 埋め込みのバッチサイズ |
 | `owlspotlight.autoStartServer` | `false` | VS Code 起動時にサーバーを自動起動 |
+| `owlspotlight.autoIndexOnFileChange` | `true` | 対応ファイル変更時に差分インデックスを自動更新 |
 | `owlspotlight.enableJapaneseTranslation` | `false` | 日本語→英語自動翻訳を有効化 |
 | `owlspotlight.geminiApiKey` | `""` | Google Gemini API キー |
 | `owlspotlight.cacheSettings.autoClearCache` | `false` | サーバー起動時にキャッシュを自動クリア |
@@ -568,7 +673,7 @@ uv run --no-project --python 3.11 bootstrap_env.py --python 3.11 --torch-mode au
 <summary><strong>検索結果が出ない</strong></summary>
 
 - サイドバーのステータスが **Online** になっているか確認
-- ワークスペースに `.py`、`.java`、`.ts` ファイルがあるか確認
+- ワークスペースに `.py`、`.java`、`.ts`、`.tsx`、`.js`、`.jsx` ファイルがあるか確認
 - `OwlSpotlight: Clear Cache` でキャッシュをクリア
 </details>
 
