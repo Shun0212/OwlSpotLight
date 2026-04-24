@@ -267,6 +267,27 @@ function getNonce() {
         return text;
 }
 
+// ハイライト色設定を取得する
+function getHighlightColors() {
+	const config = vscode.workspace.getConfiguration('owlspotlight');
+	const c = config.get<Record<string, string>>('highlightColors', {});
+	return {
+		jumpLine:           c['jumpLine']           ?? 'rgba(255,200,0,0.35)',
+		standaloneFunction: c['standaloneFunction'] ?? 'rgba(255,140,0,0.18)',
+		classMethod:        c['classMethod']        ?? 'rgba(0,140,255,0.18)',
+		classBody:          c['classBody']          ?? 'rgba(0,200,100,0.08)',
+		classHeader:        c['classHeader']        ?? 'rgba(0,200,100,0.20)',
+	};
+}
+
+// rgba文字列のアルファ値を変倍してボーダー色を自動導出する
+function deriveBorderColor(rgba: string): string {
+	const m = rgba.match(/rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)\s*\)/);
+	if (!m) { return rgba; }
+	const newAlpha = Math.min(1.0, parseFloat(m[4]) * 2.5).toFixed(2);
+	return `rgba(${m[1]},${m[2]},${m[3]},${newAlpha})`;
+}
+
 // ワークスペース内の言語を自動検出
 async function detectLanguages(): Promise<string[]> {
         const patterns = [
@@ -460,102 +481,95 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 
 					// --- サーバー提供の正確な範囲情報を使用したハイライト ---
 					const decorations: { type: vscode.TextEditorDecorationType, ranges: vscode.Range[] }[] = [];
-					
-					// ジャンプ先行の黄色ハイライト
-					const decorationType = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(255,255,0,0.5)' });
-					const lineRange = new vscode.Range(pos, pos.translate(1, 0));
-					decorations.push({ type: decorationType, ranges: [lineRange] });
+					const colors = getHighlightColors();
+
+					// ジャンプ先の定義行ハイライト（単一行）
+					decorations.push({
+						type: vscode.window.createTextEditorDecorationType({ backgroundColor: colors.jumpLine, isWholeLine: true }),
+						ranges: [new vscode.Range(pos.line, 0, pos.line, doc.lineAt(pos.line).text.length)]
+					});
 
 					// サーバーから提供された範囲情報を使用
 					if (startLine && endLine && functionName) {
-						const funcStartLine = Math.max(0, Number(startLine) - 1); // 0-based index
+						const funcStartLine = Math.max(0, Number(startLine) - 1);
 						const funcEndLine = Math.max(0, Number(endLine) - 1);
-						
-						// 関数/メソッドの範囲をハイライト（サーバー提供の正確な範囲）
 						const serverFuncRange = new vscode.Range(
 							new vscode.Position(funcStartLine, 0),
 							new vscode.Position(funcEndLine, doc.lineAt(Math.min(funcEndLine, doc.lineCount - 1)).text.length)
 						);
-						
-						// クラスメソッドかスタンドアロン関数かで色を分ける
+
 						if (className) {
-							// クラスメソッドの場合（緑系の色）
-							const methodDeco = vscode.window.createTextEditorDecorationType({ 
-								backgroundColor: 'rgba(0,128,255,0.12)', // blue background for method
-								border: '1px solid rgba(0,128,255,0.3)'
+							// クラスメソッド: 青でハイライト
+							decorations.push({
+								type: vscode.window.createTextEditorDecorationType({
+									backgroundColor: colors.classMethod,
+									border: `1px solid ${deriveBorderColor(colors.classMethod)}`,
+									isWholeLine: true
+								}),
+								ranges: [serverFuncRange]
 							});
-							decorations.push({ type: methodDeco, ranges: [serverFuncRange] });
-							
-							// クラス全体の範囲も取得してハイライト（VS Code ASTを補完的に使用）
+
+							// クラス全体の範囲をVS Code ASTで検索
 							let symbols: vscode.DocumentSymbol[] = [];
 							try {
 								symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
-									'vscode.executeDocumentSymbolProvider',
-									doc.uri
+									'vscode.executeDocumentSymbolProvider', doc.uri
 								) ?? [];
-							} catch (e) {
-								symbols = [];
-							}
-							
-							// クラス範囲をVS Code ASTで検索（補完的使用）
+							} catch { symbols = []; }
+
 							function findClassSymbol(list: vscode.DocumentSymbol[], name: string): vscode.DocumentSymbol | undefined {
 								for (const s of list) {
-									if (s.kind === vscode.SymbolKind.Class && s.name === name) {
-										return s;
-									}
-									// 子要素も再帰的に検索
+									if (s.kind === vscode.SymbolKind.Class && s.name === name) { return s; }
 									const found = findClassSymbol(s.children, name);
-									if (found) {
-										return found;
-									}
+									if (found) { return found; }
 								}
 								return undefined;
 							}
-							
+
 							const classSymbol = findClassSymbol(symbols, className);
 							if (classSymbol) {
-								// クラス範囲の薄いハイライト
+								// クラス本体: 薄い緑でハイライト
 								const classRange = await getClassRangeByIndent(doc, classSymbol.range.start);
-								const classBackgroundDeco = vscode.window.createTextEditorDecorationType({ 
-									backgroundColor: 'rgba(0,200,100,0.08)' // very light green background for class
+								decorations.push({
+									type: vscode.window.createTextEditorDecorationType({ backgroundColor: colors.classBody, isWholeLine: true }),
+									ranges: [classRange]
 								});
-								decorations.push({ type: classBackgroundDeco, ranges: [classRange] });
-								
-								// クラス定義行のハイライト
-								const classDefLineText = doc.lineAt(classSymbol.range.start.line).text;
+
+								// クラス定義行: 強い緑でハイライト
 								const classDefLine = new vscode.Range(
-									classSymbol.range.start.line,
-									0,
-									classSymbol.range.start.line,
-									classDefLineText.length
+									classSymbol.range.start.line, 0,
+									classSymbol.range.start.line, doc.lineAt(classSymbol.range.start.line).text.length
 								);
-								const classHeaderDeco = vscode.window.createTextEditorDecorationType({ 
-									backgroundColor: 'rgba(0,200,100,0.12)',
-									border: '1px solid rgba(0,200,100,0.4)'
+								decorations.push({
+									type: vscode.window.createTextEditorDecorationType({
+										backgroundColor: colors.classHeader,
+										border: `1px solid ${deriveBorderColor(colors.classHeader)}`,
+										isWholeLine: true
+									}),
+									ranges: [classDefLine]
 								});
-								decorations.push({ type: classHeaderDeco, ranges: [classDefLine] });
 							}
 						} else {
-							// スタンドアロン関数の場合（オレンジ系の色）
-							const funcDeco = vscode.window.createTextEditorDecorationType({ 
-								backgroundColor: 'rgba(255,140,0,0.12)', // orange background for standalone function
-								border: '1px solid rgba(255,140,0,0.3)'
+							// スタンドアロン関数: オレンジでハイライト
+							decorations.push({
+								type: vscode.window.createTextEditorDecorationType({
+									backgroundColor: colors.standaloneFunction,
+									border: `1px solid ${deriveBorderColor(colors.standaloneFunction)}`,
+									isWholeLine: true
+								}),
+								ranges: [serverFuncRange]
 							});
-							decorations.push({ type: funcDeco, ranges: [serverFuncRange] });
 						}
 					} else {
-						// 範囲情報がない場合は従来のVS Code ASTベースの処理にフォールバック
+						// 範囲情報がない場合はVS Code ASTにフォールバック（同じ色を使用）
 						console.log('[OwlSpotlight] No server range info, falling back to VS Code AST');
 						let symbols: vscode.DocumentSymbol[] = [];
 						try {
 							symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
-								'vscode.executeDocumentSymbolProvider',
-								doc.uri
+								'vscode.executeDocumentSymbolProvider', doc.uri
 							) ?? [];
-						} catch (e) {
-							symbols = [];
-						}
-						
+						} catch { symbols = []; }
+
 						function findSymbolWithParent(list: vscode.DocumentSymbol[], pos: vscode.Position, parent: vscode.DocumentSymbol | null = null): { symbol: vscode.DocumentSymbol, parent: vscode.DocumentSymbol | null } | undefined {
 							for (const s of list) {
 								if (s.range.contains(pos)) {
@@ -565,17 +579,21 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 							}
 							return undefined;
 						}
-						
+
 						const found = findSymbolWithParent(symbols, pos);
-						if (found && found.symbol && (found.symbol.kind === vscode.SymbolKind.Function || found.symbol.kind === vscode.SymbolKind.Method)) {
+						if (found?.symbol && (found.symbol.kind === vscode.SymbolKind.Function || found.symbol.kind === vscode.SymbolKind.Method)) {
 							const funcRange = await getFunctionRangeByIndent(doc, found.symbol.range.start);
-							const funcDeco = vscode.window.createTextEditorDecorationType({ 
-								backgroundColor: 'rgba(0,128,255,0.10)',
+							const fallbackColor = found.parent ? colors.classMethod : colors.standaloneFunction;
+							decorations.push({
+								type: vscode.window.createTextEditorDecorationType({
+									backgroundColor: fallbackColor,
+									border: `1px solid ${deriveBorderColor(fallbackColor)}`,
+									isWholeLine: true
+								}),
+								ranges: [funcRange]
 							});
-							decorations.push({ type: funcDeco, ranges: [funcRange] });
 						}
 					}
-					
 					// --- デコレーションを適用し、グローバル変数に保存 ---
 					lastEditor = editor;
 					for (const deco of decorations) {

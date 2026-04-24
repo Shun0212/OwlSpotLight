@@ -3,7 +3,7 @@
   "displayName": "owlspotlight",
   "description": "Highlight similar code snippets using semantic search.",
   "publisher": "Shun0212",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "keywords": [
     "semantic search",
     "code search",
@@ -152,6 +152,39 @@
           "type": "boolean",
           "default": false,
           "description": "Automatically start the search server when the extension activates (requires .venv to be set up)"
+        },
+        "owlspotlight.highlightColors": {
+          "type": "object",
+          "title": "Highlight Colors",
+          "description": "Customize highlight colors for code navigation results. Use CSS rgba() format, e.g. rgba(255,140,0,0.18).",
+          "properties": {
+            "jumpLine": {
+              "type": "string",
+              "default": "rgba(255,200,0,0.35)",
+              "description": "Color of the exact function definition line you jumped to (gold)"
+            },
+            "standaloneFunction": {
+              "type": "string",
+              "default": "rgba(255,140,0,0.18)",
+              "description": "Background color for a standalone function body (orange)"
+            },
+            "classMethod": {
+              "type": "string",
+              "default": "rgba(0,140,255,0.18)",
+              "description": "Background color for a class method body (blue)"
+            },
+            "classBody": {
+              "type": "string",
+              "default": "rgba(0,200,100,0.08)",
+              "description": "Background color for the entire enclosing class body (subtle green)"
+            },
+            "classHeader": {
+              "type": "string",
+              "default": "rgba(0,200,100,0.20)",
+              "description": "Background color for the class definition line (green)"
+            }
+          },
+          "additionalProperties": false
         }
       }
     }
