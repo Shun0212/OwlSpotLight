@@ -780,7 +780,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
       <button type="button" class="mode-btn" data-mode="hybrid" title="Embedding + BM25 fused via RRF">Hybrid</button>
       <button type="button" class="mode-btn" data-mode="lexical" title="Pure BM25 keyword search">Lexical</button>
     </div>
-    <div class="history-bar" id="historyBar" aria-label="Recent queries"></div>
+    <div class="history-bar" id="historyBar" aria-label="Recent queries" hidden></div>
     <div class="status" id="status"></div>
     <div id="translatedQuery" class="translated-query" style="display:none;"></div>
     <div class="results" id="results">

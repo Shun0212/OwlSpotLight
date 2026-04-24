@@ -1,84 +1,81 @@
 /* =========================================================================
    OwlSpotlight — Sidebar stylesheet
-   Adopts design-system-refresh tokens and pushes buttons/surfaces further.
+   VS Code native look: filled primary buttons, list-hover cards, bigger
+   tap targets. History chip UI is intentionally removed.
    ========================================================================= */
-
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+JP:wght@400;500;700&display=swap');
 
 :root {
   /* ---------- Type ---------- */
-  --font-ui:   var(--vscode-font-family, 'Inter', 'Noto Sans JP', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
-  --font-mono: var(--vscode-editor-font-family, 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace);
+  --font-ui:   var(--vscode-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+  --font-mono: var(--vscode-editor-font-family, 'SFMono-Regular', Menlo, Consolas, 'Courier New', monospace);
 
-  --fs-11: 10.5px;
-  --fs-12: 11.5px;
-  --fs-13: 12.5px;
-  --fs-14: 13px;
-  --fs-15: 14px;
-  --fs-18: 17px;
+  --fs-11: 11px;
+  --fs-12: 12px;
+  --fs-13: 13px;
+  --fs-14: 14px;
+  --fs-15: 15px;
 
-  /* ---------- Foreground ---------- */
-  --fg-1: var(--vscode-foreground, #d4d4d4);
-  --fg-2: var(--vscode-descriptionForeground, #9a9a9a);
+  /* ---------- Foreground (use VS Code values as-is) ---------- */
+  --fg-1: var(--vscode-foreground);
+  --fg-2: var(--vscode-descriptionForeground);
   --fg-3: color-mix(in srgb, var(--fg-2) 70%, transparent);
 
   /* ---------- Surfaces ---------- */
-  --bg-0:  var(--vscode-sideBar-background, #252526);
-  --bg-1:  color-mix(in srgb, var(--bg-0) 85%, var(--vscode-editor-background, #1e1e1e));
-  --bg-2:  color-mix(in srgb, var(--bg-0) 70%, var(--vscode-editor-background, #1e1e1e));
-  --bg-raised:   color-mix(in srgb, var(--vscode-editor-background, #1e1e1e) 40%, var(--bg-0));
-  --bg-sunken:   color-mix(in srgb, var(--vscode-editor-background, #1e1e1e) 70%, #000);
-  --bg-section:  var(--vscode-sideBarSectionHeader-background, #2d2d2e);
-  --bg-input:    var(--vscode-input-background, #3c3c3c);
-  --bg-hover:    color-mix(in srgb, var(--fg-1) 7%, transparent);
-  --bg-code:     var(--vscode-textCodeBlock-background, rgba(128,128,128,0.1));
+  --bg-0:        var(--vscode-sideBar-background);
+  --bg-section:  var(--vscode-sideBarSectionHeader-background, var(--bg-0));
+  --bg-raised:   var(--vscode-editor-background);
+  --bg-sunken:   var(--vscode-input-background);
+  --bg-hover:    var(--vscode-list-hoverBackground);
+  --bg-active:   var(--vscode-list-activeSelectionBackground);
+  --fg-active:   var(--vscode-list-activeSelectionForeground, var(--fg-1));
+  --bg-inactive: var(--vscode-list-inactiveSelectionBackground);
 
-  /* ---------- Accent ---------- */
-  --accent:       var(--vscode-textLink-foreground, #3794ff);
-  --accent-hover: color-mix(in srgb, var(--accent) 85%, white);
-  --accent-press: color-mix(in srgb, var(--accent) 80%, black);
-  --accent-weak:  color-mix(in srgb, var(--accent) 22%, transparent);
-  --accent-soft:  color-mix(in srgb, var(--accent) 12%, transparent);
-  --accent-line:  color-mix(in srgb, var(--accent) 45%, transparent);
-  --on-accent:    var(--vscode-button-foreground, #ffffff);
+  /* ---------- Accent (VS Code button blue) ---------- */
+  --accent:         var(--vscode-button-background);
+  --accent-hover:   var(--vscode-button-hoverBackground);
+  --accent-fg:      var(--vscode-button-foreground, #ffffff);
+  --accent-weak:    color-mix(in srgb, var(--accent) 28%, transparent);
+  --accent-soft:    color-mix(in srgb, var(--accent) 14%, transparent);
+  --accent-line:    color-mix(in srgb, var(--accent) 55%, transparent);
+  --link:           var(--vscode-textLink-foreground);
+
+  /* ---------- Secondary (for stats / load etc.) ---------- */
+  --secondary:       var(--vscode-button-secondaryBackground, #3a3d41);
+  --secondary-hover: var(--vscode-button-secondaryHoverBackground, #45494e);
+  --on-secondary:    var(--vscode-button-secondaryForeground, #ffffff);
 
   /* ---------- Semantic ---------- */
   --ok:     #3fb950;
-  --ok-soft:color-mix(in srgb, #3fb950 18%, transparent);
+  --ok-soft:color-mix(in srgb, #3fb950 20%, transparent);
   --warn:   #d29922;
-  --danger: #f85149;
-  --danger-soft: color-mix(in srgb, #f85149 18%, transparent);
+  --danger: var(--vscode-errorForeground, #f85149);
+  --danger-soft: color-mix(in srgb, var(--danger) 20%, transparent);
 
-  /* ---------- Symbol colors (desaturated) ---------- */
-  --sym-class:    var(--vscode-symbolIcon-classForeground, #7FB5AB);
-  --sym-method:   var(--vscode-symbolIcon-methodForeground, #C8C3A0);
-  --sym-function: var(--vscode-symbolIcon-functionForeground, #C49A78);
+  /* ---------- Symbol colors (VS Code tokens) ---------- */
+  --sym-class:    var(--vscode-symbolIcon-classForeground, #4EC9B0);
+  --sym-method:   var(--vscode-symbolIcon-methodForeground, #DCDCAA);
+  --sym-function: var(--vscode-symbolIcon-functionForeground, #D19A66);
 
   /* ---------- Borders ---------- */
-  --border-1: color-mix(in srgb, var(--fg-1) 10%, transparent);
-  --border-2: color-mix(in srgb, var(--fg-1) 16%, transparent);
+  --border-1:     var(--vscode-widget-border, color-mix(in srgb, var(--fg-1) 14%, transparent));
+  --border-2:     color-mix(in srgb, var(--fg-1) 24%, transparent);
   --border-input: var(--vscode-input-border, var(--border-2));
 
   /* ---------- Radii ---------- */
-  --r-xs: 3px;
   --r-sm: 4px;
   --r-md: 6px;
   --r-lg: 8px;
-  --r-xl: 10px;
   --r-pill: 999px;
 
   /* ---------- Shadows ---------- */
-  --sh-xs:     0 1px 0 color-mix(in srgb, #000 18%, transparent);
-  --sh-sm:     0 1px 2px rgba(0,0,0,0.25);
-  --sh-md:     0 2px 6px rgba(0,0,0,0.28), 0 1px 2px rgba(0,0,0,0.18);
-  --sh-lg:     0 6px 20px rgba(0,0,0,0.35);
-  --sh-inset:  inset 0 1px 0 color-mix(in srgb, #fff 6%, transparent);
-  --sh-focus:  0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent);
+  --sh-sm:    0 1px 2px rgba(0,0,0,0.22);
+  --sh-md:    0 2px 8px rgba(0,0,0,0.28);
+  --sh-lg:    0 8px 24px rgba(0,0,0,0.38);
+  --sh-focus: 0 0 0 2px var(--vscode-focusBorder, color-mix(in srgb, var(--accent) 60%, transparent));
 
   /* ---------- Motion ---------- */
   --dur-1: 90ms;
   --dur-2: 150ms;
-  --dur-3: 220ms;
   --ease:  cubic-bezier(0.2, 0.6, 0.2, 1);
 }
 
@@ -91,11 +88,10 @@ body {
   margin: 0;
   font-family: var(--font-ui);
   font-size: var(--fs-13);
-  line-height: 1.45;
+  line-height: 1.5;
   background: var(--bg-0);
   color: var(--fg-1);
   -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
 }
 ::selection { background: var(--accent-weak); }
 
@@ -107,33 +103,28 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 10px 12px;
-  background: linear-gradient(180deg,
-    color-mix(in srgb, var(--bg-0) 92%, white 2%),
-    var(--bg-0));
+  background: var(--bg-section);
   border-bottom: 1px solid var(--border-1);
   font-size: var(--fs-14);
   font-weight: 600;
-  letter-spacing: 0.01em;
   color: var(--vscode-sideBarTitle-foreground, var(--fg-1));
 }
-.header-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.header-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .header-btns { display: flex; align-items: center; gap: 4px; }
 
 .brand-mark {
-  font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--fs-14);
   font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--fg-2);
+  letter-spacing: 0.02em;
+  color: var(--fg-1);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 .brand-mark .brand-dot {
-  display: inline-block;
-  width: 6px; height: 6px;
+  width: 7px; height: 7px;
   border-radius: 50%;
   background: var(--accent);
-  margin-right: 7px;
-  vertical-align: 1px;
   box-shadow: 0 0 0 3px var(--accent-weak);
 }
 
@@ -142,7 +133,6 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-family: var(--font-mono);
   font-size: var(--fs-11);
   font-weight: 500;
   padding: 3px 9px;
@@ -150,10 +140,10 @@ body {
   background: color-mix(in srgb, var(--fg-1) 8%, transparent);
   color: var(--fg-2);
   border: 1px solid var(--border-1);
-  transition: background var(--dur-2) var(--ease), color var(--dur-2);
+  transition: background var(--dur-2), color var(--dur-2), border-color var(--dur-2);
 }
 .server-status .status-dot {
-  width: 6px; height: 6px;
+  width: 7px; height: 7px;
   border-radius: 50%;
   background: var(--fg-3);
   transition: background var(--dur-2);
@@ -163,19 +153,20 @@ body {
 .server-status.offline { background: var(--danger-soft); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
 .server-status.offline .status-dot { background: var(--danger); }
 
-/* owl icon button + help button: circular ghost buttons */
+/* Icon buttons (owl / help) */
 .icon-btn,
 .owl-btn,
 .help-btn {
   background: transparent;
   border: 1px solid transparent;
-  width: 28px; height: 28px;
+  width: 30px; height: 30px;
   padding: 0;
   border-radius: var(--r-md);
   color: var(--fg-2);
   cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center;
-  transition: background var(--dur-2) var(--ease), color var(--dur-2), transform var(--dur-1), border-color var(--dur-2);
+  transition: background var(--dur-2), color var(--dur-2), border-color var(--dur-2);
+  font-size: var(--fs-14);
 }
 .icon-btn:hover,
 .owl-btn:hover,
@@ -184,103 +175,82 @@ body {
   color: var(--fg-1);
   border-color: var(--border-1);
 }
-.icon-btn:active,
-.owl-btn:active,
-.help-btn:active { transform: scale(0.96); }
-.owl-btn img { width: 18px; height: 18px; display: block; opacity: 0.9; }
-.owl-btn:hover img { opacity: 1; filter: drop-shadow(0 1px 2px var(--accent-weak)); }
+.owl-btn img { width: 20px; height: 20px; display: block; opacity: 0.92; }
+.owl-btn:hover img { opacity: 1; }
 
 /* =========================================================================
-   Buttons
+   Buttons — filled VS Code style by default
    ========================================================================= */
 button, .btn {
   font-family: var(--font-ui);
   font-size: var(--fs-13);
   font-weight: 500;
   line-height: 1;
-  color: var(--fg-1);
-  background: var(--bg-raised);
-  border: 1px solid var(--border-2);
-  padding: 6px 12px;
-  border-radius: var(--r-md);
+  min-height: 30px;
+  padding: 7px 14px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--vscode-button-border, transparent);
+  background: var(--accent);
+  color: var(--accent-fg);
   cursor: pointer;
   user-select: none;
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  transition:
-    background var(--dur-2) var(--ease),
-    border-color var(--dur-2),
-    color var(--dur-2),
-    box-shadow var(--dur-2),
-    transform var(--dur-1);
-  box-shadow: var(--sh-xs), var(--sh-inset);
+  transition: background var(--dur-2), color var(--dur-2), border-color var(--dur-2), box-shadow var(--dur-2);
   white-space: nowrap;
 }
 button:hover, .btn:hover {
-  background: color-mix(in srgb, var(--bg-raised) 70%, var(--fg-1) 6%);
-  border-color: color-mix(in srgb, var(--border-2) 60%, var(--fg-1) 15%);
-  box-shadow: var(--sh-sm), var(--sh-inset);
+  background: var(--accent-hover);
 }
-button:active, .btn:active { transform: translateY(1px); box-shadow: none; }
-button:focus-visible, .btn:focus-visible { outline: none; box-shadow: var(--sh-focus); }
-button:disabled, .btn:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
-
-/* Primary button — accent filled with subtle gradient */
-button.primary, .btn.primary,
-#searchBtn {
-  color: var(--on-accent);
-  background:
-    linear-gradient(180deg,
-      color-mix(in srgb, var(--accent) 92%, white 8%),
-      var(--accent));
-  border-color: color-mix(in srgb, var(--accent) 65%, black 10%);
-  box-shadow:
-    0 1px 0 color-mix(in srgb, #fff 18%, transparent) inset,
-    0 1px 2px color-mix(in srgb, var(--accent) 35%, transparent),
-    0 6px 16px -8px color-mix(in srgb, var(--accent) 55%, transparent);
+button:active, .btn:active {
+  background: color-mix(in srgb, var(--accent) 85%, black);
 }
-button.primary:hover, .btn.primary:hover,
-#searchBtn:hover {
-  background:
-    linear-gradient(180deg,
-      color-mix(in srgb, var(--accent) 85%, white 15%),
-      var(--accent-hover));
-  box-shadow:
-    0 1px 0 color-mix(in srgb, #fff 22%, transparent) inset,
-    0 2px 4px color-mix(in srgb, var(--accent) 45%, transparent),
-    0 10px 22px -8px color-mix(in srgb, var(--accent) 70%, transparent);
+button:focus-visible, .btn:focus-visible {
+  outline: none;
+  box-shadow: var(--sh-focus);
 }
-button.primary:active, .btn.primary:active,
-#searchBtn:active {
-  background: var(--accent-press);
-  box-shadow: 0 1px 0 color-mix(in srgb, #000 30%, transparent) inset;
+button:disabled, .btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
-/* Ghost (secondary) */
+/* Secondary / ghost */
+button.secondary, .btn.secondary,
 button.ghost, .btn.ghost {
-  background: transparent;
-  border-color: var(--border-1);
-  color: var(--fg-1);
-  box-shadow: none;
+  background: var(--secondary);
+  color: var(--on-secondary);
+  border-color: transparent;
 }
+button.secondary:hover, .btn.secondary:hover,
 button.ghost:hover, .btn.ghost:hover {
-  background: var(--bg-hover);
-  border-color: var(--border-2);
-  box-shadow: none;
+  background: var(--secondary-hover);
 }
 
-/* Danger */
+/* Danger — outline by default, fill on hover (keeps header calm) */
 button.danger, .btn.danger,
 #clearCacheBtn, #clearCacheLocalBtn {
   background: transparent;
-  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
-  color: color-mix(in srgb, var(--danger) 85%, var(--fg-1));
-  box-shadow: none;
+  color: var(--danger);
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
 }
 button.danger:hover, .btn.danger:hover,
 #clearCacheBtn:hover, #clearCacheLocalBtn:hover {
   background: var(--danger-soft);
-  border-color: color-mix(in srgb, var(--danger) 60%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 70%, transparent);
   color: var(--danger);
+}
+
+/* Icon button override (re-remove inherited filled background) */
+.icon-btn, .owl-btn, .help-btn {
+  background: transparent;
+  color: var(--fg-2);
+  min-height: 0;
+  padding: 0;
+  border: 1px solid transparent;
+}
+.icon-btn:hover, .owl-btn:hover, .help-btn:hover {
+  background: var(--bg-hover);
+  color: var(--fg-1);
+  border-color: var(--border-1);
 }
 
 /* =========================================================================
@@ -288,12 +258,12 @@ button.danger:hover, .btn.danger:hover,
    ========================================================================= */
 .actions {
   display: flex;
-  gap: 6px;
+  gap: 8px;
   padding: 10px 12px;
   background: var(--bg-0);
   border-bottom: 1px solid var(--border-1);
 }
-.actions button { flex: 1; padding: 7px 10px; font-size: var(--fs-12); }
+.actions button { flex: 1; }
 
 .translation-settings {
   display: flex;
@@ -324,35 +294,35 @@ button.danger:hover, .btn.danger:hover,
 .tab-btn {
   position: relative;
   flex: 1;
+  min-height: 34px;
   background: transparent;
   border: none;
   color: var(--fg-2);
-  padding: 9px 10px 10px;
-  font-size: var(--fs-12);
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  padding: 8px 10px 10px;
+  font-size: var(--fs-13);
+  font-weight: 500;
+  letter-spacing: 0.01em;
   border-radius: 0;
-  box-shadow: none;
   cursor: pointer;
-  transition: color var(--dur-2) var(--ease);
+  transition: color var(--dur-2);
 }
-.tab-btn:hover { color: var(--fg-1); background: transparent; box-shadow: none; }
+.tab-btn:hover   { color: var(--fg-1); background: transparent; }
+.tab-btn:active  { background: transparent; }
 .tab-btn::after {
   content: "";
   position: absolute;
-  left: 14%; right: 14%; bottom: -1px;
+  left: 12%; right: 12%; bottom: -1px;
   height: 2px;
   background: var(--accent);
   border-radius: 2px 2px 0 0;
   opacity: 0;
-  transform: scaleX(0.4);
-  transition: opacity var(--dur-2) var(--ease), transform var(--dur-2) var(--ease);
+  transform: scaleX(0.5);
+  transition: opacity var(--dur-2), transform var(--dur-2);
 }
-.tab-btn.active { color: var(--fg-1); }
+.tab-btn.active { color: var(--fg-1); font-weight: 600; }
 .tab-btn.active::after { opacity: 1; transform: scaleX(1); }
 
-.tab-panel { display: none; padding: 10px 12px; }
+.tab-panel { display: none; padding: 12px; }
 .tab-panel.active { display: block; }
 
 /* =========================================================================
@@ -361,20 +331,21 @@ button.danger:hover, .btn.danger:hover,
 .search-box {
   display: flex;
   align-items: stretch;
-  gap: 6px;
-  margin-bottom: 8px;
+  gap: 8px;
+  margin-bottom: 10px;
 }
 .search-box input[type="text"] {
   flex: 1;
   min-width: 0;
+  min-height: 30px;
   background: var(--bg-sunken);
   color: var(--fg-1);
   border: 1px solid var(--border-input);
   padding: 7px 10px;
   font: inherit;
   font-size: var(--fs-13);
-  border-radius: var(--r-md);
-  transition: border-color var(--dur-2), box-shadow var(--dur-2), background var(--dur-2);
+  border-radius: var(--r-sm);
+  transition: border-color var(--dur-2), box-shadow var(--dur-2);
 }
 .search-box input[type="text"]::placeholder { color: var(--fg-3); }
 .search-box input[type="text"]:hover { border-color: var(--border-2); }
@@ -382,10 +353,9 @@ button.danger:hover, .btn.danger:hover,
   outline: none;
   border-color: var(--accent-line);
   box-shadow: var(--sh-focus);
-  background: color-mix(in srgb, var(--bg-sunken) 85%, var(--accent) 4%);
 }
 
-#searchBtn { padding: 0 14px; min-width: 72px; }
+#searchBtn { min-width: 80px; padding-left: 16px; padding-right: 16px; }
 
 .search-meta {
   display: flex;
@@ -395,77 +365,42 @@ button.danger:hover, .btn.danger:hover,
   margin-bottom: 10px;
 }
 
-/* Language / mode selectors */
+/* Language / mode selectors — segmented */
 .language-selector,
 .mode-selector {
   display: inline-flex;
   background: var(--bg-sunken);
   border: 1px solid var(--border-1);
-  border-radius: var(--r-md);
+  border-radius: var(--r-sm);
   padding: 2px;
   gap: 2px;
 }
 .lang-btn,
 .mode-btn {
+  min-height: 26px;
   background: transparent;
   border: none;
   color: var(--fg-2);
-  padding: 5px 10px;
+  padding: 4px 11px;
   font-size: var(--fs-12);
   font-weight: 500;
-  border-radius: var(--r-sm);
-  box-shadow: none;
-  transition: background var(--dur-2) var(--ease), color var(--dur-2);
+  border-radius: 3px;
+  transition: background var(--dur-2), color var(--dur-2);
   cursor: pointer;
 }
 .lang-btn:hover,
 .mode-btn:hover {
   background: var(--bg-hover);
   color: var(--fg-1);
-  box-shadow: none;
 }
 .lang-btn.active,
 .mode-btn.active {
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-  color: var(--accent);
-  box-shadow: inset 0 0 0 1px var(--accent-line);
+  background: var(--accent);
+  color: var(--accent-fg);
 }
 
-/* history chips */
-.history-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-bottom: 10px;
-}
-.history-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-family: var(--font-mono);
-  font-size: var(--fs-11);
-  padding: 3px 8px 3px 6px;
-  background: var(--bg-sunken);
-  color: var(--fg-2);
-  border: 1px solid var(--border-1);
-  border-radius: var(--r-pill);
-  cursor: pointer;
-  transition: all var(--dur-2) var(--ease);
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.history-chip:hover { color: var(--fg-1); border-color: var(--border-2); background: var(--bg-hover); }
-.history-chip .chip-pin {
-  width: 9px; height: 9px;
-  border: 1.5px solid currentColor;
-  border-radius: 50%;
-  opacity: 0.5;
-  flex-shrink: 0;
-}
-.history-chip.pinned { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
-.history-chip.pinned .chip-pin { background: currentColor; opacity: 1; }
+/* History bar — hidden per UX request but kept in DOM for state continuity */
+.history-bar { display: none !important; }
 
 /* =========================================================================
    Status / errors
@@ -483,70 +418,60 @@ button.danger:hover, .btn.danger:hover,
   font-family: var(--font-mono);
   font-size: var(--fs-11);
   color: var(--fg-2);
-  padding: 4px 8px;
+  padding: 6px 10px;
   background: var(--bg-sunken);
+  border: 1px solid var(--border-1);
   border-left: 2px solid var(--accent);
   border-radius: 0 var(--r-sm) var(--r-sm) 0;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
   display: none;
 }
 .translation-info.visible { display: block; }
 
 /* =========================================================================
-   Results
+   Results — VS Code list-style cards
    ========================================================================= */
 .results-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-family: var(--font-mono);
-  font-size: var(--fs-11);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: var(--fs-12);
   color: var(--fg-2);
   margin: 2px 0 8px;
 }
 .results-header .count-pill {
-  font-weight: 600;
+  font-family: var(--font-mono);
+  font-weight: 500;
   color: var(--fg-1);
   background: var(--bg-sunken);
   border: 1px solid var(--border-1);
   padding: 2px 8px;
   border-radius: var(--r-pill);
+  font-size: var(--fs-11);
 }
 
-.results { display: flex; flex-direction: column; gap: 6px; }
+.results { display: flex; flex-direction: column; gap: 4px; }
 
 .result-item {
   position: relative;
-  padding: 10px 12px 10px 14px;
-  background: var(--bg-raised);
-  border: 1px solid var(--border-1);
-  border-radius: var(--r-md);
+  padding: 10px 12px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
   cursor: pointer;
-  transition: background var(--dur-2) var(--ease), border-color var(--dur-2), transform var(--dur-1), box-shadow var(--dur-2);
-  box-shadow: var(--sh-xs);
-}
-.result-item::before {
-  content: "";
-  position: absolute;
-  left: 0; top: 8px; bottom: 8px;
-  width: 3px;
-  background: var(--border-2);
-  border-radius: 2px;
-  transition: background var(--dur-2);
+  transition: background var(--dur-2), border-color var(--dur-2);
 }
 .result-item:hover {
-  background: color-mix(in srgb, var(--bg-raised) 75%, var(--fg-1) 7%);
-  border-color: var(--border-2);
-  box-shadow: var(--sh-sm);
+  background: var(--bg-hover);
+  border-color: var(--border-1);
 }
-.result-item:hover::before { background: var(--accent); }
 .result-item.active {
-  border-color: var(--accent-line);
-  background: color-mix(in srgb, var(--bg-raised) 70%, var(--accent) 10%);
+  background: var(--bg-active);
+  color: var(--fg-active);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
 }
-.result-item.active::before { background: var(--accent); }
+.result-item.active .result-name,
+.result-item.active .result-meta .path .basename { color: var(--fg-active); }
 
 .result-header {
   display: flex;
@@ -556,18 +481,18 @@ button.danger:hover, .btn.danger:hover,
 }
 .result-type-badge {
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  padding: 2px 6px;
-  border-radius: var(--r-xs);
+  padding: 2px 7px;
+  border-radius: var(--r-sm);
   border: 1px solid transparent;
   flex-shrink: 0;
 }
-.result-type-badge.type-class    { color: var(--sym-class);    border-color: color-mix(in srgb, var(--sym-class) 35%, transparent);    background: color-mix(in srgb, var(--sym-class) 10%, transparent); }
-.result-type-badge.type-method   { color: var(--sym-method);   border-color: color-mix(in srgb, var(--sym-method) 35%, transparent);   background: color-mix(in srgb, var(--sym-method) 10%, transparent); }
-.result-type-badge.type-function { color: var(--sym-function); border-color: color-mix(in srgb, var(--sym-function) 35%, transparent); background: color-mix(in srgb, var(--sym-function) 10%, transparent); }
+.result-type-badge.type-class    { color: var(--sym-class);    border-color: color-mix(in srgb, var(--sym-class) 40%, transparent);    background: color-mix(in srgb, var(--sym-class) 14%, transparent); }
+.result-type-badge.type-method   { color: var(--sym-method);   border-color: color-mix(in srgb, var(--sym-method) 40%, transparent);   background: color-mix(in srgb, var(--sym-method) 14%, transparent); }
+.result-type-badge.type-function { color: var(--sym-function); border-color: color-mix(in srgb, var(--sym-function) 40%, transparent); background: color-mix(in srgb, var(--sym-function) 14%, transparent); }
 
 .result-name {
   font-family: var(--font-mono);
@@ -585,9 +510,9 @@ button.danger:hover, .btn.danger:hover,
   font-size: var(--fs-11);
   font-weight: 500;
   color: var(--fg-2);
-  padding: 2px 6px;
+  padding: 2px 7px;
   background: var(--bg-sunken);
-  border-radius: var(--r-xs);
+  border-radius: var(--r-sm);
   border: 1px solid var(--border-1);
   flex-shrink: 0;
 }
@@ -607,7 +532,6 @@ button.danger:hover, .btn.danger:hover,
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 100%;
-  color: var(--fg-2);
 }
 .result-meta .path .basename { color: var(--fg-1); font-weight: 500; }
 
@@ -615,97 +539,90 @@ button.danger:hover, .btn.danger:hover,
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 10px;
+  font-family: var(--font-ui);
+  font-size: 10.5px;
   font-weight: 500;
-  padding: 1px 7px;
+  padding: 1px 8px;
   border-radius: var(--r-pill);
   border: 1px solid var(--border-1);
   color: var(--fg-2);
   background: var(--bg-sunken);
 }
-.usage-badge.used-external { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
+.usage-badge.used-external { color: var(--accent-fg); background: var(--accent); border-color: var(--accent); }
 .usage-badge.local-only    { color: var(--fg-2); }
 .usage-badge.none          { color: var(--fg-3); border-style: dashed; }
 
-/* Action buttons inside a result */
+/* Action buttons inside a result — subtle outline, not filled */
 .result-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 8px;
+  gap: 6px;
+  margin-top: 10px;
 }
 .result-actions button {
-  font-family: var(--font-ui);
-  font-size: var(--fs-11);
+  min-height: 26px;
+  padding: 4px 10px;
+  font-size: var(--fs-12);
   font-weight: 500;
-  padding: 4px 9px;
   background: transparent;
-  color: var(--fg-2);
-  border: 1px solid var(--border-1);
-  border-radius: var(--r-sm);
-  box-shadow: none;
+  color: var(--fg-1);
+  border: 1px solid var(--border-2);
 }
 .result-actions button:hover {
-  color: var(--fg-1);
   background: var(--bg-hover);
-  border-color: var(--border-2);
-  box-shadow: none;
+  border-color: color-mix(in srgb, var(--fg-1) 32%, transparent);
 }
 .result-actions button.active {
-  color: var(--accent);
-  background: var(--accent-soft);
-  border-color: var(--accent-line);
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
 }
 
 /* =========================================================================
    Graph panel
    ========================================================================= */
 .graph-panel {
-  margin-top: 8px;
+  margin-top: 10px;
   padding: 10px 12px;
   background: var(--bg-sunken);
   border: 1px solid var(--border-1);
-  border-radius: var(--r-md);
+  border-radius: var(--r-sm);
 }
 .graph-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-family: var(--font-mono);
-  font-size: var(--fs-11);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: var(--fs-12);
   color: var(--fg-2);
   margin-bottom: 8px;
+  font-weight: 500;
 }
 .graph-close {
+  width: 22px; height: 22px;
+  min-height: 0;
+  padding: 0;
   background: transparent;
   border: 1px solid transparent;
   color: var(--fg-2);
-  width: 20px; height: 20px;
-  padding: 0;
-  border-radius: var(--r-sm);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1;
-  box-shadow: none;
 }
-.graph-close:hover { color: var(--fg-1); background: var(--bg-hover); border-color: var(--border-1); box-shadow: none; }
+.graph-close:hover { background: var(--bg-hover); border-color: var(--border-1); color: var(--fg-1); }
 
 .graph-section {
   margin-top: 10px;
-  font-family: var(--font-mono);
-  font-size: var(--fs-11);
+  font-size: var(--fs-12);
   color: var(--fg-2);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
   display: flex;
   align-items: center;
   gap: 6px;
+  font-weight: 500;
 }
 .graph-section .count-pill {
+  font-family: var(--font-mono);
   font-size: 10px;
-  font-weight: 600;
-  padding: 1px 6px;
+  font-weight: 500;
+  padding: 1px 7px;
   border-radius: var(--r-pill);
   color: var(--fg-1);
   background: var(--bg-0);
@@ -717,44 +634,47 @@ button.danger:hover, .btn.danger:hover,
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 8px;
+  padding: 7px 9px;
   background: var(--bg-0);
   border: 1px solid var(--border-1);
   border-radius: var(--r-sm);
   font-family: var(--font-mono);
   font-size: var(--fs-11);
   cursor: pointer;
-  transition: all var(--dur-2) var(--ease);
+  transition: background var(--dur-2), border-color var(--dur-2);
 }
-.graph-item:hover { border-color: var(--accent-line); background: var(--accent-soft); }
+.graph-item:hover { background: var(--bg-hover); border-color: var(--accent-line); }
 .graph-item .graph-name  { color: var(--fg-1); font-weight: 500; }
 .graph-item .graph-path  { color: var(--fg-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .graph-item .graph-line  { color: var(--fg-3); }
 .graph-ext-tag {
-  font-size: 9px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
   font-weight: 600;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  padding: 1px 5px;
-  border-radius: var(--r-xs);
-  color: var(--accent);
-  background: var(--accent-soft);
-  border: 1px solid var(--accent-line);
+  padding: 1px 6px;
+  border-radius: var(--r-sm);
+  color: var(--accent-fg);
+  background: var(--accent);
+  border: 1px solid var(--accent);
 }
 
 /* =========================================================================
    Class stats tab
    ========================================================================= */
 .class-item {
-  padding: 10px 12px;
-  background: var(--bg-raised);
+  padding: 12px;
+  background: transparent;
   border: 1px solid var(--border-1);
-  border-radius: var(--r-md);
+  border-radius: var(--r-sm);
   margin-bottom: 6px;
+  transition: background var(--dur-2), border-color var(--dur-2);
 }
+.class-item:hover { background: var(--bg-hover); border-color: var(--border-2); }
 .class-name {
   font-family: var(--font-mono);
-  font-size: var(--fs-13);
+  font-size: var(--fs-14);
   font-weight: 600;
   color: var(--sym-class);
 }
@@ -762,7 +682,7 @@ button.danger:hover, .btn.danger:hover,
   font-family: var(--font-mono);
   font-size: var(--fs-11);
   color: var(--fg-2);
-  margin-top: 2px;
+  margin-top: 3px;
 }
 
 /* =========================================================================
@@ -770,20 +690,19 @@ button.danger:hover, .btn.danger:hover,
    ========================================================================= */
 .empty-state {
   text-align: center;
-  padding: 28px 16px;
+  padding: 32px 16px;
   color: var(--fg-2);
 }
 .empty-icon {
-  width: 44px; height: 44px;
+  width: 48px; height: 48px;
   margin: 0 auto 12px;
   border: 1px dashed var(--border-2);
   border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   color: var(--fg-3);
   font-family: var(--font-mono);
-  font-size: var(--fs-13);
+  font-size: var(--fs-14);
   font-weight: 600;
-  letter-spacing: 0.03em;
 }
 .empty-title {
   font-size: var(--fs-14);
@@ -796,7 +715,7 @@ button.danger:hover, .btn.danger:hover,
   color: var(--fg-2);
   max-width: 260px;
   margin: 0 auto;
-  line-height: 1.5;
+  line-height: 1.55;
 }
 
 /* =========================================================================
@@ -812,17 +731,14 @@ button.danger:hover, .btn.danger:hover,
   -webkit-backdrop-filter: blur(2px);
   justify-content: center;
   align-items: center;
-  animation: owl-fade-in var(--dur-3) var(--ease);
+  animation: owl-fade-in 180ms var(--ease);
 }
-@keyframes owl-fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
+@keyframes owl-fade-in { from { opacity: 0; } to { opacity: 1; } }
 #helpModal .modal-content {
   background: var(--bg-raised);
   color: var(--fg-1);
   padding: 20px 22px;
-  border-radius: var(--r-xl);
+  border-radius: var(--r-lg);
   border: 1px solid var(--border-2);
   max-width: 480px;
   width: 90%;
@@ -834,25 +750,26 @@ button.danger:hover, .btn.danger:hover,
   margin: 0 0 10px;
   font-size: var(--fs-15);
   font-weight: 600;
-  letter-spacing: 0.01em;
 }
 #helpModal code {
   font-family: var(--font-mono);
   font-size: var(--fs-12);
   background: var(--bg-sunken);
   padding: 1px 6px;
-  border-radius: var(--r-xs);
+  border-radius: var(--r-sm);
   border: 1px solid var(--border-1);
 }
 
 /* =========================================================================
-   Scrollbar polish
+   Scrollbar polish — defer to VS Code
    ========================================================================= */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--fg-1) 12%, transparent);
+  background: var(--vscode-scrollbarSlider-background, color-mix(in srgb, var(--fg-1) 14%, transparent));
   border: 2px solid var(--bg-0);
   border-radius: var(--r-pill);
 }
-::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--fg-1) 22%, transparent); }
+::-webkit-scrollbar-thumb:hover {
+  background: var(--vscode-scrollbarSlider-hoverBackground, color-mix(in srgb, var(--fg-1) 24%, transparent));
+}
