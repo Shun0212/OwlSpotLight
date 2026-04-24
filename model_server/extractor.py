@@ -1,3 +1,7 @@
-from extractors import extract_functions
+"""Deprecated shim: prefer ``owl_core.extractors`` going forward.
 
-__all__ = ["extract_functions"]
+Kept so that any external tooling importing the old module keeps working.
+"""
+from owl_core.extractors import extract_functions, extract_symbols
+
+__all__ = ["extract_functions", "extract_symbols"]

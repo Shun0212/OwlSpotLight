@@ -1,6 +1,6 @@
 import faiss
 import numpy as np
-from model import encode_code, get_model_embedding_dim
+from .model import encode_code, get_model_embedding_dim
 
 class CodeIndexer:
     def __init__(self, dim: int = None):

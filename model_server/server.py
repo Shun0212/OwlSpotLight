@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
 import torch
@@ -24,11 +25,21 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
 
 OWL_INDEX_DIR = ".owl_index"
 
-from extractors import extract_functions
-from indexer import CodeIndexer
-
-# モデル管理を model.py から import
-from model import get_model, get_current_device, cleanup_memory, encode_code, DEFAULT_MODEL, get_device
+# NOTE: ``owl_core`` is the shared, reusable core package introduced in the
+# P1 roadmap milestone. It lives inside ``model_server`` for now and will be
+# split into an installable ``pip`` package once Owl-CLI / MCP integrations
+# land. Import via the package namespace so those future integrations can
+# swap in the same modules without touching callers.
+from owl_core.extractors import extract_functions, extract_symbols
+from owl_core.indexer import CodeIndexer
+from owl_core.model import (
+    DEFAULT_MODEL,
+    cleanup_memory,
+    encode_code,
+    get_current_device,
+    get_device,
+    get_model,
+)
 
 # グローバル変数
 model_name = os.environ.get("OWL_MODEL_NAME", DEFAULT_MODEL)
@@ -43,7 +54,36 @@ def encode_with_memory_management(codes: list[str], batch_size: int = None, max_
 model = get_model()
 model_device = get_current_device()
 
-app = FastAPI()
+app = FastAPI(
+    title="OwlSpotlight API",
+    version="0.4.0",
+    description=(
+        "Semantic code search server powering the OwlSpotlight VS Code extension. "
+        "Exposes endpoints for building tree-sitter + FAISS indexes and querying them "
+        "with natural-language descriptions. Intended to be embedded by the VS Code "
+        "extension, the Owl-CLI, and MCP integrations."
+    ),
+    contact={
+        "name": "OwlSpotlight",
+        "url": "https://github.com/Shun0212/OwlSpotLight",
+    },
+    license_info={"name": "MIT"},
+)
+
+# CORS: the server runs on 127.0.0.1 and is typically consumed by the VS Code
+# webview (same-origin) but we also want it callable from Owl-CLI, MCP, and
+# ad-hoc tooling. Allow configurable origins via ``OWL_CORS_ORIGINS`` (comma
+# separated) while keeping ``*`` as the default because the server only binds
+# to localhost by design.
+_cors_origins_env = os.environ.get("OWL_CORS_ORIGINS", "*").strip()
+_cors_origins = [o.strip() for o in _cors_origins_env.split(",") if o.strip()] or ["*"]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # === 設定: バッチサイズなど ===
 class OwlSettings(BaseSettings):
@@ -545,20 +585,52 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
         indexer.add_functions_without_embedding(results)  # 埋め込み計算なしで関数リストのみ追加
     return results, len(file_paths), indexer
 
-@app.post("/embed")
+@app.get("/health", tags=["meta"])
+async def health_check():
+    """Lightweight liveness probe for CLIs / MCP clients.
+
+    Returns immediately without touching the model, so it's safe to poll.
+    """
+    return {
+        "status": "ok",
+        "model_name": model_name,
+        "model_loaded": get_current_device() != "not_loaded",
+        "indexed_directory": global_index_state.directory,
+    }
+
+
+@app.get("/info", tags=["meta"])
+async def server_info():
+    """Richer status endpoint describing the current index + runtime."""
+    return {
+        "model_name": model_name,
+        "model_device": get_current_device(),
+        "default_device": get_device(),
+        "batch_size": settings.batch_size,
+        "indexed_directory": global_index_state.directory,
+        "indexed_file_count": len(global_index_state.file_info),
+        "indexed_function_count": (
+            len(global_index_state.indexer.functions) if global_index_state.indexer else 0
+        ),
+        "last_indexed": global_index_state.last_indexed,
+        "file_ext": global_index_state.file_ext,
+    }
+
+
+@app.post("/embed", tags=["embeddings"])
 async def embed(req: EmbedRequest):
     print("/embed called")
     embeddings = encode_with_memory_management(req.texts, settings.batch_size)
     return {"embeddings": embeddings.tolist()}
 
-@app.post("/build_index")
+@app.post("/build_index", tags=["index"])
 async def build_index_api(req: BuildIndexRequest):
     print(f"/build_index called for directory: {req.directory}")
     with index_lock:
         results, file_count, _ = build_index(req.directory, req.file_ext, update_state=True)
     return {"num_functions": len(results), "num_files": file_count}
 
-@app.post("/force_rebuild_index")
+@app.post("/force_rebuild_index", tags=["index"])
 async def force_rebuild_index_api(req: BuildIndexRequest):
     """キャッシュをクリアして強制的にインデックスを再構築"""
     print(f"/force_rebuild_index called for directory: {req.directory}")
@@ -567,7 +639,7 @@ async def force_rebuild_index_api(req: BuildIndexRequest):
         results, file_count, _ = build_index(req.directory, req.file_ext, update_state=True)
     return {"num_functions": len(results), "num_files": file_count, "message": "Index forcefully rebuilt"}
 
-@app.get("/index_status")
+@app.get("/index_status", tags=["index"])
 async def index_status():
     print("/index_status called")
     # If no directory is set, consider it up to date (no index to check)
@@ -582,7 +654,29 @@ async def index_status():
         up_to_date=up_to_date
     )
 
-@app.post("/search")
+class SymbolsRequest(BaseModel):
+    file: str
+
+
+@app.post("/symbols", tags=["search"])
+async def symbols_api(req: SymbolsRequest):
+    """Return the enriched tree-sitter view of a single file.
+
+    Exposes functions (with ``calls``, ``parameters``, ``return_type``,
+    ``docstring``, ``decorators``/``annotations``, ``is_async``...), classes
+    (with ``bases``), and top-level imports. Consumed by Owl-CLI, MCP, and
+    future graph / outline UIs. No embedding is computed.
+    """
+    path = Path(req.file)
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail=f"File not found: {req.file}")
+    try:
+        return extract_symbols(path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"extract_symbols failed: {e}")
+
+
+@app.post("/search", tags=["search"])
 async def search_api(query: str, top_k: int = 5):
     print(f"/search called with query: {query}")
     with index_lock:
@@ -591,7 +685,7 @@ async def search_api(query: str, top_k: int = 5):
         results = global_index_state.indexer.search(query, top_k=top_k)
     return {"results": results}
 
-@app.post("/search_functions_simple")
+@app.post("/search_functions_simple", tags=["search"])
 async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
     with index_lock:
         # build_indexを必ず呼び、差分埋め込みロジックを統一
@@ -615,7 +709,7 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
 
 
 
-@app.post("/get_class_stats")
+@app.post("/get_class_stats", tags=["search"])
 async def get_class_stats(request: ClassStatsRequest):
     try:
         # まず検索を実行して検索結果を取得
@@ -782,7 +876,7 @@ async def get_class_stats(request: ClassStatsRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/settings")
+@app.get("/settings", tags=["meta"])
 async def get_settings():
     """現在の設定値を返すAPI"""
     return {
@@ -794,7 +888,7 @@ async def get_settings():
 class UpdateSettingsRequest(BaseModel):
     batch_size: Optional[int] = None
 
-@app.post("/update_settings")
+@app.post("/update_settings", tags=["meta"])
 async def update_settings(req: UpdateSettingsRequest):
     """設定値を動的に更新するAPI"""
     if req.batch_size is not None:
