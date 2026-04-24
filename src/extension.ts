@@ -289,7 +289,10 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = 'owlspotlight.sidebar';
 	private _view?: vscode.WebviewView;
 
-	constructor(private readonly _context: vscode.ExtensionContext) {}
+	constructor(
+		private readonly _context: vscode.ExtensionContext,
+		private readonly _outputChannel?: vscode.OutputChannel
+	) {}
 
        async resolveWebviewView(
                webviewView: vscode.WebviewView,
@@ -301,6 +304,10 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                        enableScripts: true,
                        localResourceRoots: [this._context.extensionUri]
                };
+               // OwlSpotlight のタブを開いたら OUTPUT パネルを自動で表示する
+               try {
+                       this._outputChannel?.show(true);
+               } catch {}
                const langs = await detectLanguages();
                webviewView.webview.html = this.getHtmlForWebview(webviewView.webview, langs);
 
@@ -870,11 +877,14 @@ function updatePythonServerConfig() {
 export function activate(context: vscode.ExtensionContext) {
 	console.log('Congratulations, your extension "owlspotlight" is now active!');
 
+	// OUTPUT パネル: サーバー起動・環境構築のログを共通のチャネルに流す
+	const owlOutputChannel = vscode.window.createOutputChannel('OwlSpotlight');
+
 	// サイドバーWebviewViewProvider登録
 	context.subscriptions.push(
 		vscode.window.registerWebviewViewProvider(
 			OwlspotlightSidebarProvider.viewType,
-			new OwlspotlightSidebarProvider(context)
+			new OwlspotlightSidebarProvider(context, owlOutputChannel)
 		)
 	);
 
@@ -891,7 +901,7 @@ export function activate(context: vscode.ExtensionContext) {
 	// サーバー起動コマンド（child_processで直接起動 - ターミナル干渉を完全回避）
 	let serverProcess: cp.ChildProcess | undefined;
 	let isServerStarting = false;
-	const serverOutputChannel = vscode.window.createOutputChannel('OwlSpotlight Server');
+	const serverOutputChannel = owlOutputChannel;
 
 	const startServerDisposable = vscode.commands.registerCommand('owlspotlight.startServer', async () => {
 		// 二重起動防止
@@ -1059,7 +1069,14 @@ export function activate(context: vscode.ExtensionContext) {
 	});
 
 	// --- 環境セットアップコマンドを追加 ---
+	let isSetupRunning = false;
+	let setupProcess: cp.ChildProcess | undefined;
 	const setupEnvDisposable = vscode.commands.registerCommand('owlspotlight.setupEnv', async () => {
+		if (isSetupRunning) {
+			vscode.window.showInformationMessage('Environment setup is already running. Please wait for it to finish.');
+			owlOutputChannel.show(true);
+			return;
+		}
 		const config = vscode.workspace.getConfiguration('owlspotlight');
 		const envSettings = config.get<any>('environmentSettings', {});
 		const autoRemoveVenv = envSettings.autoRemoveVenv || false;
@@ -1136,35 +1153,77 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 		}
 
-		const terminal = vscode.window.createTerminal({
-			name: 'OwlSpotlight Setup',
-			cwd: serverDir
-		});
-		terminal.show();
 		const scriptArgs: string[] = ['--torch-mode', torchChoice.value];
 		if (autoRemoveVenv) {
 			scriptArgs.push('--force-recreate');
 		}
-		const commandSegments: string[] = [];
+
+		// spawn 用のコマンドと引数を組み立てる
+		let setupCommand: string;
+		const setupArgs: string[] = [];
 		if (platform === 'win32') {
 			if (numericPython.test(pythonVersion)) {
-				commandSegments.push('py', `-${pythonVersion}`);
+				setupCommand = 'py';
+				setupArgs.push(`-${pythonVersion}`);
 			} else {
-				const needsQuoting = pythonCommand.includes(' ') && !pythonCommand.includes(' -');
-				commandSegments.push(needsQuoting ? `"${pythonCommand}"` : pythonCommand);
+				setupCommand = pythonCommand;
 			}
 		} else {
 			if (numericPython.test(pythonVersion)) {
-				commandSegments.push(`python${pythonVersion}`);
+				setupCommand = `python${pythonVersion}`;
 			} else {
-				const needsQuoting = pythonCommand.includes(' ') && !pythonCommand.includes(' -');
-				commandSegments.push(needsQuoting ? `"${pythonCommand}"` : pythonCommand);
+				setupCommand = pythonCommand;
 			}
 		}
-		commandSegments.push('bootstrap_env.py', ...scriptArgs);
-		terminal.sendText(commandSegments.join(' '), true);
+		setupArgs.push('bootstrap_env.py', ...scriptArgs);
+
+		isSetupRunning = true;
+		owlOutputChannel.show(true);
+		owlOutputChannel.appendLine('');
+		owlOutputChannel.appendLine(`[OwlSpotlight] Starting environment setup...`);
+		owlOutputChannel.appendLine(`[OwlSpotlight] Command: ${setupCommand} ${setupArgs.join(' ')}`);
+		owlOutputChannel.appendLine(`[OwlSpotlight] Working dir: ${serverDir}`);
+		owlOutputChannel.appendLine(`[OwlSpotlight] PyTorch option: ${torchChoice.label}`);
+		owlOutputChannel.appendLine('---');
+
+		try {
+			setupProcess = cp.spawn(setupCommand, setupArgs, {
+				cwd: serverDir,
+				env: { ...process.env, PYTHONUNBUFFERED: '1' },
+				shell: platform === 'win32'
+			});
+		} catch (err: any) {
+			isSetupRunning = false;
+			owlOutputChannel.appendLine(`[OwlSpotlight] Failed to launch setup: ${err?.message ?? err}`);
+			vscode.window.showErrorMessage(`Failed to launch environment setup: ${err?.message ?? err}`);
+			return;
+		}
+
+		setupProcess.stdout?.on('data', (data: Buffer) => {
+			owlOutputChannel.append(data.toString());
+		});
+		setupProcess.stderr?.on('data', (data: Buffer) => {
+			owlOutputChannel.append(data.toString());
+		});
+		setupProcess.on('close', (code: number | null) => {
+			owlOutputChannel.appendLine(`\n[OwlSpotlight] Setup process exited (code: ${code})`);
+			isSetupRunning = false;
+			setupProcess = undefined;
+			if (code === 0) {
+				vscode.window.showInformationMessage('OwlSpotlight Python environment setup completed. You can now start the server.');
+			} else {
+				vscode.window.showErrorMessage(`OwlSpotlight environment setup failed (exit code: ${code}). Check the OUTPUT panel for details.`);
+			}
+		});
+		setupProcess.on('error', (err: Error) => {
+			owlOutputChannel.appendLine(`\n[OwlSpotlight] Setup failed: ${err.message}`);
+			isSetupRunning = false;
+			setupProcess = undefined;
+			vscode.window.showErrorMessage(`Environment setup failed: ${err.message}`);
+		});
+
 		vscode.window.showInformationMessage(
-			`OwlSpotlight Python environment bootstrap started with ${torchChoice.label}. Monitor the terminal for progress and start the server after setup completes.`
+			`OwlSpotlight Python environment bootstrap started with ${torchChoice.label}. Progress is shown in the OUTPUT panel.`
 		);
 		});
 	context.subscriptions.push(setupEnvDisposable);
