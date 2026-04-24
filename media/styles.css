@@ -615,6 +615,21 @@ input[type=text]::placeholder {
   margin-left: 0.35em;
 }
 
+.result-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25em;
+  margin: 0.25em 0 0.1em 0;
+}
+
+.meta-badge {
+  font-size: 0.72em;
+  padding: 0.08em 0.45em;
+  border-radius: 999px;
+  color: var(--vscode-badge-foreground, #fff);
+  background: var(--vscode-badge-background, #4d4d4d);
+}
+
 /* ===== Tabs ===== */
 .tabs {
   display: flex;

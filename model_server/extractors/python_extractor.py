@@ -32,6 +32,38 @@ def _decorator_names(node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
     return names
 
 
+def _route_info(decorators: list[str]) -> list[dict]:
+    routes: list[dict] = []
+    http_methods = {"get", "post", "put", "patch", "delete", "options", "head", "api_route", "route"}
+    for decorator in decorators:
+        try:
+            parsed = ast.parse(decorator, mode="eval").body
+        except SyntaxError:
+            continue
+        if not isinstance(parsed, ast.Call):
+            continue
+        func = parsed.func
+        method_name = func.attr if isinstance(func, ast.Attribute) else None
+        if not method_name or method_name not in http_methods:
+            continue
+        route_path = None
+        if parsed.args and isinstance(parsed.args[0], ast.Constant) and isinstance(parsed.args[0].value, str):
+            route_path = parsed.args[0].value
+        routes.append({"framework": "fastapi", "method": method_name.upper(), "path": route_path})
+    return routes
+
+
+def _framework_tags(node: ast.FunctionDef | ast.AsyncFunctionDef, decorators: list[str]) -> list[str]:
+    tags: set[str] = set()
+    if _route_info(decorators):
+        tags.add("fastapi_route")
+    if node.name.startswith("test_") or any(name in decorators for name in ["pytest.fixture", "fixture"]):
+        tags.add("pytest")
+    if any("django" in decorator.lower() for decorator in decorators):
+        tags.add("django")
+    return sorted(tags)
+
+
 def _argument_names(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[str]:
     args = []
     all_args = [
@@ -99,6 +131,8 @@ def _enrich_code_for_embedding(code: str, metadata: dict) -> str:
         ("params", "Parameters"),
         ("returns", "Returns"),
         ("decorators", "Decorators"),
+        ("framework_tags", "Framework tags"),
+        ("routes", "Routes"),
         ("imports", "Imports"),
         ("calls", "Calls"),
         ("assigned_names", "Assigned names"),
@@ -106,7 +140,7 @@ def _enrich_code_for_embedding(code: str, metadata: dict) -> str:
         value = metadata.get(key)
         if value:
             if isinstance(value, list):
-                parts.append(f"{label}: {', '.join(value)}")
+                parts.append(f"{label}: {', '.join(str(item) for item in value)}")
             else:
                 parts.append(f"{label}: {value}")
     return "\n".join(parts)
@@ -118,14 +152,18 @@ def _function_item(
     class_name: str | None = None,
 ) -> dict:
     raw_code = _source_segment(source_lines, node)
+    decorators = _decorator_names(node)
+    routes = _route_info(decorators)
     metadata = {
         "docstring": ast.get_docstring(node),
         "params": _argument_names(node),
         "returns": _annotation_name(node.returns),
-        "decorators": _decorator_names(node),
+        "decorators": decorators,
         "calls": _called_names(node),
         "assigned_names": _assigned_names(node),
         "is_async": isinstance(node, ast.AsyncFunctionDef),
+        "routes": routes,
+        "framework_tags": _framework_tags(node, decorators),
     }
     item = {
         "name": node.name,
@@ -332,5 +370,31 @@ def extract_python_functions(source_bytes: bytes) -> list[dict]:
     visit_body(tree.body)
 
     results.extend(_extract_module_code_blocks(tree, source_lines))
+    function_names = {item["name"] for item in results if item.get("symbol_kind") in {"function", "method"}}
+    import_dependency: dict[str, list[str]] = {}
+    call_graph: dict[str, list[str]] = {}
+    for item in results:
+        static = item.get("python_static", {})
+        local_calls = sorted({call for call in static.get("calls", []) if call.split(".")[-1] in function_names})
+        external_import_calls = sorted(
+            {
+                call
+                for call in static.get("calls", [])
+                if any(call == imported or call.startswith(f"{imported}.") for imported in static.get("imports", []))
+            }
+        )
+        static["local_calls"] = local_calls
+        static["external_import_calls"] = external_import_calls
+        item["python_static"] = static
+        if item.get("symbol_kind") in {"function", "method"}:
+            call_graph[item["name"]] = local_calls
+        if static.get("imports"):
+            import_dependency[item["name"]] = static["imports"]
+
+    for item in results:
+        static = item.get("python_static", {})
+        static["call_graph"] = call_graph
+        static["import_dependency"] = import_dependency
+        item["python_static"] = static
 
     return sorted(results, key=lambda item: (item["lineno"], item.get("symbol_kind") == "code_block"))

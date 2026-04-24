@@ -114,6 +114,40 @@ class JsTsExtractorTests(unittest.TestCase):
         function = next(item for item in functions if item["name"] == "valid_before_error")
         self.assertEqual(function["python_static"]["fallback"], "tree_sitter")
 
+    def test_python_framework_and_call_graph_metadata(self):
+        functions = self.extract_from_temp_file(
+            ".py",
+            """
+            from fastapi import FastAPI
+            import pytest
+
+            app = FastAPI()
+
+            def helper():
+                return "ok"
+
+            @app.get("/users/{user_id}")
+            def read_user(user_id: str):
+                return helper()
+
+            @pytest.fixture
+            def user_fixture():
+                return {"id": "1"}
+
+            def test_read_user(user_fixture):
+                assert read_user("1")
+            """,
+        )
+
+        read_user = next(item for item in functions if item["name"] == "read_user")
+        self.assertIn("fastapi_route", read_user["python_static"]["framework_tags"])
+        self.assertEqual(read_user["python_static"]["routes"][0]["path"], "/users/{user_id}")
+        self.assertIn("helper", read_user["python_static"]["local_calls"])
+
+        test_func = next(item for item in functions if item["name"] == "test_read_user")
+        self.assertIn("pytest", test_func["python_static"]["framework_tags"])
+        self.assertIn("read_user", test_func["python_static"]["local_calls"])
+
 
 if __name__ == "__main__":
     unittest.main()

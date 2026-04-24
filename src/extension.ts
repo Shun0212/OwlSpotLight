@@ -1110,6 +1110,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				const workspaceFolder = workspaceFolders[0];
 				const folderPath = workspaceFolder.uri.fsPath;
 				const scope = (msg.scope === 'source' || msg.scope === 'changed') ? msg.scope as SearchScope : 'all';
+				const searchMode = ['semantic', 'bm25', 'hybrid'].includes(msg.searchMode) ? msg.searchMode : 'hybrid';
 				const includeFiles = await resolveSearchScopeFiles(workspaceFolder, fileExt, scope);
 				if (scope === 'changed' && includeFiles && includeFiles.length === 0) {
 					webviewView.webview.postMessage({ type: 'results', results: [], folderPath });
@@ -1125,7 +1126,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				const res = await fetch(getServerUrl('/search_functions_simple', serverPort), {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ directory: folderPath, query, top_k: 10, file_ext: fileExt, include_files: includeFiles })
+                                        body: JSON.stringify({ directory: folderPath, query, top_k: 10, file_ext: fileExt, include_files: includeFiles, search_mode: searchMode })
 				});
 				const data: any = await res.json();
 				if (data && data.results && Array.isArray(data.results) && data.results.length > 0) {
@@ -1148,6 +1149,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                 webviewView.webview.postMessage({ type: 'translatedQuery', original: originalQuery, translated: query });
                 const fileExt = msg.lang || '.py';
                 const scope = (msg.scope === 'source' || msg.scope === 'changed') ? msg.scope as SearchScope : 'all';
+                const searchMode = ['semantic', 'bm25', 'hybrid'].includes(msg.searchMode) ? msg.searchMode : 'hybrid';
                 const includeFiles = await resolveSearchScopeFiles(workspaceFolder, fileExt, scope);
 				webviewView.webview.postMessage({ type: 'status', message: 'Loading class statistics...' });
 				try {
@@ -1159,7 +1161,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					const res = await fetch(getServerUrl('/get_class_stats', serverPort), {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify({ directory: folderPath, query: query, top_k: 50, file_ext: fileExt, include_files: includeFiles })
+                                                body: JSON.stringify({ directory: folderPath, query: query, top_k: 50, file_ext: fileExt, include_files: includeFiles, search_mode: searchMode })
 					});
 					const data: any = await res.json();
 					webviewView.webview.postMessage({ type: 'classStats', data, folderPath });
@@ -1486,6 +1488,14 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
         </select>
       </label>
       <label>
+        <span>Mode</span>
+        <select id="searchModeSelect" title="Search mode">
+          <option value="hybrid">Hybrid</option>
+          <option value="semantic">Semantic</option>
+          <option value="bm25">BM25</option>
+        </select>
+      </label>
+      <label>
         <span>Type</span>
         <select id="resultTypeFilter" title="Result type filter">
           <option value="all">All</option>
@@ -1796,14 +1806,15 @@ export function activate(context: vscode.ExtensionContext) {
 			const res = await fetch(getServerUrl('/search_functions_simple', serverPort), {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					directory: folderPath,
-					query,
-					top_k: 10,
-					file_ext: fileExt,
-					include_files: includeFiles
-				})
-			});
+					body: JSON.stringify({
+						directory: folderPath,
+						query,
+						top_k: 10,
+						file_ext: fileExt,
+						include_files: includeFiles,
+						search_mode: 'hybrid'
+					})
+				});
 			const data: any = await res.json();
 			const results = Array.isArray(data.results) ? data.results : [];
 			if (results.length === 0) {

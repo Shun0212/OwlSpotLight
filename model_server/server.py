@@ -16,6 +16,9 @@ import sys
 from pathlib import Path
 import json
 import hashlib
+import math
+import re
+from collections import Counter
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 import shutil
@@ -74,6 +77,8 @@ class SearchFunctionsSimpleRequest(BaseModel):
     top_k: int = 5
     file_ext: str = ".py"
     include_files: Optional[List[str]] = None
+    search_mode: str = "hybrid"
+    semantic_weight: float = 0.75
 
 class FunctionRangeRequest(BaseModel):
     file: str
@@ -338,6 +343,80 @@ def file_hash(path):
                 break
             h.update(chunk)
     return h.hexdigest()
+
+
+_TOKEN_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|\d+")
+
+
+def tokenize_for_bm25(text: str) -> list[str]:
+    return [token.lower() for token in _TOKEN_PATTERN.findall(text)]
+
+
+def normalize_scores(scores: dict[int, float]) -> dict[int, float]:
+    if not scores:
+        return {}
+    values = list(scores.values())
+    min_score = min(values)
+    max_score = max(values)
+    if max_score <= min_score:
+        return {index: 1.0 for index in scores}
+    return {index: (score - min_score) / (max_score - min_score) for index, score in scores.items()}
+
+
+def bm25_search_scores(functions: list[dict], query: str) -> dict[int, float]:
+    query_tokens = tokenize_for_bm25(query)
+    if not query_tokens:
+        return {}
+    documents = [
+        tokenize_for_bm25(
+            "\n".join(
+                str(part)
+                for part in [
+                    func.get("name", ""),
+                    func.get("function_name", ""),
+                    func.get("code", ""),
+                    func.get("raw_code", ""),
+                    json.dumps(func.get("python_static", {}), ensure_ascii=False),
+                ]
+                if part
+            )
+        )
+        for func in functions
+    ]
+    if not documents:
+        return {}
+
+    doc_freq: Counter[str] = Counter()
+    term_freqs: list[Counter[str]] = []
+    doc_lengths: list[int] = []
+    for tokens in documents:
+        tf = Counter(tokens)
+        term_freqs.append(tf)
+        doc_lengths.append(len(tokens))
+        doc_freq.update(tf.keys())
+
+    avg_doc_length = sum(doc_lengths) / len(doc_lengths) if doc_lengths else 0.0
+    if avg_doc_length <= 0:
+        return {}
+
+    k1 = 1.5
+    b = 0.75
+    scores: dict[int, float] = {}
+    total_docs = len(documents)
+    for index, tf in enumerate(term_freqs):
+        doc_length = doc_lengths[index]
+        score = 0.0
+        for token in query_tokens:
+            freq = tf.get(token, 0)
+            if freq <= 0:
+                continue
+            df = doc_freq.get(token, 0)
+            idf = math.log(1 + ((total_docs - df + 0.5) / (df + 0.5)))
+            denom = freq + k1 * (1 - b + b * (doc_length / avg_doc_length))
+            score += idf * ((freq * (k1 + 1)) / denom)
+        if score > 0:
+            scores[index] = score
+    return scores
 
 # ディレクトリ内の全ファイルから関数抽出・インデックス作成（一時的なインデックス、状態保存なし）
 def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, update_state: bool = False):
@@ -631,35 +710,77 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
             scoped_faiss_index.add(search_embeddings)
             faiss_index = scoped_faiss_index
             index_to_result_index = scoped_indices
-        query_emb = encode_code([req.query], batch_size=1)  # クエリは1つなのでバッチサイズ1
-        D, I = faiss_index.search(query_emb, min(req.top_k, len(search_results)))
-        valid_distances = [
-            float(distance)
-            for distance, idx in zip(D[0], I[0])
-            if 0 <= idx < len(results) and np.isfinite(distance)
-        ]
-        min_distance = min(valid_distances) if valid_distances else 0.0
-        max_distance = max(valid_distances) if valid_distances else 0.0
+        search_mode = req.search_mode if req.search_mode in {"semantic", "bm25", "hybrid"} else "hybrid"
+        semantic_weight = max(0.0, min(1.0, req.semantic_weight))
+
+        semantic_scores: dict[int, float] = {}
+        semantic_distances: dict[int, float] = {}
+        if search_mode in {"semantic", "hybrid"}:
+            query_emb = encode_code([req.query], batch_size=1)  # クエリは1つなのでバッチサイズ1
+            semantic_k = len(search_results) if search_mode == "hybrid" else min(req.top_k, len(search_results))
+            D, I = faiss_index.search(query_emb, semantic_k)
+            valid_distances = [
+                float(distance)
+                for distance, idx in zip(D[0], I[0])
+                if 0 <= idx < len(search_results) and np.isfinite(distance)
+            ]
+            min_distance = min(valid_distances) if valid_distances else 0.0
+            max_distance = max(valid_distances) if valid_distances else 0.0
+            for distance, idx in zip(D[0], I[0]):
+                if 0 <= idx < len(search_results):
+                    distance_value = float(distance)
+                    if max_distance > min_distance and np.isfinite(distance_value):
+                        score = max(0.0, min(1.0, 1.0 - ((distance_value - min_distance) / (max_distance - min_distance))))
+                    else:
+                        score = 1.0
+                    result_index = index_to_result_index[idx]
+                    semantic_scores[result_index] = score
+                    semantic_distances[result_index] = distance_value
+
+        scoped_bm25_scores = bm25_search_scores(search_results, req.query) if search_mode in {"bm25", "hybrid"} else {}
+        bm25_scores = {
+            index_to_result_index[index]: score
+            for index, score in scoped_bm25_scores.items()
+            if 0 <= index < len(index_to_result_index)
+        }
+        normalized_bm25 = normalize_scores(bm25_scores)
+
+        candidate_indices = set(semantic_scores) | set(normalized_bm25)
+        if not candidate_indices and search_mode in {"bm25", "hybrid"}:
+            candidate_indices = set(index_to_result_index)
+
+        ranked = []
+        for result_index in candidate_indices:
+            semantic_score = semantic_scores.get(result_index, 0.0)
+            bm25_score = normalized_bm25.get(result_index, 0.0)
+            if search_mode == "semantic":
+                hybrid_score = semantic_score
+            elif search_mode == "bm25":
+                hybrid_score = bm25_score
+            else:
+                hybrid_score = (semantic_weight * semantic_score) + ((1.0 - semantic_weight) * bm25_score)
+            ranked.append((hybrid_score, semantic_score, bm25_score, result_index))
+
+        ranked.sort(key=lambda item: item[0], reverse=True)
         found = []
-        for rank, (distance, idx) in enumerate(zip(D[0], I[0]), start=1):
-            if 0 <= idx < len(search_results):
-                result_index = index_to_result_index[idx]
-                item = dict(results[result_index])
-                distance_value = float(distance)
-                if max_distance > min_distance and np.isfinite(distance_value):
-                    score = max(0.0, min(1.0, 1.0 - ((distance_value - min_distance) / (max_distance - min_distance))))
-                else:
-                    score = 1.0
-                item["rank"] = rank
-                item["distance"] = distance_value
-                item["score"] = score
-                item["similarity"] = score
-                found.append(item)
+        for rank, (hybrid_score, semantic_score, bm25_score, result_index) in enumerate(ranked[:req.top_k], start=1):
+            item = dict(results[result_index])
+            item["rank"] = rank
+            item["distance"] = semantic_distances.get(result_index)
+            item["score"] = hybrid_score
+            item["similarity"] = semantic_score if search_mode != "bm25" else bm25_score
+            item["semantic_similarity"] = semantic_score
+            item["bm25_score"] = bm25_score
+            item["hybrid_score"] = hybrid_score
+            item["search_mode"] = search_mode
+            found.append(item)
         return {
             "results": found,
             "num_functions": len(results),
             "num_files": file_count,
             "scoped_files": len(req.include_files or []),
+            "search_mode": search_mode,
+            "semantic_weight": semantic_weight,
         }
 
 

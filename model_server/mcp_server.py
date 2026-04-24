@@ -120,6 +120,12 @@ def tool_definitions() -> list[dict[str, Any]]:
                         "enum": ["all", "source", "changed"],
                         "default": "all",
                     },
+                    "search_mode": {
+                        "type": "string",
+                        "description": "Search ranking mode.",
+                        "enum": ["semantic", "bm25", "hybrid"],
+                        "default": "hybrid",
+                    },
                     "server_url": {
                         "type": "string",
                         "description": "OwlSpotlight HTTP server URL. Defaults to OWLSPOTLIGHT_SERVER_URL or http://127.0.0.1:8000.",
@@ -138,6 +144,7 @@ def call_search(arguments: dict[str, Any]) -> dict[str, Any]:
     file_ext = str(arguments.get("file_ext", ".py")).strip() or ".py"
     top_k = int(arguments.get("top_k", 10))
     scope = str(arguments.get("scope", "all")).strip()
+    search_mode = str(arguments.get("search_mode", "hybrid")).strip()
     server_url = str(arguments.get("server_url", DEFAULT_SERVER_URL)).rstrip("/")
 
     if not directory or not query:
@@ -157,6 +164,7 @@ def call_search(arguments: dict[str, Any]) -> dict[str, Any]:
         "file_ext": file_ext,
         "top_k": max(1, min(top_k, 50)),
         "include_files": include_files,
+        "search_mode": search_mode if search_mode in {"semantic", "bm25", "hybrid"} else "hybrid",
     }
     try:
         result = post_json(f"{server_url}/search_functions_simple", payload)

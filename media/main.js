@@ -15,6 +15,7 @@ window.onload = function() {
         const searchInput = document.getElementById('searchInput')?.value || '';
         const language = document.getElementById('languageSelect')?.value || '.py';
         const scope = document.getElementById('scopeSelect')?.value || 'all';
+        const searchMode = document.getElementById('searchModeSelect')?.value || 'hybrid';
         const resultTypeFilter = document.getElementById('resultTypeFilter')?.value || 'all';
         const searchOptionsVisible = document.getElementById('searchOptions')?.style.display !== 'none';
         const statsFilter = document.getElementById('statsFilter')?.value || 'all';
@@ -28,6 +29,7 @@ window.onload = function() {
             searchInput,
             language,
             scope,
+            searchMode,
             resultTypeFilter,
             searchOptionsVisible,
             statsFilter,
@@ -71,6 +73,10 @@ window.onload = function() {
             if (state.resultTypeFilter && document.getElementById('resultTypeFilter')) {
                 const sel = document.getElementById('resultTypeFilter');
                 if (sel) sel.value = state.resultTypeFilter;
+            }
+            if (state.searchMode && document.getElementById('searchModeSelect')) {
+                const sel = document.getElementById('searchModeSelect');
+                if (sel) sel.value = state.searchMode;
             }
             if (typeof state.searchOptionsVisible === 'boolean' && document.getElementById('searchOptions')) {
                 document.getElementById('searchOptions').style.display = state.searchOptionsVisible ? 'grid' : 'none';
@@ -133,6 +139,10 @@ window.onload = function() {
             if (external.resultTypeFilter && document.getElementById('resultTypeFilter')) {
                 const sel = document.getElementById('resultTypeFilter');
                 if (sel) sel.value = external.resultTypeFilter;
+            }
+            if (external.searchMode && document.getElementById('searchModeSelect')) {
+                const sel = document.getElementById('searchModeSelect');
+                if (sel) sel.value = external.searchMode;
             }
             if (typeof external.searchOptionsVisible === 'boolean' && document.getElementById('searchOptions')) {
                 document.getElementById('searchOptions').style.display = external.searchOptionsVisible ? 'grid' : 'none';
@@ -287,11 +297,12 @@ window.onload = function() {
                         currentSearchQuery = text;
                         const lang = document.getElementById('languageSelect')?.value || '.py';
                         const scope = document.getElementById('scopeSelect')?.value || 'all';
+                        const searchMode = document.getElementById('searchModeSelect')?.value || 'hybrid';
                         showLoading('status');
                         // 空状態を非表示
                         const empty = document.getElementById('emptyState');
                         if (empty) empty.style.display = 'none';
-                        vscode.postMessage({ command: 'search', text, lang, scope });
+                        vscode.postMessage({ command: 'search', text, lang, scope, searchMode });
                         saveState();
                 }
         };
@@ -308,8 +319,9 @@ window.onload = function() {
                 console.log('Loading class stats with query:', query);
                 const lang = document.getElementById('languageSelect')?.value || '.py';
                 const scope = document.getElementById('scopeSelect')?.value || 'all';
+                const searchMode = document.getElementById('searchModeSelect')?.value || 'hybrid';
                 showLoading('stats-status');
-                vscode.postMessage({ command: 'getClassStats', query: query, lang, scope });
+                vscode.postMessage({ command: 'getClassStats', query: query, lang, scope, searchMode });
                 saveState();
         };
 	
@@ -564,6 +576,19 @@ window.onload = function() {
             const scoreBadge = hasScore
                 ? '<span class="score-badge ' + scoreClass + '" title="Relative similarity">Similarity ' + (similarity * 100).toFixed(0) + '%</span>'
                 : '';
+            const staticInfo = r.python_static || {};
+            const metaBadges = [];
+            if (Array.isArray(staticInfo.framework_tags)) {
+                staticInfo.framework_tags.slice(0, 2).forEach(tag => metaBadges.push('<span class="meta-badge">' + tag + '</span>'));
+            }
+            if (Array.isArray(staticInfo.routes) && staticInfo.routes.length) {
+                const route = staticInfo.routes[0];
+                metaBadges.push('<span class="meta-badge">' + route.method + ' ' + (route.path || '') + '</span>');
+            }
+            if (typeof r.bm25_score === 'number' && r.bm25_score > 0) {
+                metaBadges.push('<span class="meta-badge">BM25 ' + (r.bm25_score * 100).toFixed(0) + '%</span>');
+            }
+            const metaLine = metaBadges.length ? '<div class="result-meta">' + metaBadges.join('') + '</div>' : '';
 
             // ランクバッジ
             const rankClass = index < 3 ? 'result-rank rank-top' : 'result-rank';
@@ -582,6 +607,7 @@ window.onload = function() {
                   scoreBadge +
                 '</div>' +
                 '<div class="result-path">' + relPath + ':' + (r.lineno || r.line_number || 1) + '</div>' +
+                metaLine +
                 '<div class="result-snippet">' + (r.code ? r.code.split('\n').slice(0,2).join(' ') : '') + '</div>' +
                 scoreBar;
 
