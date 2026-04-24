@@ -20,7 +20,7 @@ class CodeIndexer:
         codes = [f["code"] for f in functions]
         new_codes = [c for c in codes if c not in self.code2emb]
         if new_codes:
-            print(f"🔄 Encoding {len(new_codes)} new code snippets...")
+            print(f"[indexer] Encoding {len(new_codes)} new code snippets...")
             new_embs = encode_code(new_codes, show_progress=True)
             for c, e in zip(new_codes, new_embs):
                 self.code2emb[c] = e

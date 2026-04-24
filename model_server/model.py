@@ -42,7 +42,7 @@ def load_model_with_device_fallback():
     if model is not None:
         return model
     
-    print(f"🦉 Loading model: {model_name}")
+    print(f"[model] Loading model: {model_name}")
     
     try:
         # まずはモデルを読み込み
@@ -50,7 +50,7 @@ def load_model_with_device_fallback():
         
         # デバイスを決定して移動
         device = get_device()
-        print(f"🔧 Attempting to use device: {device}")
+        print(f"[model] Attempting to use device: {device}")
         
         # MPSデバイスの場合、torch.compileを無効化してwarningを防ぐ
         if device == "mps":
@@ -62,16 +62,16 @@ def load_model_with_device_fallback():
         
         model.to(device)
         model_device = device
-        print(f"✅ Model loaded successfully on {device}")
+        print(f"[model] Model loaded successfully on {device}")
         emb_dim = model.get_sentence_embedding_dimension()
-        print(f"ℹ️ Embedding dimension: {emb_dim}")
+        print(f"[model] Embedding dimension: {emb_dim}")
         
     except Exception as e:
-        print(f"⚠️ Failed to load model on {device}: {e}")
+        print(f"[model] Failed to load model on {device}: {e}")
         
         # MPSで失敗した場合はCPUにフォールバック
         if device == "mps":
-            print("🔄 Falling back to CPU...")
+            print("[model] Falling back to CPU...")
             try:
                 if model is not None:
                     model.to("cpu")
@@ -80,9 +80,9 @@ def load_model_with_device_fallback():
                     model.to("cpu")
                 model_device = "cpu"
                 cleanup_memory()
-                print("✅ Model loaded successfully on CPU")
+                print("[model] Model loaded successfully on CPU")
             except Exception as cpu_e:
-                print(f"❌ Failed to load model on CPU: {cpu_e}")
+                print(f"[model] Failed to load model on CPU: {cpu_e}")
                 raise cpu_e
         else:
             raise e
@@ -122,22 +122,22 @@ def encode_code(codes: list[str], batch_size: int = 8, max_retries: int = 3, sho
         except (RuntimeError, torch.cuda.OutOfMemoryError) as e:
             error_msg = str(e).lower()
             if "memory" in error_msg or "out of memory" in error_msg:
-                print(f"⚠️ Memory error on attempt {attempt + 1}: {e}")
+                print(f"[model] Memory error on attempt {attempt + 1}: {e}")
                 cleanup_memory()
                 
                 if attempt < max_retries - 1:
                     # バッチサイズを半分に減らして再試行
                     batch_size = max(1, batch_size // 2)
-                    print(f"🔄 Reducing batch size to {batch_size} and retrying...")
+                    print(f"[model] Reducing batch size to {batch_size} and retrying...")
                     
                     # 最後の試行でMPSが失敗した場合、CPUにフォールバック
                     if attempt == max_retries - 2 and model_device == "mps":
-                        print("🔄 Falling back to CPU due to persistent MPS memory issues...")
+                        print("[model] Falling back to CPU due to persistent MPS memory issues...")
                         current_model.to("cpu")
                         model_device = "cpu"
                         cleanup_memory()
                 else:
-                    print("❌ All memory optimization attempts failed")
+                    print("[model] All memory optimization attempts failed")
                     raise e
             else:
                 raise e

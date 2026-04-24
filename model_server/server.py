@@ -54,7 +54,7 @@ class OwlSettings(BaseSettings):
 
 settings = OwlSettings()
 
-# ✅ リクエスト用の Pydantic モデル
+# リクエスト用の Pydantic モデル
 class EmbedRequest(BaseModel):
     texts: list[str]
 
