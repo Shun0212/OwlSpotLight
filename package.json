@@ -82,6 +82,10 @@
         "command": "owlspotlight.findSimilarToSelection",
         "title": "OwlSpotlight: Find Similar Code to Selection",
         "icon": "$(search-fuzzy)"
+      },
+      {
+        "command": "owlspotlight.showNeighborsAt",
+        "title": "OwlSpotlight: Show Callers / Callees"
       }
     ],
     "menus": {
@@ -166,9 +170,53 @@
           "type": "boolean",
           "default": false,
           "description": "Automatically start the search server when the extension activates (requires .venv to be set up)"
+        },
+        "owlspotlight.enableCodeLens": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show '🦉 Find similar' and '🔗 Callers / Callees' CodeLens above function definitions (Python, Java, TypeScript)."
         }
       }
-    }
+    },
+    "walkthroughs": [
+      {
+        "id": "owlspotlight.getStarted",
+        "title": "Get Started with OwlSpotlight",
+        "description": "Set up semantic code search powered by tree-sitter + embeddings in 5 short steps.",
+        "steps": [
+          {
+            "id": "setup-python",
+            "title": "Set up the Python environment",
+            "description": "Run **OwlSpotlight: Setup Python Environment** from the Command Palette. This creates a local `.venv` and installs the embedding model dependencies.\n[Run setup](command:owlspotlight.setupEnv)",
+            "media": { "markdown": "media/walkthrough/setup-python.md" }
+          },
+          {
+            "id": "start-server",
+            "title": "Start the search server",
+            "description": "Start the FastAPI server that serves embeddings and the code graph.\n[Start server](command:owlspotlight.startServer)",
+            "media": { "markdown": "media/walkthrough/start-server.md" }
+          },
+          {
+            "id": "first-search",
+            "title": "Run your first semantic search",
+            "description": "Open the OwlSpotlight sidebar and try a natural-language query like \"function that validates email\".\n[Open sidebar](command:workbench.view.extension.owlspotlight)",
+            "media": { "markdown": "media/walkthrough/first-search.md" }
+          },
+          {
+            "id": "find-similar",
+            "title": "Find similar code from a selection",
+            "description": "Select code in any Python / Java / TypeScript file, right-click and choose **Find Similar Code to Selection**, or click the **🦉 Find similar** CodeLens above a function.",
+            "media": { "markdown": "media/walkthrough/find-similar.md" }
+          },
+          {
+            "id": "hybrid-mcp",
+            "title": "Hybrid search, code graph & MCP",
+            "description": "Switch between Semantic / Hybrid / Lexical modes, explore callers & callees from any result, or expose OwlSpotlight to Claude Desktop via the bundled MCP server.",
+            "media": { "markdown": "media/walkthrough/hybrid-mcp.md" }
+          }
+        ]
+      }
+    ]
   },
   "menus": {
     "view/item/context": [

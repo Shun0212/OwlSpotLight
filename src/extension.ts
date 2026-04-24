@@ -408,13 +408,53 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				const res = await fetch('http://localhost:8000/search_functions_simple', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ directory: folderPath, query, top_k: 10, file_ext: fileExt })
+                                body: JSON.stringify({ directory: folderPath, query, top_k: 10, file_ext: fileExt, mode: (typeof msg.mode === 'string' ? msg.mode : 'semantic') })
 				});
 				const data: any = await res.json();
 				if (data && data.results && Array.isArray(data.results) && data.results.length > 0) {
 					webviewView.webview.postMessage({ type: 'results', results: data.results, folderPath });
 				} else {
 					webviewView.webview.postMessage({ type: 'results', results: [], folderPath });
+				}
+			}
+			if (msg.command === 'getGraphNeighbors') {
+				const workspaceFolders = vscode.workspace.workspaceFolders;
+				if (!workspaceFolders || workspaceFolders.length === 0) {
+					webviewView.webview.postMessage({ type: 'graphNeighbors', panelId: msg.panelId, error: 'No workspace folder found' });
+					return;
+				}
+				const folderPath = workspaceFolders[0].uri.fsPath;
+				const fileExt = msg.lang || '.py';
+				try {
+					const res = await fetch('http://localhost:8000/graph/neighbors', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							directory: folderPath,
+							file_ext: fileExt,
+							file: msg.file,
+							lineno: typeof msg.lineno === 'number' ? msg.lineno : parseInt(msg.lineno, 10) || undefined,
+							name: msg.name || undefined,
+							class_name: msg.className || undefined,
+							depth: 1,
+							limit: 25,
+						})
+					});
+					if (!res.ok) {
+						const errText = await res.text();
+						webviewView.webview.postMessage({ type: 'graphNeighbors', panelId: msg.panelId, error: `Server error: ${res.status} ${errText.slice(0, 200)}` });
+						return;
+					}
+					const data: any = await res.json();
+					webviewView.webview.postMessage({
+						type: 'graphNeighbors',
+						panelId: msg.panelId,
+						target: data.target || null,
+						callers: data.callers || [],
+						callees: data.callees || []
+					});
+				} catch (e: any) {
+					webviewView.webview.postMessage({ type: 'graphNeighbors', panelId: msg.panelId, error: `Failed to fetch neighbors: ${e?.message || e}` });
 				}
 			}
 			if (msg.command === 'getClassStats') {
@@ -710,6 +750,12 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
       <input id="searchInput" type="text" placeholder="Describe what the code does..." />
       <button id="searchBtn">Search</button>
     </div>
+    <div class="mode-selector" role="tablist" aria-label="Search mode">
+      <button type="button" class="mode-btn active" data-mode="semantic" title="Embedding-only semantic search">🧠 Semantic</button>
+      <button type="button" class="mode-btn" data-mode="hybrid" title="Embedding + BM25 fused via RRF">⚡ Hybrid</button>
+      <button type="button" class="mode-btn" data-mode="lexical" title="Pure BM25 keyword search">🔤 Lexical</button>
+    </div>
+    <div class="history-bar" id="historyBar" aria-label="Recent queries"></div>
     <div class="status" id="status"></div>
     <div id="translatedQuery" class="translated-query" style="display:none;"></div>
     <div class="results" id="results">
@@ -895,44 +941,120 @@ export function activate(context: vscode.ExtensionContext) {
 
 	// エディタ選択範囲から類似コード検索
 	context.subscriptions.push(
-		vscode.commands.registerCommand('owlspotlight.findSimilarToSelection', async () => {
-			const editor = vscode.window.activeTextEditor;
-			if (!editor) {
-				vscode.window.showWarningMessage('OwlSpotlight: Open a file and select some code first.');
-				return;
-			}
-			let text = editor.document.getText(editor.selection).trim();
-			if (!text) {
-				// フォールバック: 現在位置の enclosing symbol を DocumentSymbolProvider から取得
+		vscode.commands.registerCommand('owlspotlight.findSimilarToSelection', async (uri?: vscode.Uri, range?: vscode.Range) => {
+			let text = '';
+			let langExt: string | undefined;
+			// CodeLens など引数つきで呼ばれた場合
+			if (uri && range) {
 				try {
-					const symbols = (await vscode.commands.executeCommand(
-						'vscode.executeDocumentSymbolProvider',
-						editor.document.uri
-					)) as vscode.DocumentSymbol[] | undefined;
-					const pos = editor.selection.active;
-					const findEnclosing = (syms: vscode.DocumentSymbol[] | undefined): vscode.DocumentSymbol | undefined => {
-						if (!syms) { return undefined; }
-						for (const s of syms) {
-							if (s.range.contains(pos)) {
-								return findEnclosing(s.children) || s;
-							}
-						}
-						return undefined;
-					};
-					const enclosing = findEnclosing(symbols);
-					if (enclosing) {
-						text = editor.document.getText(enclosing.range).trim();
-					}
+					const doc = await vscode.workspace.openTextDocument(uri);
+					text = doc.getText(range).trim();
+					const ext = path.extname(doc.fileName).toLowerCase();
+					langExt = ['.py', '.java', '.ts', '.tsx'].includes(ext) ? (ext === '.tsx' ? '.ts' : ext) : undefined;
 				} catch { /* ignore */ }
 			}
 			if (!text) {
-				vscode.window.showWarningMessage('OwlSpotlight: No selection or enclosing symbol found.');
-				return;
+				const editor = vscode.window.activeTextEditor;
+				if (!editor) {
+					vscode.window.showWarningMessage('OwlSpotlight: Open a file and select some code first.');
+					return;
+				}
+				text = editor.document.getText(editor.selection).trim();
+				if (!text) {
+					// フォールバック: 現在位置の enclosing symbol を DocumentSymbolProvider から取得
+					try {
+						const symbols = (await vscode.commands.executeCommand(
+							'vscode.executeDocumentSymbolProvider',
+							editor.document.uri
+						)) as vscode.DocumentSymbol[] | undefined;
+						const pos = editor.selection.active;
+						const findEnclosing = (syms: vscode.DocumentSymbol[] | undefined): vscode.DocumentSymbol | undefined => {
+							if (!syms) { return undefined; }
+							for (const s of syms) {
+								if (s.range.contains(pos)) {
+									return findEnclosing(s.children) || s;
+								}
+							}
+							return undefined;
+						};
+						const enclosing = findEnclosing(symbols);
+						if (enclosing) {
+							text = editor.document.getText(enclosing.range).trim();
+						}
+					} catch { /* ignore */ }
+				}
+				if (!text) {
+					vscode.window.showWarningMessage('OwlSpotlight: No selection or enclosing symbol found.');
+					return;
+				}
+				const ext = path.extname(editor.document.fileName).toLowerCase();
+				langExt = ['.py', '.java', '.ts', '.tsx'].includes(ext) ? (ext === '.tsx' ? '.ts' : ext) : undefined;
 			}
-			// 言語を拡張子から推定
-			const ext = path.extname(editor.document.fileName).toLowerCase();
-			const lang = ['.py', '.java', '.ts', '.tsx'].includes(ext) ? (ext === '.tsx' ? '.ts' : ext) : undefined;
-			await sidebarProvider.runSearch(text, lang);
+			await sidebarProvider.runSearch(text, langExt);
+		})
+	);
+
+	// CodeLens: 関数定義に「🦉 Find similar / 🔗 Neighbors」を表示
+	const codeLensProvider: vscode.CodeLensProvider = {
+		async provideCodeLenses(document, _token) {
+			const cfg = vscode.workspace.getConfiguration('owlspotlight');
+			if (!cfg.get<boolean>('enableCodeLens', true)) { return []; }
+			let symbols: vscode.DocumentSymbol[] | undefined;
+			try {
+				symbols = (await vscode.commands.executeCommand(
+					'vscode.executeDocumentSymbolProvider',
+					document.uri
+				)) as vscode.DocumentSymbol[] | undefined;
+			} catch { return []; }
+			if (!symbols) { return []; }
+			const lenses: vscode.CodeLens[] = [];
+			const FN_KINDS = new Set([
+				vscode.SymbolKind.Function,
+				vscode.SymbolKind.Method,
+				vscode.SymbolKind.Constructor,
+			]);
+			const walk = (syms: vscode.DocumentSymbol[]) => {
+				for (const s of syms) {
+					if (FN_KINDS.has(s.kind)) {
+						const headRange = new vscode.Range(s.selectionRange.start, s.selectionRange.end);
+						lenses.push(new vscode.CodeLens(headRange, {
+							title: '🦉 Find similar',
+							command: 'owlspotlight.findSimilarToSelection',
+							arguments: [document.uri, s.range],
+							tooltip: 'Search the index for functions similar to this one',
+						}));
+						lenses.push(new vscode.CodeLens(headRange, {
+							title: '🔗 Callers / Callees',
+							command: 'owlspotlight.showNeighborsAt',
+							arguments: [document.uri, s.selectionRange.start.line + 1, s.name],
+							tooltip: 'Open OwlSpotlight and inspect callers/callees',
+						}));
+					}
+					if (s.children && s.children.length) { walk(s.children); }
+				}
+			};
+			walk(symbols);
+			return lenses;
+		}
+	};
+	context.subscriptions.push(
+		vscode.languages.registerCodeLensProvider(
+			[
+				{ language: 'python' },
+				{ language: 'java' },
+				{ language: 'typescript' },
+				{ language: 'typescriptreact' },
+			],
+			codeLensProvider
+		)
+	);
+	context.subscriptions.push(
+		vscode.commands.registerCommand('owlspotlight.showNeighborsAt', async (uri: vscode.Uri, lineno: number, name?: string) => {
+			await vscode.commands.executeCommand('workbench.view.extension.owlspotlight');
+			await vscode.commands.executeCommand('owlspotlight.sidebar.focus');
+			vscode.window.showInformationMessage(
+				`OwlSpotlight: open a recent search result and click "🔗 Callers / Callees" to see neighbors for ${name || path.basename(uri.fsPath) + ':' + lineno}.`
+			);
 		})
 	);
 

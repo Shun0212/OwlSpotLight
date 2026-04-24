@@ -21,6 +21,14 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   - `GET /info` — runtime + index status.
   - `POST /symbols` — per-file enriched symbol view (functions / classes / imports) without embedding.
 
+### Added — Roadmap P3: UX polish
+- **Search mode selector**: new `Semantic / Hybrid / Lexical` segmented control at the top of the sidebar. The chosen mode is persisted in `workspaceState` and passed to `POST /search_functions_simple` as `mode`. Switching mode with an active query re-runs the search automatically.
+- **Query history chips**: recently used queries appear as chips under the search bar. Clicking a chip re-runs that query; the ⭐ icon pins it so it survives history trimming. History is persisted per workspace.
+- **Callers / Callees panel on results**: every result row now has a `🔗 Callers / Callees` action that expands an inline panel calling `POST /graph/neighbors`. Click a caller or callee to jump straight to it. Every result also exposes a `🦉 Find similar` button that seeds a new search with the result's code.
+- **CodeLens**: `🦉 Find similar` and `🔗 Callers / Callees` CodeLenses are shown above every function / method / constructor in Python, Java, and TypeScript (incl. `.tsx`). Toggle with the new `owlspotlight.enableCodeLens` setting (default `true`).
+- **New command**: `owlspotlight.showNeighborsAt(uri, lineno, name)` — focuses the sidebar and nudges the user to inspect neighbors for a given symbol (used by CodeLens).
+- **Get Started walkthrough**: `contributes.walkthroughs` adds a 5-step onboarding (Setup Python → Start Server → First Search → Find Similar → Hybrid/MCP) with dedicated markdown pages under `media/walkthrough/`.
+
 ### Added — Roadmap P2: Differentiation
 - **Find similar to selection** (`owlspotlight.findSimilarToSelection`): new editor context-menu command (`editorHasSelection`) that takes the current selection (or the enclosing symbol from `vscode.executeDocumentSymbolProvider`), opens the OwlSpotlight sidebar and runs a search with it as the query.
 - **Hybrid retrieval** (`mode=hybrid|lexical|semantic`): `POST /search_functions_simple` now accepts a `mode` field. Hybrid fuses FAISS (semantic) and BM25 (lexical) rankings via Reciprocal Rank Fusion. New module `owl_core.hybrid` (identifier-aware tokenizer, `BM25Index`, `rrf_fuse`). BM25 is built lazily and cached per indexer instance.

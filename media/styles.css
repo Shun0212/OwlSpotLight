@@ -589,6 +589,122 @@ input[type=text]::placeholder {
   display: block;
 }
 
+/* ===== Mode selector (semantic / hybrid / lexical) ===== */
+.mode-selector {
+  display: flex;
+  gap: 4px;
+  padding: 0.35em 0.8em 0.1em;
+  background: var(--vscode-sideBar-background, transparent);
+}
+.mode-btn {
+  flex: 1;
+  font-size: 0.78em;
+  padding: 3px 6px;
+  border: 1px solid var(--vscode-input-border, #3c3c3c);
+  border-radius: 3px;
+  background: var(--vscode-input-background, #1e1e1e);
+  color: var(--vscode-foreground, #ccc);
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+}
+.mode-btn:hover {
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+}
+.mode-btn.active {
+  background: var(--vscode-button-background, #0078d4);
+  color: var(--vscode-button-foreground, #fff);
+  border-color: var(--vscode-button-background, #0078d4);
+  font-weight: 600;
+}
+
+/* ===== History chips ===== */
+.history-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 0.8em 0.3em;
+}
+.history-bar:empty { display: none; }
+.history-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 180px;
+  padding: 2px 6px;
+  font-size: 0.75em;
+  border: 1px solid var(--vscode-badge-background, #4d4d4d);
+  border-radius: 10px;
+  background: var(--vscode-badge-background, #4d4d4d);
+  color: var(--vscode-badge-foreground, #fff);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.85;
+}
+.history-chip:hover { opacity: 1; }
+.history-chip.pinned {
+  background: var(--vscode-button-secondaryBackground, #3a3d41);
+  border-color: var(--vscode-button-background, #0078d4);
+}
+.history-chip .chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 130px;
+}
+.history-chip .chip-pin {
+  cursor: pointer;
+  opacity: 0.6;
+  padding: 0 2px;
+}
+.history-chip .chip-pin:hover { opacity: 1; }
+
+/* ===== Result action row (graph neighbors / similar) ===== */
+.result-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--vscode-widget-border, transparent);
+}
+.result-action-btn {
+  font-size: 0.72em;
+  padding: 1px 6px;
+  border: 1px solid var(--vscode-input-border, transparent);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--vscode-textLink-foreground, #3794ff);
+  cursor: pointer;
+}
+.result-action-btn:hover {
+  background: var(--vscode-list-hoverBackground, rgba(255,255,255,0.05));
+}
+.result-graph-panel {
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: var(--vscode-textCodeBlock-background, rgba(0,0,0,0.2));
+  border-left: 2px solid var(--vscode-textLink-foreground, #3794ff);
+  font-size: 0.82em;
+}
+.result-graph-panel .graph-section-title {
+  font-weight: 600;
+  margin: 4px 0 2px;
+  opacity: 0.8;
+}
+.result-graph-panel .graph-item {
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 2px;
+}
+.result-graph-panel .graph-item:hover {
+  background: var(--vscode-list-hoverBackground, rgba(255,255,255,0.07));
+}
+.result-graph-panel .graph-item .graph-path {
+  opacity: 0.65;
+  font-size: 0.9em;
+  margin-left: 6px;
+}
+
 /* ===== Class stats ===== */
 .stats-filter {
   padding: 0.55em 0.8em;

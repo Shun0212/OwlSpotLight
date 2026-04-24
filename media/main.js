@@ -7,6 +7,10 @@ window.onload = function() {
     let currentStatsData = null;
     let currentFolderPath = null;
     let currentResults = [];
+    let currentMode = 'semantic';
+    // 履歴: [{text, pinned}] — 最新順 / ピン留め優先表示
+    let queryHistory = [];
+    const HISTORY_MAX = 20;
 
     // 状態保存/復元
     function collectState() {
@@ -31,7 +35,9 @@ window.onload = function() {
             currentSearchQuery,
             currentStatsData,
             currentFolderPath,
-            currentResults
+            currentResults,
+            currentMode,
+            queryHistory
         };
     }
 
@@ -80,6 +86,14 @@ window.onload = function() {
 
             // データ復元
             currentFolderPath = state.currentFolderPath || currentFolderPath;
+            if (typeof state.currentMode === 'string') {
+                currentMode = state.currentMode;
+                applyMode(currentMode);
+            }
+            if (Array.isArray(state.queryHistory)) {
+                queryHistory = state.queryHistory.slice(0, HISTORY_MAX);
+                renderHistory();
+            }
             if (Array.isArray(state.currentResults) && state.currentResults.length > 0) {
                 currentResults = state.currentResults;
                 renderResults(currentResults, currentFolderPath || '');
@@ -130,6 +144,14 @@ window.onload = function() {
             if (btn) btn.click();
 
             currentFolderPath = external.currentFolderPath || currentFolderPath;
+            if (typeof external.currentMode === 'string') {
+                currentMode = external.currentMode;
+                applyMode(currentMode);
+            }
+            if (Array.isArray(external.queryHistory)) {
+                queryHistory = external.queryHistory.slice(0, HISTORY_MAX);
+                renderHistory();
+            }
             if (Array.isArray(external.currentResults) && external.currentResults.length > 0) {
                 currentResults = external.currentResults;
                 renderResults(currentResults, currentFolderPath || '');
@@ -220,8 +242,73 @@ window.onload = function() {
             }
         }
 
-        // 翻訳設定のトグル
-        const translateToggle = document.getElementById('translateToggle');
+        // ===== Mode selector =====
+        function applyMode(mode) {
+            currentMode = mode;
+            document.querySelectorAll('.mode-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.getAttribute('data-mode') === mode);
+            });
+        }
+        document.querySelectorAll('.mode-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const newMode = btn.getAttribute('data-mode');
+                if (newMode === currentMode) return;
+                applyMode(newMode);
+                saveState();
+                // 現在の検索クエリがあれば自動再検索
+                const input = document.getElementById('searchInput');
+                if (input && input.value.trim()) {
+                    document.getElementById('searchBtn').click();
+                }
+            });
+        });
+
+        // ===== Query history =====
+        function addToHistory(text) {
+            if (!text) return;
+            const idx = queryHistory.findIndex(h => h.text === text);
+            const wasPinned = idx >= 0 ? !!queryHistory[idx].pinned : false;
+            if (idx >= 0) queryHistory.splice(idx, 1);
+            queryHistory.unshift({ text, pinned: wasPinned });
+            // トリム: ピン留めは常に残す
+            const pinned = queryHistory.filter(h => h.pinned);
+            const recent = queryHistory.filter(h => !h.pinned).slice(0, HISTORY_MAX - pinned.length);
+            queryHistory = [...pinned, ...recent.filter(r => !pinned.some(p => p.text === r.text))];
+            renderHistory();
+        }
+        function togglePin(text) {
+            const item = queryHistory.find(h => h.text === text);
+            if (item) { item.pinned = !item.pinned; renderHistory(); saveState(); }
+        }
+        function renderHistory() {
+            const bar = document.getElementById('historyBar');
+            if (!bar) return;
+            bar.innerHTML = '';
+            // ピン留めを先頭に並べる
+            const sorted = [...queryHistory].sort((a, b) => (b.pinned?1:0) - (a.pinned?1:0));
+            sorted.slice(0, 10).forEach(item => {
+                const chip = document.createElement('span');
+                chip.className = 'history-chip' + (item.pinned ? ' pinned' : '');
+                chip.title = item.text;
+                const textEl = document.createElement('span');
+                textEl.className = 'chip-text';
+                textEl.textContent = item.text;
+                textEl.onclick = () => {
+                    const input = document.getElementById('searchInput');
+                    if (input) { input.value = item.text; }
+                    document.getElementById('searchBtn')?.click();
+                };
+                const pinEl = document.createElement('span');
+                pinEl.className = 'chip-pin';
+                pinEl.textContent = item.pinned ? '⭐' : '☆';
+                pinEl.onclick = (e) => { e.stopPropagation(); togglePin(item.text); };
+                chip.appendChild(textEl);
+                chip.appendChild(pinEl);
+                bar.appendChild(chip);
+            });
+        }
+
+
         if (translateToggle) {
           translateToggle.onchange = () => {
             const enable = translateToggle.checked;
@@ -241,7 +328,8 @@ window.onload = function() {
                         // 空状態を非表示
                         const empty = document.getElementById('emptyState');
                         if (empty) empty.style.display = 'none';
-                        vscode.postMessage({ command: 'search', text, lang });
+                        vscode.postMessage({ command: 'search', text, lang, mode: currentMode });
+                        addToHistory(text);
                         saveState();
                 }
         };
@@ -513,9 +601,58 @@ window.onload = function() {
                 '</div>' +
                 '<div class="result-path">' + relPath + ':' + (r.lineno || r.line_number || 1) + '</div>' +
                 '<div class="result-snippet">' + (r.code ? r.code.split('\n').slice(0,2).join(' ') : '') + '</div>' +
-                scoreBar;
+                scoreBar +
+                '<div class="result-actions">' +
+                  '<button type="button" class="result-action-btn" data-action="graph">🔗 Callers / Callees</button>' +
+                  '<button type="button" class="result-action-btn" data-action="similar">🦉 Find similar</button>' +
+                '</div>' +
+                '<div class="result-graph-panel" style="display:none;"></div>';
 
-            resultDiv.onclick = function() {
+            // アクションボタン: イベントは個別バインド
+            const graphBtn = resultDiv.querySelector('[data-action="graph"]');
+            const similarBtn = resultDiv.querySelector('[data-action="similar"]');
+            const panelEl = resultDiv.querySelector('.result-graph-panel');
+            if (graphBtn) {
+                graphBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    if (panelEl.style.display === 'block') {
+                        panelEl.style.display = 'none';
+                        return;
+                    }
+                    panelEl.style.display = 'block';
+                    panelEl.innerHTML = '<span class="loading-spinner"></span> Loading neighbors…';
+                    const lang = document.getElementById('languageSelect')?.value || '.py';
+                    // 一意のpanel IDを付けて応答を紐付け
+                    const panelId = 'graph-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+                    panelEl.setAttribute('data-panel-id', panelId);
+                    vscode.postMessage({
+                        command: 'getGraphNeighbors',
+                        panelId,
+                        file: r.file_path || r.file,
+                        lineno: r.lineno || r.line_number || 1,
+                        name: functionName,
+                        className: className || null,
+                        lang
+                    });
+                };
+            }
+            if (similarBtn) {
+                similarBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    const text = r.code || '';
+                    if (!text) { return; }
+                    const lang = document.getElementById('languageSelect')?.value || '.py';
+                    const input = document.getElementById('searchInput');
+                    if (input) { input.value = (r.name || r.function_name || '') + ' similar'; }
+                    vscode.postMessage({ command: 'search', text, lang, mode: currentMode });
+                    addToHistory('≈ ' + (r.name || r.function_name || 'selected'));
+                    showLoading('status');
+                };
+            }
+
+            resultDiv.onclick = function(ev) {
+                // アクションパネル/ボタン上のクリックはジャンプしない
+                if (ev.target.closest('.result-action-btn') || ev.target.closest('.result-graph-panel')) { return; }
                 const jumpData = {
                     command: 'jump', 
                     file: this.getAttribute('data-file'), 
@@ -617,6 +754,46 @@ window.onload = function() {
             currentResults = Array.isArray(msg.results) ? msg.results : [];
             currentFolderPath = msg.folderPath || currentFolderPath;
             renderResults(currentResults, currentFolderPath || '');
+        }
+        if (msg.type === 'graphNeighbors') {
+            const panel = document.querySelector('.result-graph-panel[data-panel-id="' + msg.panelId + '"]');
+            if (!panel) return;
+            const buildList = (title, items) => {
+                const header = '<div class="graph-section-title">' + title + ' (' + items.length + ')</div>';
+                if (!items.length) return header + '<div style="opacity:0.6;font-size:0.9em;">none</div>';
+                const lines = items.map(it => {
+                    const nm = it.name || it.function_name || '?';
+                    const cls = it.class_name ? (it.class_name + '.') : '';
+                    const f = (it.file || it.file_path || '');
+                    let rel = f;
+                    if (rel && currentFolderPath && rel.startsWith(currentFolderPath)) {
+                        rel = rel.substring(currentFolderPath.length).replace(/^[\\/]/, '');
+                    }
+                    return '<div class="graph-item" data-file="' + (f || '') + '" data-line="' + (it.lineno || 1) + '">'
+                        + '<span>' + cls + nm + '</span>'
+                        + '<span class="graph-path">' + rel + ':' + (it.lineno || 1) + '</span>'
+                        + '</div>';
+                }).join('');
+                return header + lines;
+            };
+            if (msg.error) {
+                panel.innerHTML = '<span style="color:var(--vscode-errorForeground,#f48771);">' + msg.error + '</span>';
+                return;
+            }
+            panel.innerHTML = buildList('⬆ Callers', msg.callers || []) + buildList('⬇ Callees', msg.callees || []);
+            panel.querySelectorAll('.graph-item').forEach(el => {
+                el.onclick = () => {
+                    vscode.postMessage({
+                        command: 'jump',
+                        file: el.getAttribute('data-file'),
+                        line: el.getAttribute('data-line'),
+                        functionName: el.querySelector('span')?.textContent || '',
+                        className: null,
+                        startLine: parseInt(el.getAttribute('data-line') || '1', 10),
+                        endLine: null
+                    });
+                };
+            });
         }
     });
 	
