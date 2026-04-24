@@ -134,7 +134,7 @@
             "pythonVersion": {
               "type": "string",
               "default": "3.11",
-              "description": "Python version to use for virtual environment (requires pyenv on macOS/Linux)"
+              "description": "Python version or interpreter path for uv to use when creating the virtual environment"
             }
           }
         },

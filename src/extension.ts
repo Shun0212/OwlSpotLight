@@ -1106,31 +1106,15 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 
 		const serverDir = path.join(context.extensionPath, 'model_server');
-		const venvDir = path.join(serverDir, '.venv');
-		const fs = require('fs');
-
-		// Python 3.11が存在しなければインストール案内＆中断（Windows/macOS/Linuxすべて）
 		const platform = os.platform();
-		const numericPython = /^\d+(?:\.\d+)?$/;
-		let pythonCommand = '';
-		if (platform === 'win32') {
-			pythonCommand = numericPython.test(pythonVersion)
-				? `py -${pythonVersion}`
-				: pythonVersion;
-		} else {
-			pythonCommand = numericPython.test(pythonVersion)
-				? `python${pythonVersion}`
-				: pythonVersion;
-		}
-		const pythonCheckCmd = `${pythonCommand} --version`;
 		try {
-			cp.execSync(pythonCheckCmd, { stdio: 'ignore' });
-		} catch (e) {
+			cp.execFileSync('uv', ['--version'], { stdio: 'ignore' });
+		} catch {
+			const installHint = platform === 'win32'
+				? 'Install uv with `winget install --id=astral-sh.uv -e` or from https://docs.astral.sh/uv/getting-started/installation/.'
+				: 'Install uv with `curl -LsSf https://astral.sh/uv/install.sh | sh`, `brew install uv`, or from https://docs.astral.sh/uv/getting-started/installation/.';
 			vscode.window.showErrorMessage(
-				`Python ${pythonVersion} was not found.\n` +
-				(platform === 'win32'
-					? `Please install Python ${pythonVersion} from the official site (https://www.python.org/downloads/). After installation, restart VSCode and try setup again.`
-					: `For macOS/Linux, install with \`brew install python@${pythonVersion}\` or from the official site (https://www.python.org/downloads/). After installation, restart VSCode and try setup again.`)
+				`uv was not found in PATH. ${installHint}`
 			);
 			return;
 		}
@@ -1161,46 +1145,30 @@ export function activate(context: vscode.ExtensionContext) {
 			return;
 		}
 
-		// 自動削除設定がオンの場合、既存の仮想環境を削除
-		if (autoRemoveVenv && fs.existsSync(venvDir)) {
-			try {
-				fs.rmSync(venvDir, { recursive: true, force: true });
-				vscode.window.showInformationMessage('Existing virtual environment removed automatically.');
-			} catch (error) {
-				vscode.window.showWarningMessage(`Failed to remove existing virtual environment: ${error}`);
-			}
-		}
-
 		const scriptArgs: string[] = ['--torch-mode', torchChoice.value];
 		if (autoRemoveVenv) {
 			scriptArgs.push('--force-recreate');
 		}
 
-		// spawn 用のコマンドと引数を組み立てる
-		let setupCommand: string;
-		const setupArgs: string[] = [];
-		if (platform === 'win32') {
-			if (numericPython.test(pythonVersion)) {
-				setupCommand = 'py';
-				setupArgs.push(`-${pythonVersion}`);
-			} else {
-				setupCommand = pythonCommand;
-			}
-		} else {
-			if (numericPython.test(pythonVersion)) {
-				setupCommand = `python${pythonVersion}`;
-			} else {
-				setupCommand = pythonCommand;
-			}
-		}
-		setupArgs.push('bootstrap_env.py', ...scriptArgs);
+		const setupCommand = 'uv';
+		const setupArgs: string[] = [
+			'run',
+			'--no-project',
+			'--python',
+			pythonVersion,
+			'bootstrap_env.py',
+			'--python',
+			pythonVersion,
+			...scriptArgs
+		];
 
 		isSetupRunning = true;
 		owlOutputChannel.show(true);
 		owlOutputChannel.appendLine('');
-		owlOutputChannel.appendLine(`[OwlSpotlight] Starting environment setup...`);
+		owlOutputChannel.appendLine(`[OwlSpotlight] Starting environment setup with uv...`);
 		owlOutputChannel.appendLine(`[OwlSpotlight] Command: ${setupCommand} ${setupArgs.join(' ')}`);
 		owlOutputChannel.appendLine(`[OwlSpotlight] Working dir: ${serverDir}`);
+		owlOutputChannel.appendLine(`[OwlSpotlight] Python request: ${pythonVersion}`);
 		owlOutputChannel.appendLine(`[OwlSpotlight] PyTorch option: ${torchChoice.label}`);
 		owlOutputChannel.appendLine('---');
 
@@ -1208,7 +1176,7 @@ export function activate(context: vscode.ExtensionContext) {
 			setupProcess = cp.spawn(setupCommand, setupArgs, {
 				cwd: serverDir,
 				env: { ...process.env, PYTHONUNBUFFERED: '1' },
-				shell: platform === 'win32'
+				shell: false
 			});
 		} catch (err: any) {
 			isSetupRunning = false;
@@ -1241,7 +1209,7 @@ export function activate(context: vscode.ExtensionContext) {
 		});
 
 		vscode.window.showInformationMessage(
-			`OwlSpotlight Python environment bootstrap started with ${torchChoice.label}. Progress is shown in the OUTPUT panel.`
+			`OwlSpotlight uv environment setup started with ${torchChoice.label}. Progress is shown in the OUTPUT panel.`
 		);
 		});
 	context.subscriptions.push(setupEnvDisposable);

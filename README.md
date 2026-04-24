@@ -59,7 +59,7 @@ OwlSpotlight brings **semantic understanding** to VS Code code navigation. Inste
 
 ### Quick Start
 
-**Prerequisites**: Python 3.11+ installed on your system
+**Prerequisites**: `uv` installed on your system (`uv` can manage Python 3.11 automatically)
 
 > Queries can be entered in English or Japanese. Japanese text is automatically translated to English when the translation feature is enabled.
 
@@ -95,7 +95,7 @@ Then run `OwlSpotlight: Setup Python Environment` from the Command Palette.
 
 ### Environment Setup
 
-The `Setup Python Environment` command handles everything automatically — it creates a `.venv` inside `model_server/` and installs all required packages.
+The `Setup Python Environment` command handles everything automatically with `uv` — it creates a `.venv` inside `model_server/` and installs all required packages.
 
 **What changed:** Previously, the server was launched directly inside a VS Code integrated terminal. This caused conflicts with the VS Code Python extension's own venv activation. The server now runs as a **background process**, and all output is routed to the VS Code **OUTPUT panel** (`OwlSpotlight Server` channel). Your terminal stays clean and there are no environment conflicts.
 
@@ -105,11 +105,14 @@ The `Setup Python Environment` command handles everything automatically — it c
 cd model_server
 
 # macOS / Linux
-python3.11 bootstrap_env.py --torch-mode cpu
+uv run --no-project --python 3.11 bootstrap_env.py --python 3.11 --torch-mode cpu
 source .venv/bin/activate
+```
 
+```powershell
 # Windows PowerShell
-py -3.11 bootstrap_env.py --torch-mode cpu
+cd model_server
+uv run --no-project --python 3.11 bootstrap_env.py --python 3.11 --torch-mode cpu
 .\.venv\Scripts\Activate.ps1
 ```
 
@@ -122,14 +125,24 @@ py -3.11 bootstrap_env.py --torch-mode cpu
 | `skip` | Skip PyTorch installation |
 | `--force-recreate` | Rebuild the virtual environment from scratch |
 
-#### macOS / Linux with pyenv
+#### Installing uv
 
 ```bash
-brew install npm pyenv
-pyenv install 3.11
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+```powershell
+# Windows PowerShell
+winget install --id=astral-sh.uv -e
+```
+
+#### macOS / Linux with a pinned Python version
+
+```bash
+brew install npm uv
 cd model_server
-pyenv local 3.11
-python3.11 bootstrap_env.py --torch-mode cpu
+uv run --no-project --python 3.11 bootstrap_env.py --python 3.11 --torch-mode cpu
 source .venv/bin/activate
 ```
 
@@ -137,7 +150,7 @@ source .venv/bin/activate
 
 ```powershell
 cd model_server
-py -3.11 bootstrap_env.py --torch-mode cpu
+uv run --no-project --python 3.11 bootstrap_env.py --python 3.11 --torch-mode cpu
 .\.venv\Scripts\Activate.ps1
 ```
 
@@ -211,7 +224,7 @@ py -3.11 bootstrap_env.py --torch-mode cpu
 |---------|-------------|
 | `OwlSpotlight: Start Server` | Start the background server |
 | `OwlSpotlight: Stop Server` | Cleanly shut down the server |
-| `OwlSpotlight: Setup Python Environment` | Create or update the Python venv |
+| `OwlSpotlight: Setup Python Environment` | Create or update the uv-managed Python venv |
 | `OwlSpotlight: Code Search` | Open the search panel |
 | `OwlSpotlight: Clear Cache` | Clear FAISS index and embedding cache |
 | `OwlSpotlight: Remove Virtual Environment` | Delete the `.venv` and start fresh |
@@ -222,7 +235,7 @@ py -3.11 bootstrap_env.py --torch-mode cpu
 
 | Component | Requirement |
 |-----------|-------------|
-| Python | 3.11+ |
+| Runtime | `uv` + Python 3.11 (uv-managed or system-installed) |
 | Memory | 4 GB+ (8 GB+ for large projects) |
 | Storage | 2–3 GB (dependencies + model weights) |
 | Platform | macOS, Linux, Windows |
@@ -251,7 +264,8 @@ The Python backend exposes these REST endpoints on `localhost:8000`:
 <details>
 <summary><strong>Server won't start</strong></summary>
 
-- Verify Python 3.11+ is installed: `python3.11 --version`
+- Verify `uv` is installed: `uv --version`
+- If needed, install Python 3.11 through uv: `uv python install 3.11`
 - Check if `.venv` exists in `model_server/`. If not, run `OwlSpotlight: Setup Python Environment`.
 - Make sure port 8000 is not in use: `lsof -i :8000`
 - Check **View → Output → OwlSpotlight Server** for detailed error logs.
@@ -372,7 +386,7 @@ OwlSpotlightは、VS CodeでPython・Java・TypeScriptコードを**自然言語
 
 ### クイックスタート
 
-**前提条件**: Python 3.11+ がインストールされていること
+**前提条件**: `uv` がインストールされていること（Python 3.11 は `uv` に管理させても構いません）
 
 > クエリは英語・日本語どちらでも入力可能。自動翻訳を有効にすると、日本語クエリは英語に変換されて検索されます。
 
@@ -408,7 +422,7 @@ npm install && npm run compile && npx vsce package
 
 ### 環境構築について
 
-`Setup Python Environment` コマンドにより、仮想環境の作成から依存パッケージのインストールまで**すべて自動**で行われます。
+`Setup Python Environment` コマンドにより、`uv` を使って仮想環境の作成から依存パッケージのインストールまで**すべて自動**で行われます。
 
 **以前のバージョンからの変更点:** 旧バージョンではサーバーを VS Code の統合ターミナルで直接起動していたため、VS Code の Python 拡張機能が持つ venv 設定と競合することがありました。現在はサーバーを**バックグラウンドプロセス**として起動し、出力はすべて VS Code の **OUTPUT パネル**（`OwlSpotlight Server` チャンネル）に表示されます。ターミナルは一切使用しないため、他の Python 環境との競合が発生しません。
 
@@ -418,11 +432,14 @@ npm install && npm run compile && npx vsce package
 cd model_server
 
 # macOS / Linux
-python3.11 bootstrap_env.py --torch-mode cpu
+uv run --no-project --python 3.11 bootstrap_env.py --python 3.11 --torch-mode cpu
 source .venv/bin/activate
+```
 
+```powershell
 # Windows PowerShell
-py -3.11 bootstrap_env.py --torch-mode cpu
+cd model_server
+uv run --no-project --python 3.11 bootstrap_env.py --python 3.11 --torch-mode cpu
 .\.venv\Scripts\Activate.ps1
 ```
 
@@ -443,7 +460,7 @@ py -3.11 bootstrap_env.py --torch-mode cpu
 |---------|------|
 | `OwlSpotlight: Start Server` | バックグラウンドサーバーを起動 |
 | `OwlSpotlight: Stop Server` | サーバーを安全に停止 |
-| `OwlSpotlight: Setup Python Environment` | Python 仮想環境を作成・更新 |
+| `OwlSpotlight: Setup Python Environment` | uv 管理の Python 仮想環境を作成・更新 |
 | `OwlSpotlight: Code Search` | 検索パネルを開く |
 | `OwlSpotlight: Clear Cache` | FAISS インデックスと埋め込みキャッシュをクリア |
 | `OwlSpotlight: Remove Virtual Environment` | `.venv` を削除してゼロから再構築 |
@@ -491,7 +508,8 @@ py -3.11 bootstrap_env.py --torch-mode cpu
 <details>
 <summary><strong>サーバーが起動しない</strong></summary>
 
-- Python 3.11+ がインストールされているか確認: `python3.11 --version`
+- `uv` がインストールされているか確認: `uv --version`
+- 必要なら `uv python install 3.11` で Python を用意
 - `model_server/.venv` が存在しない場合は `OwlSpotlight: Setup Python Environment` を実行
 - ポート 8000 が使用中でないか確認: `lsof -i :8000`
 - `表示 → 出力 → OwlSpotlight Server` でエラー詳細を確認

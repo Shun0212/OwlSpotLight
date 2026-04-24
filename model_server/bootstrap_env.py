@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""Utility for bootstrapping the OwlSpotlight Python environment.
-
-This script centralises the logic that used to live in the VS Code
-extension so that contributors can reproduce the exact same setup from
-any shell.  It creates a virtual environment, installs the base
-requirements and optionally installs a GPU build of PyTorch.
-"""
+"""Utility for bootstrapping the OwlSpotlight Python environment with uv."""
 from __future__ import annotations
 
 import argparse
@@ -28,8 +22,8 @@ def parse_args() -> argparse.Namespace:
         "--python",
         default=None,
         help=(
-            "Python interpreter to use for creating the virtual environment. "
-            "Defaults to the interpreter that executes this script."
+            "Python version or interpreter path for uv to use when creating the virtual "
+            "environment. Defaults to the current interpreter's major.minor version."
         ),
     )
     parser.add_argument(
@@ -81,7 +75,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--skip-pip-upgrade",
         action="store_true",
-        help="Do not run 'pip install --upgrade pip' inside the environment.",
+        help="Deprecated with uv. Accepted for compatibility but ignored.",
     )
     return parser.parse_args()
 
@@ -89,81 +83,89 @@ def parse_args() -> argparse.Namespace:
 def run_command(cmd: Iterable[str], *, env: dict[str, str] | None = None) -> None:
     display_cmd = " ".join(str(part) for part in cmd)
     print(f"\n[bootstrap] $ {display_cmd}")
-    subprocess.check_call(list(str(part) for part in cmd), env=env)
+    subprocess.check_call([str(part) for part in cmd], env=env)
 
 
-def ensure_python(python_cmd: str) -> str:
-    """Return the interpreter path and validate the version."""
-    try:
-        version_output = subprocess.check_output(
-            [python_cmd, "-c", "import sys; print(sys.version)"],
-            text=True,
-        ).strip()
-    except FileNotFoundError as exc:
-        raise SystemExit(f"Python interpreter '{python_cmd}' was not found.") from exc
-    except subprocess.CalledProcessError as exc:
-        raise SystemExit(
-            f"Failed to execute '{python_cmd}'. Please ensure Python 3.11 or newer is installed."
-        ) from exc
-
-    version_info = tuple(int(part) for part in version_output.split()[0].split(".")[:2])
-    if version_info < (3, 11):
-        raise SystemExit(
-            f"Python 3.11 or newer is required. Detected version: {version_output}."
-        )
-    return python_cmd
+def ensure_uv() -> str:
+    uv_path = shutil.which("uv")
+    if uv_path:
+        return uv_path
+    raise SystemExit(
+        "uv was not found in PATH. Install it from https://docs.astral.sh/uv/getting-started/installation/"
+    )
 
 
 def venv_bin_path(env_dir: Path, executable: str) -> Path:
     if platform.system() == "Windows":
-        return env_dir / "Scripts" / executable
+        if executable == "python":
+            return env_dir / "Scripts" / "python.exe"
+        return env_dir / "Scripts" / f"{executable}.exe"
     return env_dir / "bin" / executable
+
+
+def current_python_spec() -> str:
+    return f"{sys.version_info.major}.{sys.version_info.minor}"
 
 
 def main() -> None:
     args = parse_args()
+    ensure_uv()
+
     project_root = Path(__file__).resolve().parent
     env_dir = (project_root / args.env_dir).resolve()
 
-    python_cmd = args.python or sys.executable
-    python_cmd = ensure_python(python_cmd)
+    python_spec = args.python or current_python_spec()
 
     if env_dir.exists() and args.force_recreate:
         print(f"[bootstrap] Removing existing environment at {env_dir}")
         shutil.rmtree(env_dir)
 
     if not env_dir.exists():
-        print(f"[bootstrap] Creating virtual environment at {env_dir}")
-        run_command([python_cmd, "-m", "venv", str(env_dir)])
+        print(f"[bootstrap] Creating virtual environment at {env_dir} with uv")
+        run_command(["uv", "venv", "--python", python_spec, str(env_dir)])
     else:
         print(f"[bootstrap] Reusing existing environment at {env_dir}")
 
-    pip_path = venv_bin_path(env_dir, "pip")
     python_env_path = venv_bin_path(env_dir, "python")
-
-    if not args.skip_pip_upgrade:
-        run_command([python_env_path, "-m", "pip", "install", "--upgrade", "pip"])
 
     requirements_path = (project_root / args.requirements).resolve()
     if not requirements_path.exists():
         raise SystemExit(f"Requirements file not found: {requirements_path}")
-    run_command([pip_path, "install", "-r", str(requirements_path)])
+    run_command(["uv", "pip", "install", "--python", str(python_env_path), "-r", str(requirements_path)])
 
     if args.torch_mode == "cpu":
         torch_requirements = (project_root / args.torch_requirements).resolve()
         if not torch_requirements.exists():
             raise SystemExit(f"Torch requirements file not found: {torch_requirements}")
-        run_command([pip_path, "install", "-r", str(torch_requirements)])
+        run_command(
+            ["uv", "pip", "install", "--python", str(python_env_path), "-r", str(torch_requirements)]
+        )
     elif args.torch_mode == "cuda":
-        run_command([pip_path, "install", "torch", "--index-url", args.torch_index])
+        run_command(
+            [
+                "uv",
+                "pip",
+                "install",
+                "--python",
+                str(python_env_path),
+                "torch",
+                "--index-url",
+                args.torch_index,
+            ]
+        )
     else:
         print("[bootstrap] Skipping PyTorch installation as requested")
+
+    if args.skip_pip_upgrade:
+        print("[bootstrap] --skip-pip-upgrade is ignored because uv manages package installation directly")
 
     print(
         "\n[bootstrap] Environment ready! Activate it with:\n"
         f"  {python_env_path.parent / ('activate.bat' if platform.system() == 'Windows' else 'activate')}"
     )
-    print("[bootstrap] Afterwards run 'uvicorn server:app --host 127.0.0.1 --port 8000 --reload'.")
+    print(
+        f"[bootstrap] Afterwards run '{python_env_path} -m uvicorn server:app --host 127.0.0.1 --port 8000'."
+    )
 
 
 if __name__ == "__main__":
