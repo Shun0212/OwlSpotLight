@@ -11,8 +11,11 @@ test/**
 vsc-extension-quickstart.md
 *.vsix
 model_server/.venv
-model_server/__pycache__
 model_server/.owl_index
 model_server/.env
+model_server/tests/
+**/__pycache__
+**/*.pyc
+test_sample.py
 screenshot/
-model_server/extractors/__pycache__
+CHANGELOG.md

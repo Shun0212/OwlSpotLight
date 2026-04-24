@@ -3,7 +3,7 @@
 <div align="center">
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.4.3-blue.svg)](https://github.com/Shun0212/owlspotlight)
+[![Version](https://img.shields.io/badge/version-0.4.4-blue.svg)](https://github.com/Shun0212/owlspotlight)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://www.python.org/)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.100+-blue.svg)](https://code.visualstudio.com/)
 [![Marketplace](https://img.shields.io/badge/VS%20Code-Marketplace-brightgreen.svg)](https://marketplace.visualstudio.com/items?itemName=Shun0212.owlspotlight)
