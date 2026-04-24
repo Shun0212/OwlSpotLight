@@ -31,6 +31,16 @@ OWL_INDEX_DIR = ".owl_index"
 # land. Import via the package namespace so those future integrations can
 # swap in the same modules without touching callers.
 from owl_core.extractors import extract_functions, extract_symbols
+from owl_core.graph import (
+    build_call_graph,
+    graph_signature,
+    resolve_target,
+)
+from owl_core.hybrid import (
+    BM25Index,
+    bm25_signature,
+    rrf_fuse,
+)
 from owl_core.indexer import CodeIndexer
 from owl_core.model import (
     DEFAULT_MODEL,
@@ -113,6 +123,8 @@ class SearchFunctionsSimpleRequest(BaseModel):
     query: str
     top_k: int = 5
     file_ext: str = ".py"
+    # "semantic" (current default) | "lexical" (BM25) | "hybrid" (RRF-fused)
+    mode: str = "semantic"
 
 class FunctionRangeRequest(BaseModel):
     file: str
@@ -141,6 +153,55 @@ class GlobalIndexerState:
         self.index_dir = None  # ディレクトリごとに動的に設定
         self.model_name: Optional[str] = None  # 追加: インデックス構築に使用したモデル名
         self.model_config: dict = {}  # 追加: モデル構成情報
+        # P2: 派生インデックス (BM25 / call-graph) と無効化用シグネチャ
+        self.bm25: Optional[BM25Index] = None
+        self._bm25_signature: Optional[tuple] = None
+        self.call_graph: Optional[Dict] = None
+        self._graph_signature: Optional[tuple] = None
+
+    def _functions(self) -> Optional[list]:
+        return self.indexer.functions if self.indexer else None
+
+    def get_bm25(self) -> Optional[BM25Index]:
+        """Lazily build a BM25 index over the current function list."""
+        functions = self._functions()
+        if not functions:
+            self.bm25 = None
+            self._bm25_signature = None
+            return None
+        sig = bm25_signature(functions)
+        if self.bm25 is None or sig != self._bm25_signature:
+            try:
+                self.bm25 = BM25Index(functions)
+                self._bm25_signature = sig
+            except Exception as exc:  # pragma: no cover - optional dep
+                print(f"[bm25] build failed: {exc}")
+                self.bm25 = None
+                self._bm25_signature = None
+        return self.bm25
+
+    def get_call_graph(self) -> Optional[Dict]:
+        functions = self._functions()
+        if not functions:
+            self.call_graph = None
+            self._graph_signature = None
+            return None
+        sig = graph_signature(functions)
+        if self.call_graph is None or sig != self._graph_signature:
+            try:
+                self.call_graph = build_call_graph(functions)
+                self._graph_signature = sig
+            except Exception as exc:
+                print(f"[call_graph] build failed: {exc}")
+                self.call_graph = None
+                self._graph_signature = None
+        return self.call_graph
+
+    def invalidate_derived(self) -> None:
+        self.bm25 = None
+        self._bm25_signature = None
+        self.call_graph = None
+        self._graph_signature = None
 
     def get_current_model_config(self) -> dict:
         # Add new config keys here as needed for extensibility
@@ -222,6 +283,7 @@ class GlobalIndexerState:
         self.last_indexed = 0.0
         self.model_name = None
         self.model_config = {}
+        self.invalidate_derived()
         if clear_disk and self.index_dir and os.path.exists(self.index_dir):
             shutil.rmtree(self.index_dir, ignore_errors=True)
 
@@ -697,15 +759,133 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
         print("file_ext:", global_index_state.file_ext)
         embeddings = global_index_state.embeddings
         faiss_index = global_index_state.faiss_index
-        if not results or embeddings is None or faiss_index is None:
+        if not results:
             return {"results": [], "message": "No functions found."}
-        query_emb = encode_code([req.query], batch_size=1)  # クエリは1つなのでバッチサイズ1
-        D, I = faiss_index.search(query_emb, req.top_k)
-        found = []
-        for idx in I[0]:
-            if 0 <= idx < len(results):
-                found.append(results[idx])
-        return {"results": found, "num_functions": len(results), "num_files": file_count}
+
+        mode = (req.mode or "semantic").lower()
+        if mode not in {"semantic", "lexical", "hybrid"}:
+            raise HTTPException(status_code=400, detail=f"Unknown search mode: {req.mode}")
+
+        # Pull more candidates than top_k so RRF has something to fuse.
+        candidate_k = max(req.top_k * 4, req.top_k + 10)
+
+        semantic_ranked: List[int] = []
+        if mode in {"semantic", "hybrid"}:
+            if embeddings is None or faiss_index is None:
+                if mode == "semantic":
+                    return {"results": [], "message": "Semantic index not ready."}
+            else:
+                query_emb = encode_code([req.query], batch_size=1)
+                _, I = faiss_index.search(query_emb, min(candidate_k, len(results)))
+                semantic_ranked = [int(i) for i in I[0] if 0 <= int(i) < len(results)]
+
+        lexical_ranked: List[int] = []
+        if mode in {"lexical", "hybrid"}:
+            bm25 = global_index_state.get_bm25()
+            if bm25 is None:
+                if mode == "lexical":
+                    return {"results": [], "message": "Lexical (BM25) index unavailable."}
+            else:
+                lexical_ranked = [idx for idx, _score in bm25.search(req.query, candidate_k)]
+
+        if mode == "semantic":
+            chosen = semantic_ranked[: req.top_k]
+        elif mode == "lexical":
+            chosen = lexical_ranked[: req.top_k]
+        else:  # hybrid
+            fused = rrf_fuse([semantic_ranked, lexical_ranked], top_k=req.top_k)
+            chosen = [idx for idx, _s in fused]
+
+        found = [results[i] for i in chosen if 0 <= i < len(results)]
+        return {
+            "results": found,
+            "num_functions": len(results),
+            "num_files": file_count,
+            "mode": mode,
+        }
+
+
+class GraphNeighborsRequest(BaseModel):
+    directory: str
+    file_ext: str = ".py"
+    # Either (file + lineno) or (name[, class_name]) identifies the target
+    file: Optional[str] = None
+    lineno: Optional[int] = None
+    name: Optional[str] = None
+    class_name: Optional[str] = None
+    depth: int = 1
+    limit: int = 25
+
+
+def _expand_neighbors(
+    graph: Dict,
+    start: int,
+    direction: str,
+    depth: int,
+    limit: int,
+) -> List[int]:
+    key = "callees" if direction == "callees" else "callers"
+    adjacency = graph.get(key, {})
+    seen: set[int] = set()
+    frontier = [start]
+    order: List[int] = []
+    for _ in range(max(depth, 1)):
+        next_frontier: List[int] = []
+        for node in frontier:
+            for nb in adjacency.get(node, []):
+                if nb in seen or nb == start:
+                    continue
+                seen.add(nb)
+                order.append(nb)
+                next_frontier.append(nb)
+                if len(order) >= limit:
+                    return order
+        frontier = next_frontier
+        if not frontier:
+            break
+    return order
+
+
+@app.post("/graph/neighbors", tags=["search"])
+async def graph_neighbors_api(req: GraphNeighborsRequest):
+    """Return callers and callees of the target function.
+
+    Either supply ``file`` + ``lineno`` (preferred – picks the tightest
+    enclosing function) or ``name`` (+ optional ``class_name``) to
+    identify the target. The call graph is derived from the tree-sitter
+    ``calls`` field and is cached per indexer instance.
+    """
+    with index_lock:
+        build_index(req.directory, req.file_ext, update_state=True)
+        if not global_index_state.indexer or not global_index_state.indexer.functions:
+            return {"target": None, "callers": [], "callees": []}
+        functions = global_index_state.indexer.functions
+        target_idx = resolve_target(
+            functions,
+            file=req.file,
+            lineno=req.lineno,
+            name=req.name,
+            class_name=req.class_name,
+        )
+        if target_idx is None:
+            raise HTTPException(status_code=404, detail="Target function not found.")
+
+        graph = global_index_state.get_call_graph()
+        if not graph:
+            return {
+                "target": functions[target_idx],
+                "callers": [],
+                "callees": [],
+                "message": "Call graph unavailable.",
+            }
+
+        callers_idx = _expand_neighbors(graph, target_idx, "callers", req.depth, req.limit)
+        callees_idx = _expand_neighbors(graph, target_idx, "callees", req.depth, req.limit)
+        return {
+            "target": functions[target_idx],
+            "callers": [functions[i] for i in callers_idx],
+            "callees": [functions[i] for i in callees_idx],
+        }
 
 
 

@@ -543,6 +543,23 @@ window.onload = function() {
                         restoreFromExternalState(msg.state);
                         return;
                 }
+                if (msg.type === 'runSearch') {
+                        const input = document.getElementById('searchInput');
+                        const langSel = document.getElementById('languageSelect');
+                        if (msg.lang && langSel) {
+                                for (const opt of langSel.options) {
+                                        if (opt.value === msg.lang) { langSel.value = msg.lang; break; }
+                                }
+                        }
+                        if (input && typeof msg.query === 'string') {
+                                input.value = msg.query;
+                                // 検索タブに切替
+                                const searchTab = document.querySelector('[data-tab="search"]');
+                                if (searchTab) { searchTab.click(); }
+                                document.getElementById('searchBtn')?.click();
+                        }
+                        return;
+                }
                 if (msg.type === 'translationSettings') {
                         const tToggle = document.getElementById('translateToggle');
                         if (tToggle) { tToggle.checked = !!msg.enable; }

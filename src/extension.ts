@@ -291,6 +291,20 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 
 	constructor(private readonly _context: vscode.ExtensionContext) {}
 
+	public get view(): vscode.WebviewView | undefined {
+		return this._view;
+	}
+
+	public async runSearch(query: string, lang?: string): Promise<void> {
+		await vscode.commands.executeCommand('workbench.view.extension.owlspotlight');
+		await vscode.commands.executeCommand('owlspotlight.sidebar.focus');
+		// Wait briefly for the webview to be resolved if it wasn't already.
+		for (let i = 0; i < 50 && !this._view; i++) {
+			await new Promise((r) => setTimeout(r, 60));
+		}
+		this._view?.webview.postMessage({ type: 'runSearch', query, lang });
+	}
+
        async resolveWebviewView(
                webviewView: vscode.WebviewView,
                context: vscode.WebviewViewResolveContext,
@@ -871,11 +885,55 @@ export function activate(context: vscode.ExtensionContext) {
 	console.log('Congratulations, your extension "owlspotlight" is now active!');
 
 	// サイドバーWebviewViewProvider登録
+	const sidebarProvider = new OwlspotlightSidebarProvider(context);
 	context.subscriptions.push(
 		vscode.window.registerWebviewViewProvider(
 			OwlspotlightSidebarProvider.viewType,
-			new OwlspotlightSidebarProvider(context)
+			sidebarProvider
 		)
+	);
+
+	// エディタ選択範囲から類似コード検索
+	context.subscriptions.push(
+		vscode.commands.registerCommand('owlspotlight.findSimilarToSelection', async () => {
+			const editor = vscode.window.activeTextEditor;
+			if (!editor) {
+				vscode.window.showWarningMessage('OwlSpotlight: Open a file and select some code first.');
+				return;
+			}
+			let text = editor.document.getText(editor.selection).trim();
+			if (!text) {
+				// フォールバック: 現在位置の enclosing symbol を DocumentSymbolProvider から取得
+				try {
+					const symbols = (await vscode.commands.executeCommand(
+						'vscode.executeDocumentSymbolProvider',
+						editor.document.uri
+					)) as vscode.DocumentSymbol[] | undefined;
+					const pos = editor.selection.active;
+					const findEnclosing = (syms: vscode.DocumentSymbol[] | undefined): vscode.DocumentSymbol | undefined => {
+						if (!syms) { return undefined; }
+						for (const s of syms) {
+							if (s.range.contains(pos)) {
+								return findEnclosing(s.children) || s;
+							}
+						}
+						return undefined;
+					};
+					const enclosing = findEnclosing(symbols);
+					if (enclosing) {
+						text = editor.document.getText(enclosing.range).trim();
+					}
+				} catch { /* ignore */ }
+			}
+			if (!text) {
+				vscode.window.showWarningMessage('OwlSpotlight: No selection or enclosing symbol found.');
+				return;
+			}
+			// 言語を拡張子から推定
+			const ext = path.extname(editor.document.fileName).toLowerCase();
+			const lang = ['.py', '.java', '.ts', '.tsx'].includes(ext) ? (ext === '.tsx' ? '.ts' : ext) : undefined;
+			await sidebarProvider.runSearch(text, lang);
+		})
 	);
 
 	// コマンドパレットからの検索コマンドはサイドバーを開く動作に変更

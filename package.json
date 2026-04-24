@@ -77,8 +77,22 @@
       {
         "command": "owlspotlight.removeVenv",
         "title": "OwlSpotlight: Remove Virtual Environment"
+      },
+      {
+        "command": "owlspotlight.findSimilarToSelection",
+        "title": "OwlSpotlight: Find Similar Code to Selection",
+        "icon": "$(search-fuzzy)"
       }
     ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "owlspotlight.findSimilarToSelection",
+          "when": "editorHasSelection",
+          "group": "navigation@99"
+        }
+      ]
+    },
     "configuration": {
       "type": "object",
       "title": "OwlSpotlight Settings",

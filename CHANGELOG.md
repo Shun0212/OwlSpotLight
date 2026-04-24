@@ -21,6 +21,16 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   - `GET /info` — runtime + index status.
   - `POST /symbols` — per-file enriched symbol view (functions / classes / imports) without embedding.
 
+### Added — Roadmap P2: Differentiation
+- **Find similar to selection** (`owlspotlight.findSimilarToSelection`): new editor context-menu command (`editorHasSelection`) that takes the current selection (or the enclosing symbol from `vscode.executeDocumentSymbolProvider`), opens the OwlSpotlight sidebar and runs a search with it as the query.
+- **Hybrid retrieval** (`mode=hybrid|lexical|semantic`): `POST /search_functions_simple` now accepts a `mode` field. Hybrid fuses FAISS (semantic) and BM25 (lexical) rankings via Reciprocal Rank Fusion. New module `owl_core.hybrid` (identifier-aware tokenizer, `BM25Index`, `rrf_fuse`). BM25 is built lazily and cached per indexer instance.
+- **Code-graph search** (`POST /graph/neighbors`): returns callers and callees of a target function (resolved by `file`+`lineno` or by `name`), using the new `owl_core.graph.build_call_graph` over the tree-sitter `calls` field. Supports multi-hop expansion via `depth` and per-direction `limit`.
+- **MCP server** (`python -m owl_mcp`): Model Context Protocol stdio server exposing `search_code`, `get_symbols`, `graph_neighbors`, and `build_index` tools for Claude Desktop / Copilot / Cursor / Continue / any MCP-aware client. Talks to the existing FastAPI server via `OWL_SERVER_URL` (default `http://127.0.0.1:8000`).
+
+### Dependencies
+- Added `rank-bm25>=0.2.2` (hybrid retrieval) and `mcp>=1.0.0` (MCP server).
+- Bumped `fastapi` to `>=0.118` and `starlette` to `>=1.0` to stay compatible with the MCP SDK.
+
 ### Changed
 - `model_server/extractor.py` is now a thin backward-compatible shim delegating to `owl_core.extractors`.
 
