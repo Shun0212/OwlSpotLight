@@ -4,6 +4,235 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as os from 'os';
 import * as cp from 'child_process';
+import * as net from 'net';
+
+const DEFAULT_SERVER_HOST = '127.0.0.1';
+const DEFAULT_SERVER_PORT = 8000;
+const SERVER_PORT_SCAN_LIMIT = 20;
+const CUDA_12_8_TORCH_INDEX = 'https://download.pytorch.org/whl/cu128';
+const CUDA_12_4_TORCH_INDEX = 'https://download.pytorch.org/whl/cu124';
+const CUDA_12_X_MIN_DRIVER = '527.41';
+const CUDA_12_8_RECOMMENDED_DRIVER = '570.0';
+
+let activeServerPort = DEFAULT_SERVER_PORT;
+
+type TorchMode = 'auto' | 'cpu' | 'cuda' | 'skip';
+
+type NvidiaGpuInfo = {
+	available: boolean;
+	driverVersion?: string;
+	gpuName?: string;
+};
+
+type TorchInstallOption = {
+	label: string;
+	description: string;
+	value: TorchMode;
+	torchIndex?: string;
+};
+
+function parseVersion(version: string): number[] {
+	return version
+		.split('.')
+		.map((part) => Number.parseInt(part, 10))
+		.filter((part) => Number.isFinite(part));
+}
+
+function compareVersions(left: string, right: string): number {
+	const leftParts = parseVersion(left);
+	const rightParts = parseVersion(right);
+	const maxLength = Math.max(leftParts.length, rightParts.length);
+
+	for (let index = 0; index < maxLength; index++) {
+		const leftPart = leftParts[index] ?? 0;
+		const rightPart = rightParts[index] ?? 0;
+		if (leftPart > rightPart) {
+			return 1;
+		}
+		if (leftPart < rightPart) {
+			return -1;
+		}
+	}
+
+	return 0;
+}
+
+function detectNvidiaGpuInfo(): NvidiaGpuInfo {
+	try {
+		const output = cp.execFileSync(
+			'nvidia-smi',
+			['--query-gpu=name,driver_version', '--format=csv,noheader'],
+			{ encoding: 'utf8' }
+		).trim();
+		if (!output) {
+			return { available: false };
+		}
+
+		const [firstLine] = output.split(/\r?\n/);
+		const [gpuName, driverVersion] = firstLine.split(',').map((part) => part.trim());
+		if (!driverVersion) {
+			return { available: false };
+		}
+
+		return {
+			available: true,
+			driverVersion,
+			gpuName
+		};
+	} catch {
+		return { available: false };
+	}
+}
+
+function getAutoTorchRecommendation(gpuInfo: NvidiaGpuInfo): { torchIndex?: string; reason: string } {
+	if (!gpuInfo.available || !gpuInfo.driverVersion) {
+		return {
+			reason: 'No NVIDIA GPU detected. Falls back to the CPU build automatically.'
+		};
+	}
+
+	if (compareVersions(gpuInfo.driverVersion, CUDA_12_8_RECOMMENDED_DRIVER) >= 0) {
+		return {
+			torchIndex: CUDA_12_8_TORCH_INDEX,
+			reason: `Detected ${gpuInfo.gpuName ?? 'NVIDIA GPU'} with driver ${gpuInfo.driverVersion}; CUDA 12.8 is recommended.`
+		};
+	}
+
+	if (compareVersions(gpuInfo.driverVersion, CUDA_12_X_MIN_DRIVER) >= 0) {
+		return {
+			torchIndex: CUDA_12_4_TORCH_INDEX,
+			reason: `Detected NVIDIA driver ${gpuInfo.driverVersion}; CUDA 12.4 is the safer automatic choice for this driver range.`
+		};
+	}
+
+	return {
+		reason: `Detected NVIDIA driver ${gpuInfo.driverVersion}, which is older than the supported CUDA 12.x range. Falls back to the CPU build automatically.`
+	};
+}
+
+function getTorchInstallOptions(): { options: TorchInstallOption[]; gpuInfo: NvidiaGpuInfo; autoReason: string } {
+	const gpuInfo = detectNvidiaGpuInfo();
+	const autoRecommendation = getAutoTorchRecommendation(gpuInfo);
+	const options: TorchInstallOption[] = [];
+
+	if (autoRecommendation.torchIndex) {
+		options.push({
+			label: 'GPU (Auto Recommended)',
+			description: autoRecommendation.reason,
+			value: 'auto'
+		});
+		options.push({
+			label: 'CPU',
+			description: 'Install the CPU-only PyTorch build.',
+			value: 'cpu'
+		});
+	} else {
+		options.push({
+			label: 'CPU (Recommended)',
+			description: 'Install the CPU-only PyTorch build.',
+			value: 'cpu'
+		});
+		options.push({
+			label: 'GPU (Auto Detect)',
+			description: autoRecommendation.reason,
+			value: 'auto'
+		});
+	}
+
+	options.push(
+		{
+			label: 'CUDA 12.8 (Manual)',
+			description: 'Install PyTorch from the official CUDA 12.8 wheel index (~3.6GB download).',
+			value: 'cuda',
+			torchIndex: CUDA_12_8_TORCH_INDEX
+		},
+		{
+			label: 'CUDA 12.4 (Manual)',
+			description: 'Install PyTorch from the official CUDA 12.4 wheel index if 12.8 is too new for your driver.',
+			value: 'cuda',
+			torchIndex: CUDA_12_4_TORCH_INDEX
+		},
+		{
+			label: 'Skip PyTorch installation',
+			description: 'Prepare the environment without installing PyTorch.',
+			value: 'skip'
+		}
+	);
+
+	return { options, gpuInfo, autoReason: autoRecommendation.reason };
+}
+
+function getServerBaseUrl(port: number = activeServerPort): string {
+	return `http://${DEFAULT_SERVER_HOST}:${port}`;
+}
+
+function getServerUrl(endpoint: string, port: number = activeServerPort): string {
+	return `${getServerBaseUrl(port)}${endpoint}`;
+}
+
+async function isOwlServerReachable(port: number): Promise<boolean> {
+	try {
+		const res = await fetch(getServerUrl('/index_status', port));
+		return res.ok;
+	} catch {
+		return false;
+	}
+}
+
+async function isPortAvailable(port: number, host: string = DEFAULT_SERVER_HOST): Promise<boolean> {
+	return new Promise((resolve) => {
+		const server = net.createServer();
+		server.unref();
+		server.once('error', () => resolve(false));
+		server.once('listening', () => {
+			server.close(() => resolve(true));
+		});
+		server.listen(port, host);
+	});
+}
+
+async function findRunningServerPort(): Promise<number | undefined> {
+	for (let offset = 0; offset < SERVER_PORT_SCAN_LIMIT; offset++) {
+		const port = DEFAULT_SERVER_PORT + offset;
+		if (await isOwlServerReachable(port)) {
+			return port;
+		}
+	}
+	return undefined;
+}
+
+async function resolveActiveServerPort(): Promise<number | undefined> {
+	if (await isOwlServerReachable(activeServerPort)) {
+		return activeServerPort;
+	}
+
+	const discoveredPort = await findRunningServerPort();
+	if (discoveredPort !== undefined) {
+		activeServerPort = discoveredPort;
+		return discoveredPort;
+	}
+
+	return undefined;
+}
+
+async function findLaunchServerPort(): Promise<{ port: number; reusedExisting: boolean }> {
+	const runningPort = await findRunningServerPort();
+	if (runningPort !== undefined) {
+		activeServerPort = runningPort;
+		return { port: runningPort, reusedExisting: true };
+	}
+
+	for (let offset = 0; offset < SERVER_PORT_SCAN_LIMIT; offset++) {
+		const port = DEFAULT_SERVER_PORT + offset;
+		if (await isPortAvailable(port)) {
+			return { port, reusedExisting: false };
+		}
+	}
+
+	throw new Error(
+		`No available OwlSpotlight server port found in range ${DEFAULT_SERVER_PORT}-${DEFAULT_SERVER_PORT + SERVER_PORT_SCAN_LIMIT - 1}.`
+	);
+}
 
 // Translate Japanese query to English using Gemini API
 async function translateJapaneseToEnglish(text: string): Promise<string> {
@@ -393,8 +622,11 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				// サーバー起動チェック
 				let serverUp = true;
 				try {
-					const statusRes = await fetch('http://localhost:8000/index_status');
-					if (!statusRes.ok) { serverUp = false; }
+					const serverPort = await resolveActiveServerPort();
+					const statusRes = serverPort !== undefined
+						? await fetch(getServerUrl('/index_status', serverPort))
+						: undefined;
+					if (!statusRes?.ok) { serverUp = false; }
 				} catch (e) {
 					serverUp = false;
 				}
@@ -419,7 +651,12 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				}
 				const folderPath = workspaceFolders[0].uri.fsPath;
 				webviewView.webview.postMessage({ type: 'status', message: 'Searching...' });
-				const res = await fetch('http://localhost:8000/search_functions_simple', {
+				const serverPort = await resolveActiveServerPort();
+				if (serverPort === undefined) {
+					webviewView.webview.postMessage({ type: 'error', message: 'Failed to search. Make sure the server is running.' });
+					return;
+				}
+				const res = await fetch(getServerUrl('/search_functions_simple', serverPort), {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
                                         body: JSON.stringify({ directory: folderPath, query, top_k: 10, file_ext: fileExt })
@@ -445,7 +682,12 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                 const fileExt = msg.lang || '.py';
 				webviewView.webview.postMessage({ type: 'status', message: 'Loading class statistics...' });
 				try {
-					const res = await fetch('http://localhost:8000/get_class_stats', {
+					const serverPort = await resolveActiveServerPort();
+					if (serverPort === undefined) {
+						webviewView.webview.postMessage({ type: 'error', message: 'Failed to load statistics. Make sure the server is running.' });
+						return;
+					}
+					const res = await fetch(getServerUrl('/get_class_stats', serverPort), {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
                                                 body: JSON.stringify({ directory: folderPath, query: query, top_k: 50, file_ext: fileExt })
@@ -609,13 +851,13 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				// Webviewからのサーバー起動要求はコマンド経由で実行
 				void vscode.commands.executeCommand('owlspotlight.startServer');
 			}
+			if (msg.command === 'stopServer') {
+				console.log('[OwlSpotlight] stopServer command received from Webview');
+				void vscode.commands.executeCommand('owlspotlight.stopServer');
+			}
 			if (msg.command === 'checkServerStatus') {
-				try {
-					const res = await fetch('http://localhost:8000/index_status');
-					webviewView.webview.postMessage({ type: 'serverStatus', online: res.ok });
-				} catch {
-					webviewView.webview.postMessage({ type: 'serverStatus', online: false });
-				}
+				const serverPort = await resolveActiveServerPort();
+				webviewView.webview.postMessage({ type: 'serverStatus', online: serverPort !== undefined, port: serverPort });
 			}
 			if (msg.command === 'clearCache') {
 				const workspaceFolders = vscode.workspace.workspaceFolders;
@@ -627,7 +869,12 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                 const fileExt = msg.lang || '.py';
                                 webviewView.webview.postMessage({ type: 'status', message: 'Clearing cache and rebuilding index...' });
 				try {
-					const res = await fetch('http://localhost:8000/force_rebuild_index', {
+					const serverPort = await resolveActiveServerPort();
+					if (serverPort === undefined) {
+						webviewView.webview.postMessage({ type: 'error', message: 'Failed to clear cache. Make sure the server is running.' });
+						return;
+					}
+					const res = await fetch(getServerUrl('/force_rebuild_index', serverPort), {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
                                                 body: JSON.stringify({ directory: folderPath, file_ext: fileExt })
@@ -695,6 +942,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
   </div>
   <div class="actions">
     <button id="startServerBtn">Start Server</button>
+    <button id="stopServerBtn">Stop Server</button>
     <button id="clearCacheBtn">Clear Cache</button>
   </div>
   <div class="translation-settings">
@@ -919,7 +1167,16 @@ export function activate(context: vscode.ExtensionContext) {
 	// サーバー起動コマンド（child_processで直接起動 - ターミナル干渉を完全回避）
 	let serverProcess: cp.ChildProcess | undefined;
 	let isServerStarting = false;
+	let isServerStopping = false;
+	let serverStartupPoll: NodeJS.Timeout | undefined;
 	const serverOutputChannel = owlOutputChannel;
+
+	const clearServerStartupPoll = () => {
+		if (serverStartupPoll) {
+			clearInterval(serverStartupPoll);
+			serverStartupPoll = undefined;
+		}
+	};
 
 	const startServerDisposable = vscode.commands.registerCommand('owlspotlight.startServer', async () => {
 		// 二重起動防止
@@ -929,14 +1186,10 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 
 		// サーバーが既に起動中かチェック
-		try {
-			const res = await fetch('http://localhost:8000/index_status');
-			if (res.ok) {
-				vscode.window.showInformationMessage('Server is already running.');
-				return;
-			}
-		} catch {
-			// サーバー未起動 → 続行
+		const existingServerPort = await resolveActiveServerPort();
+		if (existingServerPort !== undefined) {
+			vscode.window.showInformationMessage(`Server is already running on port ${existingServerPort}.`);
+			return;
 		}
 
 		isServerStarting = true;
@@ -987,8 +1240,20 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 
 		try {
+			const launchTarget = await findLaunchServerPort();
+			if (launchTarget.reusedExisting) {
+				isServerStarting = false;
+				vscode.window.showInformationMessage(`Server is already running on port ${launchTarget.port}.`);
+				return;
+			}
+
+			const selectedPort = launchTarget.port;
+			activeServerPort = selectedPort;
+
 			// 既存のプロセスがあれば停止
 			if (serverProcess && !serverProcess.killed) {
+				isServerStopping = true;
+				clearServerStartupPoll();
 				serverProcess.kill();
 				serverProcess = undefined;
 			}
@@ -996,13 +1261,14 @@ export function activate(context: vscode.ExtensionContext) {
 			serverOutputChannel.clear();
 			serverOutputChannel.show(true);
 			serverOutputChannel.appendLine(`[OwlSpotlight] Starting server...`);
+			serverOutputChannel.appendLine(`[OwlSpotlight] Port: ${selectedPort}`);
 			serverOutputChannel.appendLine(`[OwlSpotlight] Python: ${pythonBin}`);
 			serverOutputChannel.appendLine(`[OwlSpotlight] Working dir: ${serverDir}`);
 			serverOutputChannel.appendLine('---');
 
-			serverProcess = cp.spawn(
+			const child = cp.spawn(
 				pythonBin,
-				['-m', 'uvicorn', 'server:app', '--host', '127.0.0.1', '--port', '8000', '--reload'],
+				['-m', 'uvicorn', 'server:app', '--host', DEFAULT_SERVER_HOST, '--port', String(selectedPort)],
 				{
 					cwd: serverDir,
 					env: {
@@ -1015,28 +1281,48 @@ export function activate(context: vscode.ExtensionContext) {
 					}
 				}
 			);
+			serverProcess = child;
 
-			serverProcess.stdout?.on('data', (data: Buffer) => {
+			child.stdout?.on('data', (data: Buffer) => {
 				serverOutputChannel.append(data.toString());
 			});
-			serverProcess.stderr?.on('data', (data: Buffer) => {
+			child.stderr?.on('data', (data: Buffer) => {
 				serverOutputChannel.append(data.toString());
 			});
-			serverProcess.on('close', (code: number | null) => {
-				serverOutputChannel.appendLine(`\n[OwlSpotlight] Server process exited (code: ${code})`);
+			child.on('close', async (code: number | null) => {
+				clearServerStartupPoll();
+				if (serverProcess === child) {
+					serverProcess = undefined;
+				}
 				isServerStarting = false;
-				serverProcess = undefined;
+				const stoppedByUser = isServerStopping;
+				isServerStopping = false;
+				if (stoppedByUser) {
+					serverOutputChannel.appendLine(`\n[OwlSpotlight] Server stopped.`);
+				} else {
+					serverOutputChannel.appendLine(`\n[OwlSpotlight] Server process exited (code: ${code})`);
+				}
+				const runningPort = await findRunningServerPort();
+				activeServerPort = runningPort ?? DEFAULT_SERVER_PORT;
 			});
-			serverProcess.on('error', (err: Error) => {
+			child.on('error', (err: Error) => {
+				clearServerStartupPoll();
 				serverOutputChannel.appendLine(`\n[OwlSpotlight] Failed to start: ${err.message}`);
 				isServerStarting = false;
 				serverProcess = undefined;
+				isServerStopping = false;
+				activeServerPort = DEFAULT_SERVER_PORT;
 				vscode.window.showErrorMessage(`Failed to start server: ${err.message}`);
 			});
 
-			vscode.window.showInformationMessage('OwlSpotlight server starting...');
+			const portMessage = selectedPort === DEFAULT_SERVER_PORT
+				? 'OwlSpotlight server starting...'
+				: `OwlSpotlight server starting on port ${selectedPort}...`;
+			vscode.window.showInformationMessage(portMessage);
 		} catch (err) {
+			clearServerStartupPoll();
 			isServerStarting = false;
+			activeServerPort = DEFAULT_SERVER_PORT;
 			vscode.window.showErrorMessage(`Failed to start server: ${err}`);
 			return;
 		}
@@ -1044,18 +1330,21 @@ export function activate(context: vscode.ExtensionContext) {
 		// サーバー起動完了を待って通知（最大90秒 - モデルロード考慮）
 		const maxRetries = 18;
 		let retries = 0;
-		const checkInterval = setInterval(async () => {
+		clearServerStartupPoll();
+		const startupPort = activeServerPort;
+		serverStartupPoll = setInterval(async () => {
 			retries++;
 			try {
-				const res = await fetch('http://localhost:8000/index_status');
+				const res = await fetch(getServerUrl('/index_status', startupPort));
 				if (res.ok) {
-					clearInterval(checkInterval);
+					clearServerStartupPoll();
+					activeServerPort = startupPort;
 					isServerStarting = false;
-					vscode.window.showInformationMessage('OwlSpotlight server is ready.');
+					vscode.window.showInformationMessage(`OwlSpotlight server is ready on port ${startupPort}.`);
 				}
 			} catch {
 				if (retries >= maxRetries) {
-					clearInterval(checkInterval);
+					clearServerStartupPoll();
 					isServerStarting = false;
 				}
 			}
@@ -1066,13 +1355,19 @@ export function activate(context: vscode.ExtensionContext) {
 	// サーバー停止コマンド
 	const stopServerDisposable = vscode.commands.registerCommand('owlspotlight.stopServer', () => {
 		if (serverProcess && !serverProcess.killed) {
-			serverProcess.kill();
-			serverProcess = undefined;
+			clearServerStartupPoll();
+			isServerStopping = true;
 			isServerStarting = false;
-			serverOutputChannel.appendLine('\n[OwlSpotlight] Server stopped by user.');
-			vscode.window.showInformationMessage('OwlSpotlight server stopped.');
+			serverProcess.kill();
+			vscode.window.showInformationMessage('OwlSpotlight server stopping...');
 		} else {
-			vscode.window.showInformationMessage('No server process is running.');
+			void resolveActiveServerPort().then((serverPort) => {
+				if (serverPort !== undefined) {
+					vscode.window.showInformationMessage(`A server is reachable on port ${serverPort}, but it is not managed by this extension.`);
+					return;
+				}
+				vscode.window.showInformationMessage('No server process is running.');
+			});
 		}
 	});
 	context.subscriptions.push(stopServerDisposable);
@@ -1080,7 +1375,9 @@ export function activate(context: vscode.ExtensionContext) {
 	// 拡張機能終了時にサーバーを停止
 	context.subscriptions.push({
 		dispose: () => {
+			clearServerStartupPoll();
 			if (serverProcess && !serverProcess.killed) {
+				isServerStopping = true;
 				serverProcess.kill();
 			}
 		}
@@ -1119,23 +1416,7 @@ export function activate(context: vscode.ExtensionContext) {
 			return;
 		}
 
-		const torchOptions: { label: string; description: string; value: 'cpu' | 'cuda' | 'skip' }[] = [
-			{
-				label: 'CPU (recommended)',
-				description: 'Install the default CPU build of PyTorch.',
-				value: 'cpu'
-			},
-			{
-				label: 'CUDA 12.8 (GPU)',
-				description: 'Install PyTorch from the official CUDA 12.8 wheel index (~3.6GB download).',
-				value: 'cuda'
-			},
-			{
-				label: 'Skip PyTorch installation',
-				description: 'Prepare the environment without installing PyTorch.',
-				value: 'skip'
-			}
-		];
+		const { options: torchOptions, gpuInfo, autoReason } = getTorchInstallOptions();
 		const torchChoice = await vscode.window.showQuickPick(torchOptions, {
 			placeHolder: 'Select the PyTorch build to install during setup',
 			ignoreFocusOut: true
@@ -1146,6 +1427,9 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 
 		const scriptArgs: string[] = ['--torch-mode', torchChoice.value];
+		if (torchChoice.torchIndex) {
+			scriptArgs.push('--torch-index', torchChoice.torchIndex);
+		}
 		if (autoRemoveVenv) {
 			scriptArgs.push('--force-recreate');
 		}
@@ -1170,6 +1454,12 @@ export function activate(context: vscode.ExtensionContext) {
 		owlOutputChannel.appendLine(`[OwlSpotlight] Working dir: ${serverDir}`);
 		owlOutputChannel.appendLine(`[OwlSpotlight] Python request: ${pythonVersion}`);
 		owlOutputChannel.appendLine(`[OwlSpotlight] PyTorch option: ${torchChoice.label}`);
+		if (gpuInfo.available) {
+			owlOutputChannel.appendLine(`[OwlSpotlight] NVIDIA GPU: ${gpuInfo.gpuName ?? 'Detected'} (driver ${gpuInfo.driverVersion ?? 'unknown'})`);
+		} else {
+			owlOutputChannel.appendLine('[OwlSpotlight] NVIDIA GPU: Not detected via nvidia-smi');
+		}
+		owlOutputChannel.appendLine(`[OwlSpotlight] Auto recommendation: ${autoReason}`);
 		owlOutputChannel.appendLine('---');
 
 		try {
@@ -1337,14 +1627,10 @@ export function activate(context: vscode.ExtensionContext) {
 	const autoStart = vscode.workspace.getConfiguration('owlspotlight').get<boolean>('autoStartServer', false);
 	if (autoStart) {
 		setTimeout(async () => {
-			try {
-				const res = await fetch('http://localhost:8000/index_status');
-				if (res.ok) {
-					console.log('[OwlSpotlight] Server already running, skipping auto-start.');
-					return;
-				}
-			} catch {
-				// サーバー未起動
+			const serverPort = await resolveActiveServerPort();
+			if (serverPort !== undefined) {
+				console.log(`[OwlSpotlight] Server already running on port ${serverPort}, skipping auto-start.`);
+				return;
 			}
 			console.log('[OwlSpotlight] Auto-starting server...');
 			vscode.commands.executeCommand('owlspotlight.startServer');

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -11,7 +12,11 @@ from pathlib import Path
 from typing import Iterable
 
 
-DEFAULT_TORCH_INDEX = "https://download.pytorch.org/whl/cu128"
+CUDA_12_8_TORCH_INDEX = "https://download.pytorch.org/whl/cu128"
+CUDA_12_4_TORCH_INDEX = "https://download.pytorch.org/whl/cu124"
+DEFAULT_TORCH_INDEX = CUDA_12_8_TORCH_INDEX
+CUDA_12_X_MIN_DRIVER = "527.41"
+CUDA_12_8_RECOMMENDED_DRIVER = "570.0"
 
 
 def parse_args() -> argparse.Namespace:
@@ -42,12 +47,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--torch-mode",
-        choices=("cpu", "cuda", "skip"),
+        choices=("auto", "cpu", "cuda", "skip"),
         default="cpu",
         help=(
-            "Choose how PyTorch should be installed: 'cpu' installs the standard build "
-            "defined in requirements/torch-cpu.txt, 'cuda' installs from the official CUDA "
-            "wheel index (defaulting to CUDA 12.8), and 'skip' leaves PyTorch uninstalled."
+            "Choose how PyTorch should be installed: 'auto' detects the best supported build "
+            "for the current NVIDIA driver, 'cpu' installs the standard build defined in "
+            "requirements/torch-cpu.txt, 'cuda' installs from the specified CUDA wheel index, "
+            "and 'skip' leaves PyTorch uninstalled."
         ),
     )
     parser.add_argument(
@@ -84,6 +90,96 @@ def run_command(cmd: Iterable[str], *, env: dict[str, str] | None = None) -> Non
     display_cmd = " ".join(str(part) for part in cmd)
     print(f"\n[bootstrap] $ {display_cmd}")
     subprocess.check_call([str(part) for part in cmd], env=env)
+
+
+def run_best_effort_command(cmd: Iterable[str], *, env: dict[str, str] | None = None) -> None:
+    display_cmd = " ".join(str(part) for part in cmd)
+    print(f"\n[bootstrap] $ {display_cmd}")
+    subprocess.run([str(part) for part in cmd], env=env, check=False)
+
+
+def uninstall_existing_torch_packages(python_env_path: Path) -> None:
+    run_best_effort_command(
+        [
+            "uv",
+            "pip",
+            "uninstall",
+            "--python",
+            str(python_env_path),
+            "torch",
+            "torchvision",
+            "torchaudio",
+        ]
+    )
+
+
+def parse_version(version: str) -> tuple[int, ...]:
+    parts = re.split(r"[^0-9]+", version.strip())
+    return tuple(int(part) for part in parts if part)
+
+
+def compare_versions(left: str, right: str) -> int:
+    left_parts = parse_version(left)
+    right_parts = parse_version(right)
+    max_length = max(len(left_parts), len(right_parts))
+
+    for index in range(max_length):
+        left_part = left_parts[index] if index < len(left_parts) else 0
+        right_part = right_parts[index] if index < len(right_parts) else 0
+        if left_part > right_part:
+            return 1
+        if left_part < right_part:
+            return -1
+
+    return 0
+
+
+def detect_nvidia_driver_version() -> tuple[str | None, str | None]:
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name,driver_version", "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return None, None
+
+    lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    if not lines:
+        return None, None
+
+    first_line = lines[0]
+    parts = [part.strip() for part in first_line.split(",", maxsplit=1)]
+    if len(parts) != 2:
+        return None, None
+
+    gpu_name, driver_version = parts
+    return gpu_name or None, driver_version or None
+
+
+def resolve_auto_torch_installation() -> tuple[str, str | None]:
+    gpu_name, driver_version = detect_nvidia_driver_version()
+
+    if not driver_version:
+        print("[bootstrap] No NVIDIA GPU detected via nvidia-smi; using the CPU PyTorch build.")
+        return "cpu", None
+
+    print(f"[bootstrap] Detected NVIDIA GPU: {gpu_name or 'Unknown'} (driver {driver_version})")
+
+    if compare_versions(driver_version, CUDA_12_8_RECOMMENDED_DRIVER) >= 0:
+        print("[bootstrap] Auto-selected CUDA 12.8 PyTorch wheels for this driver.")
+        return "cuda", CUDA_12_8_TORCH_INDEX
+
+    if compare_versions(driver_version, CUDA_12_X_MIN_DRIVER) >= 0:
+        print("[bootstrap] Auto-selected CUDA 12.4 PyTorch wheels for safer driver compatibility.")
+        return "cuda", CUDA_12_4_TORCH_INDEX
+
+    print(
+        f"[bootstrap] NVIDIA driver {driver_version} is older than the supported CUDA 12.x range; "
+        "using the CPU PyTorch build."
+    )
+    return "cpu", None
 
 
 def ensure_uv() -> str:
@@ -133,14 +229,22 @@ def main() -> None:
         raise SystemExit(f"Requirements file not found: {requirements_path}")
     run_command(["uv", "pip", "install", "--python", str(python_env_path), "-r", str(requirements_path)])
 
-    if args.torch_mode == "cpu":
+    selected_torch_mode = args.torch_mode
+    selected_torch_index = args.torch_index
+
+    if args.torch_mode == "auto":
+        selected_torch_mode, selected_torch_index = resolve_auto_torch_installation()
+
+    if selected_torch_mode == "cpu":
         torch_requirements = (project_root / args.torch_requirements).resolve()
         if not torch_requirements.exists():
             raise SystemExit(f"Torch requirements file not found: {torch_requirements}")
+        uninstall_existing_torch_packages(python_env_path)
         run_command(
             ["uv", "pip", "install", "--python", str(python_env_path), "-r", str(torch_requirements)]
         )
-    elif args.torch_mode == "cuda":
+    elif selected_torch_mode == "cuda":
+        uninstall_existing_torch_packages(python_env_path)
         run_command(
             [
                 "uv",
@@ -148,9 +252,10 @@ def main() -> None:
                 "install",
                 "--python",
                 str(python_env_path),
+                "--reinstall",
                 "torch",
                 "--index-url",
-                args.torch_index,
+                selected_torch_index or DEFAULT_TORCH_INDEX,
             ]
         )
     else:

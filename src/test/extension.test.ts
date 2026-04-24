@@ -23,6 +23,7 @@ suite('Extension Test Suite', () => {
         const cmds = await vscode.commands.getCommands(true);
         const expected = [
             'owlspotlight.startServer',
+            'owlspotlight.stopServer',
             'owlspotlight.searchCode',
             'owlspotlight.setupEnv',
             'owlspotlight.clearCache',

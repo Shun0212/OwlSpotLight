@@ -105,14 +105,14 @@ The `Setup Python Environment` command handles everything automatically with `uv
 cd model_server
 
 # macOS / Linux
-uv run --no-project --python 3.11 bootstrap_env.py --python 3.11 --torch-mode cpu
+uv run --no-project --python 3.11 bootstrap_env.py --python 3.11 --torch-mode auto
 source .venv/bin/activate
 ```
 
 ```powershell
 # Windows PowerShell
 cd model_server
-uv run --no-project --python 3.11 bootstrap_env.py --python 3.11 --torch-mode cpu
+uv run --no-project --python 3.11 bootstrap_env.py --python 3.11 --torch-mode auto
 .\.venv\Scripts\Activate.ps1
 ```
 
@@ -120,8 +120,9 @@ uv run --no-project --python 3.11 bootstrap_env.py --python 3.11 --torch-mode cp
 
 | Flag | Description |
 |------|-------------|
-| `cpu` | CPU only (default) |
-| `cuda` | CUDA 12.8 for NVIDIA GPUs |
+| `auto` | Detect NVIDIA driver support and choose CUDA 12.8 / 12.4 automatically, otherwise fall back to CPU |
+| `cpu` | CPU only |
+| `cuda` | Install from the specified CUDA wheel index (`--torch-index`) |
 | `skip` | Skip PyTorch installation |
 | `--force-recreate` | Rebuild the virtual environment from scratch |
 
@@ -142,7 +143,7 @@ winget install --id=astral-sh.uv -e
 ```bash
 brew install npm uv
 cd model_server
-uv run --no-project --python 3.11 bootstrap_env.py --python 3.11 --torch-mode cpu
+uv run --no-project --python 3.11 bootstrap_env.py --python 3.11 --torch-mode auto
 source .venv/bin/activate
 ```
 
@@ -150,9 +151,11 @@ source .venv/bin/activate
 
 ```powershell
 cd model_server
-uv run --no-project --python 3.11 bootstrap_env.py --python 3.11 --torch-mode cpu
+uv run --no-project --python 3.11 bootstrap_env.py --python 3.11 --torch-mode auto
 .\.venv\Scripts\Activate.ps1
 ```
+
+If you want the extension to pick the safest GPU build automatically, use `--torch-mode auto`. For manual override, use `--torch-mode cuda --torch-index https://download.pytorch.org/whl/cu128` (or `cu124`). The setup script replaces any existing CPU-only PyTorch build before installing the selected build.
 
 ---
 
@@ -163,7 +166,8 @@ uv run --no-project --python 3.11 bootstrap_env.py --python 3.11 --torch-mode cp
 │                   VS Code Extension                     │
 │  Sidebar UI (Webview) <-> Extension Host (TypeScript)   │
 └───────────────────────────┬─────────────────────────────┘
-                            │ HTTP (localhost:8000)
+                            │ HTTP (localhost:8000 by default,
+                            │        next free port if needed)
 ┌───────────────────────────▼─────────────────────────────┐
 │         FastAPI Server (Background Process)              │
 │         Logs -> VS Code OUTPUT panel                     │
@@ -244,7 +248,7 @@ uv run --no-project --python 3.11 bootstrap_env.py --python 3.11 --torch-mode cp
 
 ### API Endpoints
 
-The Python backend exposes these REST endpoints on `localhost:8000`:
+The Python backend exposes these REST endpoints on the OwlSpotlight local server. The extension uses `localhost:8000` by default and automatically falls back to the next free port when needed:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -267,7 +271,8 @@ The Python backend exposes these REST endpoints on `localhost:8000`:
 - Verify `uv` is installed: `uv --version`
 - If needed, install Python 3.11 through uv: `uv python install 3.11`
 - Check if `.venv` exists in `model_server/`. If not, run `OwlSpotlight: Setup Python Environment`.
-- Make sure port 8000 is not in use: `lsof -i :8000`
+- If port 8000 is already in use, OwlSpotlight will try the next free local port automatically.
+- Use `OwlSpotlight: Stop Server` or the sidebar **Stop Server** button to stop a server started by the extension.
 - Check **View → Output → OwlSpotlight Server** for detailed error logs.
 </details>
 
@@ -432,14 +437,14 @@ npm install && npm run compile && npx vsce package
 cd model_server
 
 # macOS / Linux
-uv run --no-project --python 3.11 bootstrap_env.py --python 3.11 --torch-mode cpu
+uv run --no-project --python 3.11 bootstrap_env.py --python 3.11 --torch-mode auto
 source .venv/bin/activate
 ```
 
 ```powershell
 # Windows PowerShell
 cd model_server
-uv run --no-project --python 3.11 bootstrap_env.py --python 3.11 --torch-mode cpu
+uv run --no-project --python 3.11 bootstrap_env.py --python 3.11 --torch-mode auto
 .\.venv\Scripts\Activate.ps1
 ```
 
@@ -447,8 +452,9 @@ uv run --no-project --python 3.11 bootstrap_env.py --python 3.11 --torch-mode cp
 
 | フラグ | 説明 |
 |--------|------|
-| `cpu` | CPU のみ（デフォルト） |
-| `cuda` | NVIDIA GPU 向け CUDA 12.8 ビルド |
+| `auto` | NVIDIA ドライバを見て CUDA 12.8 / 12.4 を自動選択し、使えない場合は CPU にフォールバック |
+| `cpu` | CPU のみ |
+| `cuda` | `--torch-index` で指定した CUDA ホイールをインストール |
 | `skip` | PyTorch のインストールをスキップ |
 | `--force-recreate` | 仮想環境を完全に作り直す |
 
@@ -511,7 +517,8 @@ uv run --no-project --python 3.11 bootstrap_env.py --python 3.11 --torch-mode cp
 - `uv` がインストールされているか確認: `uv --version`
 - 必要なら `uv python install 3.11` で Python を用意
 - `model_server/.venv` が存在しない場合は `OwlSpotlight: Setup Python Environment` を実行
-- ポート 8000 が使用中でないか確認: `lsof -i :8000`
+- ポート 8000 が使用中でも、拡張機能は次に空いているローカルポートへ自動で切り替えます
+- 拡張機能が起動したサーバーは `OwlSpotlight: Stop Server` またはサイドバーの **Stop Server** ボタンで停止できます
 - `表示 → 出力 → OwlSpotlight Server` でエラー詳細を確認
 </details>
 

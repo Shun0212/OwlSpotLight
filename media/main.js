@@ -185,6 +185,12 @@ window.onload = function() {
         vscode.postMessage({ command: 'startServer' });
       };
     }
+        if (document.getElementById('stopServerBtn')) {
+          document.getElementById('stopServerBtn').onclick = () => {
+            console.log('stopServerBtn clicked');
+            vscode.postMessage({ command: 'stopServer' });
+          };
+        }
         if (document.getElementById('clearCacheBtn')) {
           document.getElementById('clearCacheBtn').onclick = () => {
             console.log('clearCacheBtn clicked');
@@ -197,13 +203,13 @@ window.onload = function() {
         function checkServerStatus() {
             vscode.postMessage({ command: 'checkServerStatus' });
         }
-        function setServerStatus(online) {
+        function setServerStatus(online, port) {
             const el = document.getElementById('serverStatus');
             const txt = document.getElementById('serverStatusText');
             if (!el || !txt) return;
             if (online) {
                 el.className = 'server-status online';
-                txt.textContent = 'Online';
+                txt.textContent = port ? `Online (${port})` : 'Online';
             } else {
                 el.className = 'server-status offline';
                 txt.textContent = 'Offline';
@@ -557,7 +563,7 @@ window.onload = function() {
                         }
                 }
                 if (msg.type === 'serverStatus') {
-                        setServerStatus(msg.online);
+                        setServerStatus(msg.online, msg.port);
                 }
                 if (msg.type === 'status') {
                         const statusEl = document.getElementById('status');
