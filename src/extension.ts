@@ -457,6 +457,31 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					webviewView.webview.postMessage({ type: 'graphNeighbors', panelId: msg.panelId, error: `Failed to fetch neighbors: ${e?.message || e}` });
 				}
 			}
+			if (msg.command === 'getUsageCounts') {
+				const workspaceFolders = vscode.workspace.workspaceFolders;
+				if (!workspaceFolders || workspaceFolders.length === 0) { return; }
+				const folderPath = workspaceFolders[0].uri.fsPath;
+				const fileExt = msg.lang || '.py';
+				try {
+					const res = await fetch('http://localhost:8000/graph/usage_counts', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							directory: folderPath,
+							file_ext: fileExt,
+							refs: Array.isArray(msg.refs) ? msg.refs : [],
+						})
+					});
+					if (!res.ok) { return; }
+					const data: any = await res.json();
+					webviewView.webview.postMessage({
+						type: 'usageCounts',
+						counts: Array.isArray(data?.counts) ? data.counts : []
+					});
+				} catch {
+					// silent – usage badges are non-critical
+				}
+			}
 			if (msg.command === 'getClassStats') {
 				const workspaceFolders = vscode.workspace.workspaceFolders;
 				if (!workspaceFolders || workspaceFolders.length === 0) {
@@ -709,7 +734,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 <body>
   <div class="header">
     <div class="header-left">
-      OwlSpotlight
+      <span class="brand-mark"><span class="brand-dot"></span>OwlSpotlight</span>
       <span class="server-status offline" id="serverStatus">
         <span class="status-dot"></span>
         <span id="serverStatusText">Offline</span>
@@ -717,14 +742,14 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
     </div>
     <div class="header-btns">
       <button class="owl-btn" id="repoBtn" title="Open GitHub Repository">
-        <img src="${owlPngUri}" alt="GitHub" style="height:1.4em;width:1.4em;vertical-align:middle;" />
+        <img src="${owlPngUri}" alt="GitHub" />
       </button>
       <button class="help-btn" id="helpBtn" title="Help"><span aria-label="help" role="img">?</span></button>
     </div>
   </div>
   <div class="actions">
-    <button id="startServerBtn">Start Server</button>
-    <button id="clearCacheBtn">Clear Cache</button>
+    <button id="startServerBtn" class="primary">Start Server</button>
+    <button id="clearCacheBtn" class="danger">Clear Cache</button>
   </div>
   <div class="translation-settings">
     <label><input type="checkbox" id="translateToggle"> JP → EN Translation</label>
@@ -748,23 +773,21 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
         ${options}
       </select>
       <input id="searchInput" type="text" placeholder="Describe what the code does..." />
-      <button id="searchBtn">Search</button>
+      <button id="searchBtn" class="primary">Search</button>
     </div>
     <div class="mode-selector" role="tablist" aria-label="Search mode">
-      <button type="button" class="mode-btn active" data-mode="semantic" title="Embedding-only semantic search">🧠 Semantic</button>
-      <button type="button" class="mode-btn" data-mode="hybrid" title="Embedding + BM25 fused via RRF">⚡ Hybrid</button>
-      <button type="button" class="mode-btn" data-mode="lexical" title="Pure BM25 keyword search">🔤 Lexical</button>
+      <button type="button" class="mode-btn active" data-mode="semantic" title="Embedding-only semantic search">Semantic</button>
+      <button type="button" class="mode-btn" data-mode="hybrid" title="Embedding + BM25 fused via RRF">Hybrid</button>
+      <button type="button" class="mode-btn" data-mode="lexical" title="Pure BM25 keyword search">Lexical</button>
     </div>
     <div class="history-bar" id="historyBar" aria-label="Recent queries"></div>
     <div class="status" id="status"></div>
     <div id="translatedQuery" class="translated-query" style="display:none;"></div>
     <div class="results" id="results">
       <div class="empty-state" id="emptyState">
-        <div class="empty-icon">
-          <img src="${owlPngUri}" alt="owl" style="height:2.2em;width:2.2em;opacity:0.5;" />
-        </div>
+        <div class="empty-icon">&lt;/&gt;</div>
         <div class="empty-title">Ready to search</div>
-        <div class="empty-hint">Enter a natural language query to find<br>functions, classes, and methods</div>
+        <div class="empty-hint">Describe what the code does in natural language.<br>Functions, classes, and methods will surface here.</div>
       </div>
     </div>
   </div>
@@ -776,7 +799,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
         <option value="classes">Classes Only</option>
         <option value="functions">Standalone Functions Only</option>
       </select>
-      <button id="loadStatsBtn">Load</button>
+      <button id="loadStatsBtn" class="primary">Load</button>
     </div>
     <div class="status" id="stats-status"></div>
     <div class="stats-results" id="stats-results">
@@ -994,7 +1017,7 @@ export function activate(context: vscode.ExtensionContext) {
 		})
 	);
 
-	// CodeLens: 関数定義に「🦉 Find similar / 🔗 Neighbors」を表示
+	// CodeLens: 関数定義に「Find similar / Callers / Callees」を表示
 	const codeLensProvider: vscode.CodeLensProvider = {
 		async provideCodeLenses(document, _token) {
 			const cfg = vscode.workspace.getConfiguration('owlspotlight');
@@ -1018,16 +1041,16 @@ export function activate(context: vscode.ExtensionContext) {
 					if (FN_KINDS.has(s.kind)) {
 						const headRange = new vscode.Range(s.selectionRange.start, s.selectionRange.end);
 						lenses.push(new vscode.CodeLens(headRange, {
-							title: '🦉 Find similar',
+							title: 'Find similar',
 							command: 'owlspotlight.findSimilarToSelection',
 							arguments: [document.uri, s.range],
 							tooltip: 'Search the index for functions similar to this one',
 						}));
 						lenses.push(new vscode.CodeLens(headRange, {
-							title: '🔗 Callers / Callees',
+							title: 'Callers / Callees',
 							command: 'owlspotlight.showNeighborsAt',
 							arguments: [document.uri, s.selectionRange.start.line + 1, s.name],
-							tooltip: 'Open OwlSpotlight and inspect callers/callees',
+							tooltip: 'Open OwlSpotlight and inspect callers / callees',
 						}));
 					}
 					if (s.children && s.children.length) { walk(s.children); }
@@ -1053,7 +1076,7 @@ export function activate(context: vscode.ExtensionContext) {
 			await vscode.commands.executeCommand('workbench.view.extension.owlspotlight');
 			await vscode.commands.executeCommand('owlspotlight.sidebar.focus');
 			vscode.window.showInformationMessage(
-				`OwlSpotlight: open a recent search result and click "🔗 Callers / Callees" to see neighbors for ${name || path.basename(uri.fsPath) + ':' + lineno}.`
+				`OwlSpotlight: open a recent search result and click "Callers / Callees" to see neighbors for ${name || path.basename(uri.fsPath) + ':' + lineno}.`
 			);
 		})
 	);

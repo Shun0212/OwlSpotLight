@@ -300,7 +300,8 @@ window.onload = function() {
                 };
                 const pinEl = document.createElement('span');
                 pinEl.className = 'chip-pin';
-                pinEl.textContent = item.pinned ? '⭐' : '☆';
+                pinEl.title = item.pinned ? 'Unpin query' : 'Pin query';
+                pinEl.setAttribute('role', 'button');
                 pinEl.onclick = (e) => { e.stopPropagation(); togglePin(item.text); };
                 chip.appendChild(textEl);
                 chip.appendChild(pinEl);
@@ -593,6 +594,9 @@ window.onload = function() {
                 ? '<div class="score-bar-wrapper"><div class="score-bar ' + barClass + '" style="width:' + barWidth + '%;"></div></div>'
                 : '';
 
+            const funcKey = (r.file_path || r.file || '') + ':' + (r.lineno || r.line_number || 1) + ':' + functionName;
+            resultDiv.setAttribute('data-func-key', funcKey);
+
             resultDiv.innerHTML = 
                 '<div class="result-header">' +
                   rankBadge +
@@ -602,9 +606,10 @@ window.onload = function() {
                 '<div class="result-path">' + relPath + ':' + (r.lineno || r.line_number || 1) + '</div>' +
                 '<div class="result-snippet">' + (r.code ? r.code.split('\n').slice(0,2).join(' ') : '') + '</div>' +
                 scoreBar +
+                '<div class="result-meta"></div>' +
                 '<div class="result-actions">' +
-                  '<button type="button" class="result-action-btn" data-action="graph">🔗 Callers / Callees</button>' +
-                  '<button type="button" class="result-action-btn" data-action="similar">🦉 Find similar</button>' +
+                  '<button type="button" class="result-action-btn" data-action="graph">Callers / Callees</button>' +
+                  '<button type="button" class="result-action-btn" data-action="similar">Find similar</button>' +
                 '</div>' +
                 '<div class="result-graph-panel" style="display:none;"></div>';
 
@@ -617,9 +622,11 @@ window.onload = function() {
                     e.stopPropagation();
                     if (panelEl.style.display === 'block') {
                         panelEl.style.display = 'none';
+                        graphBtn.classList.remove('active');
                         return;
                     }
                     panelEl.style.display = 'block';
+                    graphBtn.classList.add('active');
                     panelEl.innerHTML = '<span class="loading-spinner"></span> Loading neighbors…';
                     const lang = document.getElementById('languageSelect')?.value || '.py';
                     // 一意のpanel IDを付けて応答を紐付け
@@ -645,7 +652,7 @@ window.onload = function() {
                     const input = document.getElementById('searchInput');
                     if (input) { input.value = (r.name || r.function_name || '') + ' similar'; }
                     vscode.postMessage({ command: 'search', text, lang, mode: currentMode });
-                    addToHistory('≈ ' + (r.name || r.function_name || 'selected'));
+                    addToHistory('~ ' + (r.name || r.function_name || 'selected'));
                     showLoading('status');
                 };
             }
@@ -754,13 +761,49 @@ window.onload = function() {
             currentResults = Array.isArray(msg.results) ? msg.results : [];
             currentFolderPath = msg.folderPath || currentFolderPath;
             renderResults(currentResults, currentFolderPath || '');
+            // 別ファイルからの使用数をまとめて取得（Python のみ対応）
+            const lang = document.getElementById('languageSelect')?.value || '.py';
+            if (lang === '.py' && currentResults.length) {
+                const refs = currentResults.map(r => ({
+                    file: r.file_path || r.file,
+                    lineno: r.lineno || r.line_number || 1,
+                    name: r.name || r.function_name || '',
+                    class_name: r.class_name || null,
+                }));
+                vscode.postMessage({ command: 'getUsageCounts', lang, refs });
+            }
+        }
+        if (msg.type === 'usageCounts') {
+            const counts = Array.isArray(msg.counts) ? msg.counts : [];
+            counts.forEach((c) => {
+                const key = (c.file || '') + ':' + (c.lineno || 1) + ':' + (c.name || '');
+                const item = document.querySelector('.result-item[data-func-key="' + CSS.escape(key) + '"]');
+                if (!item) return;
+                const meta = item.querySelector('.result-meta');
+                if (!meta) return;
+                const ext = c.external_callers || 0;
+                const total = c.total_callers || 0;
+                let badge;
+                if (ext > 0) {
+                    badge = '<span class="usage-badge used-external" title="Called from ' + ext + ' other file(s)">'
+                        + '<span class="usage-dot"></span>used in ' + ext + ' file' + (ext === 1 ? '' : 's') + '</span>';
+                } else if (total > 0) {
+                    badge = '<span class="usage-badge" title="' + total + ' in-file caller(s)">'
+                        + '<span class="usage-dot"></span>local only · ' + total + '</span>';
+                } else {
+                    badge = '<span class="usage-badge unused" title="No known callers in this workspace">'
+                        + '<span class="usage-dot"></span>no callers</span>';
+                }
+                meta.innerHTML = badge;
+            });
         }
         if (msg.type === 'graphNeighbors') {
             const panel = document.querySelector('.result-graph-panel[data-panel-id="' + msg.panelId + '"]');
             if (!panel) return;
             const buildList = (title, items) => {
-                const header = '<div class="graph-section-title">' + title + ' (' + items.length + ')</div>';
-                if (!items.length) return header + '<div style="opacity:0.6;font-size:0.9em;">none</div>';
+                const header = '<div class="graph-section-title">' + title
+                    + '<span class="count-pill">' + items.length + '</span></div>';
+                if (!items.length) return header + '<div class="graph-empty">none</div>';
                 const lines = items.map(it => {
                     const nm = it.name || it.function_name || '?';
                     const cls = it.class_name ? (it.class_name + '.') : '';
@@ -769,9 +812,11 @@ window.onload = function() {
                     if (rel && currentFolderPath && rel.startsWith(currentFolderPath)) {
                         rel = rel.substring(currentFolderPath.length).replace(/^[\\/]/, '');
                     }
+                    const extTag = it.is_external ? '<span class="graph-ext-tag">ext</span>' : '';
                     return '<div class="graph-item" data-file="' + (f || '') + '" data-line="' + (it.lineno || 1) + '">'
-                        + '<span>' + cls + nm + '</span>'
+                        + '<span class="graph-name">' + cls + nm + '</span>'
                         + '<span class="graph-path">' + rel + ':' + (it.lineno || 1) + '</span>'
+                        + extTag
                         + '</div>';
                 }).join('');
                 return header + lines;
@@ -780,14 +825,14 @@ window.onload = function() {
                 panel.innerHTML = '<span style="color:var(--vscode-errorForeground,#f48771);">' + msg.error + '</span>';
                 return;
             }
-            panel.innerHTML = buildList('⬆ Callers', msg.callers || []) + buildList('⬇ Callees', msg.callees || []);
+            panel.innerHTML = buildList('Callers', msg.callers || []) + buildList('Callees', msg.callees || []);
             panel.querySelectorAll('.graph-item').forEach(el => {
                 el.onclick = () => {
                     vscode.postMessage({
                         command: 'jump',
                         file: el.getAttribute('data-file'),
                         line: el.getAttribute('data-line'),
-                        functionName: el.querySelector('span')?.textContent || '',
+                        functionName: el.querySelector('.graph-name')?.textContent || '',
                         className: null,
                         startLine: parseInt(el.getAttribute('data-line') || '1', 10),
                         endLine: null
