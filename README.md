@@ -41,7 +41,8 @@ OwlSpotlight brings **semantic understanding** to VS Code code navigation. Inste
 | **Smart Highlighting** | Jump to results with color-coded highlighting |
 | **Background Server** | Server runs silently in the background — logs appear in the VS Code OUTPUT panel, no terminal conflicts |
 | **Apple Silicon** | MPS acceleration on M-series chips |
-| **CUDA / GPU** | Full NVIDIA GPU acceleration |
+| **CUDA / GPU** | Auto-detects NVIDIA driver support and installs CUDA 12.8 / 12.4 when possible; otherwise uses the CPU build |
+| **Cross-platform** | Supported on macOS, Linux, and Windows |
 | **Similarity Scores** | Score badges and bars showing result relevance |
 
 ---
@@ -60,6 +61,8 @@ OwlSpotlight brings **semantic understanding** to VS Code code navigation. Inste
 ### Quick Start
 
 **Prerequisites**: `uv` installed on your system (`uv` can manage Python 3.11 automatically)
+
+> OwlSpotlight now installs its Python environment with `uv`. The same `OwlSpotlight: Setup Python Environment` flow works on macOS, Linux, and Windows.
 
 > Queries can be entered in English or Japanese. Japanese text is automatically translated to English when the translation feature is enabled.
 
@@ -95,7 +98,13 @@ Then run `OwlSpotlight: Setup Python Environment` from the Command Palette.
 
 ### Environment Setup
 
-The `Setup Python Environment` command handles everything automatically with `uv` — it creates a `.venv` inside `model_server/` and installs all required packages.
+The `Setup Python Environment` command handles everything automatically with `uv` — it creates a `.venv` inside `model_server/` and installs all required packages on macOS, Linux, and Windows.
+
+With `--torch-mode auto`, OwlSpotlight tries to detect NVIDIA support via `nvidia-smi`, chooses the newest compatible build from the shared CUDA matrix (`cu130` → `cu129` → `cu128` → `cu126` → `cu124` → `cu121` → `cu118`), and falls back to the CPU PyTorch build if no compatible GPU/driver is found or if CUDA runtime validation fails.
+
+On macOS, OwlSpotlight always installs the CPU PyTorch build because CUDA wheels are not supported there. Apple Silicon can still use MPS acceleration at runtime.
+
+The setup flow also searches for `uv` and `nvidia-smi` in `PATH` and common install locations (standalone installer, pipx, cargo, WinGet, Scoop, and typical NVIDIA utility paths) before giving up.
 
 **What changed:** Previously, the server was launched directly inside a VS Code integrated terminal. This caused conflicts with the VS Code Python extension's own venv activation. The server now runs as a **background process**, and all output is routed to the VS Code **OUTPUT panel** (`OwlSpotlight Server` channel). Your terminal stays clean and there are no environment conflicts.
 
@@ -120,11 +129,23 @@ uv run --no-project --python 3.11 bootstrap_env.py --python 3.11 --torch-mode au
 
 | Flag | Description |
 |------|-------------|
-| `auto` | Detect NVIDIA driver support and choose CUDA 12.8 / 12.4 automatically, otherwise fall back to CPU |
+| `auto` | Detect NVIDIA driver support and choose the newest compatible CUDA build from the shared matrix, otherwise fall back to CPU |
 | `cpu` | CPU only |
-| `cuda` | Install from the specified CUDA wheel index (`--torch-index`) |
+| `cuda` | Install a specific CUDA build via `--torch-build` (or a custom wheel index via `--torch-index`) |
 | `skip` | Skip PyTorch installation |
 | `--force-recreate` | Rebuild the virtual environment from scratch |
+
+`--torch-build` matrix:
+
+| Key | CUDA | Wheel index | Linux min driver | Windows min driver | Architectures |
+|-----|------|-------------|------------------|--------------------|---------------|
+| `cu130` | 13.0 | `https://download.pytorch.org/whl/cu130` | `580.0+` | `580.0+` | Linux `x64`, `arm64`; Windows `x64` |
+| `cu129` | 12.9 | `https://download.pytorch.org/whl/cu129` | `575.51.03+` | `576.02+` | Linux `x64`, `arm64`; Windows `x64` |
+| `cu128` | 12.8 | `https://download.pytorch.org/whl/cu128` | `570.26+` | `570.65+` | Linux `x64`, `arm64`; Windows `x64` |
+| `cu126` | 12.6 | `https://download.pytorch.org/whl/cu126` | `560.28.03+` | `560.76+` | Linux `x64`; Windows `x64` |
+| `cu124` | 12.4 | `https://download.pytorch.org/whl/cu124` | `550.54.14+` | `551.61+` | Linux `x64`; Windows `x64` |
+| `cu121` | 12.1 | `https://download.pytorch.org/whl/cu121` | `530.30.02+` | `531.14+` | Linux `x64`; Windows `x64` |
+| `cu118` | 11.8 | `https://download.pytorch.org/whl/cu118` | `520.61.05+` | `520.06+` | Linux `x64`; Windows `x64` |
 
 #### Installing uv
 
@@ -155,7 +176,7 @@ uv run --no-project --python 3.11 bootstrap_env.py --python 3.11 --torch-mode au
 .\.venv\Scripts\Activate.ps1
 ```
 
-If you want the extension to pick the safest GPU build automatically, use `--torch-mode auto`. For manual override, use `--torch-mode cuda --torch-index https://download.pytorch.org/whl/cu128` (or `cu124`). The setup script replaces any existing CPU-only PyTorch build before installing the selected build.
+If you want the extension to pick the safest GPU build automatically, use `--torch-mode auto`. For manual override, use `--torch-mode cuda --torch-build cu126` (or another key from the matrix above). If you need a custom or future wheel index that is not in the shared matrix yet, you can still pass `--torch-mode cuda --torch-index https://download.pytorch.org/whl/cuXXX`. The setup script replaces any existing CPU-only PyTorch build before installing the selected build, and auto mode falls back to CPU if CUDA cannot be used safely.
 
 ---
 
@@ -373,7 +394,8 @@ OwlSpotlightは、VS CodeでPython・Java・TypeScriptコードを**自然言語
 | **スマートハイライト** | 色分けハイライトで結果箇所へジャンプ |
 | **バックグラウンドサーバー** | ターミナル不使用 — ログは VS Code の OUTPUT パネルに表示 |
 | **Apple Silicon** | M 系チップの MPS アクセラレーション最適化 |
-| **CUDA / GPU** | NVIDIA GPU 完全対応 |
+| **CUDA / GPU** | NVIDIA ドライバ対応を自動判定し、可能なら CUDA 12.8 / 12.4 を導入。難しい場合は CPU 版を使用 |
+| **クロスプラットフォーム** | macOS / Linux / Windows に対応 |
 | **類似度スコア** | 結果の関連度をバッジとバーで視覚表示 |
 
 ---
@@ -393,12 +415,14 @@ OwlSpotlightは、VS CodeでPython・Java・TypeScriptコードを**自然言語
 
 **前提条件**: `uv` がインストールされていること（Python 3.11 は `uv` に管理させても構いません）
 
+> OwlSpotlight の Python 環境構築は `uv` ベースになりました。`OwlSpotlight: Setup Python Environment` は macOS / Linux / Windows で同じ流れで利用できます。
+
 > クエリは英語・日本語どちらでも入力可能。自動翻訳を有効にすると、日本語クエリは英語に変換されて検索されます。
 
 #### 方法1: 自動セットアップ（推奨）
 
 1. [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=Shun0212.owlspotlight) から拡張機能をインストール
-2. コマンドパレット（`Cmd+Shift+P`）で実行：
+2. コマンドパレット（`Cmd+Shift+P` / `Ctrl+Shift+P`）で実行：
    ```
    OwlSpotlight: Setup Python Environment
    ```
@@ -427,7 +451,13 @@ npm install && npm run compile && npx vsce package
 
 ### 環境構築について
 
-`Setup Python Environment` コマンドにより、`uv` を使って仮想環境の作成から依存パッケージのインストールまで**すべて自動**で行われます。
+`Setup Python Environment` コマンドにより、`uv` を使って仮想環境の作成から依存パッケージのインストールまで**すべて自動**で行われます。macOS / Linux / Windows のいずれでも同じコマンドでセットアップできます。
+
+`--torch-mode auto` を使うと、OwlSpotlight は `nvidia-smi` で NVIDIA 環境をできる限り自動判定し、共有 CUDA 対応表（`cu130` → `cu129` → `cu128` → `cu126` → `cu124` → `cu121` → `cu118`）から、使える中で最も新しいビルドを選びます。対応 GPU / ドライバが見つからない場合や CUDA の runtime 検証に失敗した場合は、CPU 版の PyTorch に自動でフォールバックします。
+
+macOS では CUDA ホイールが使えないため、常に CPU 版の PyTorch を導入します。Apple Silicon では実行時に MPS アクセラレーションを利用できます。
+
+また、セットアップ時は `uv` や `nvidia-smi` を `PATH` だけでなく、standalone installer / pipx / cargo / WinGet / Scoop / NVIDIA ユーティリティの典型的な配置場所も含めて探索します。
 
 **以前のバージョンからの変更点:** 旧バージョンではサーバーを VS Code の統合ターミナルで直接起動していたため、VS Code の Python 拡張機能が持つ venv 設定と競合することがありました。現在はサーバーを**バックグラウンドプロセス**として起動し、出力はすべて VS Code の **OUTPUT パネル**（`OwlSpotlight Server` チャンネル）に表示されます。ターミナルは一切使用しないため、他の Python 環境との競合が発生しません。
 
@@ -452,11 +482,23 @@ uv run --no-project --python 3.11 bootstrap_env.py --python 3.11 --torch-mode au
 
 | フラグ | 説明 |
 |--------|------|
-| `auto` | NVIDIA ドライバを見て CUDA 12.8 / 12.4 を自動選択し、使えない場合は CPU にフォールバック |
+| `auto` | NVIDIA ドライバを見て共有対応表から最も新しい互換 CUDA ビルドを自動選択し、使えない場合は CPU にフォールバック |
 | `cpu` | CPU のみ |
-| `cuda` | `--torch-index` で指定した CUDA ホイールをインストール |
+| `cuda` | `--torch-build` で特定の CUDA ビルドを指定して導入（または `--torch-index` で任意 index を指定） |
 | `skip` | PyTorch のインストールをスキップ |
 | `--force-recreate` | 仮想環境を完全に作り直す |
+
+`--torch-build` 対応表:
+
+| Key | CUDA | Wheel index | Linux 最低 driver | Windows 最低 driver | 対応アーキテクチャ |
+|-----|------|-------------|--------------------|----------------------|--------------------|
+| `cu130` | 13.0 | `https://download.pytorch.org/whl/cu130` | `580.0+` | `580.0+` | Linux `x64`, `arm64`; Windows `x64` |
+| `cu129` | 12.9 | `https://download.pytorch.org/whl/cu129` | `575.51.03+` | `576.02+` | Linux `x64`, `arm64`; Windows `x64` |
+| `cu128` | 12.8 | `https://download.pytorch.org/whl/cu128` | `570.26+` | `570.65+` | Linux `x64`, `arm64`; Windows `x64` |
+| `cu126` | 12.6 | `https://download.pytorch.org/whl/cu126` | `560.28.03+` | `560.76+` | Linux `x64`; Windows `x64` |
+| `cu124` | 12.4 | `https://download.pytorch.org/whl/cu124` | `550.54.14+` | `551.61+` | Linux `x64`; Windows `x64` |
+| `cu121` | 12.1 | `https://download.pytorch.org/whl/cu121` | `530.30.02+` | `531.14+` | Linux `x64`; Windows `x64` |
+| `cu118` | 11.8 | `https://download.pytorch.org/whl/cu118` | `520.61.05+` | `520.06+` | Linux `x64`; Windows `x64` |
 
 ---
 

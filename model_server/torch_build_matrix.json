@@ -1,0 +1,144 @@
+{
+  "schemaVersion": 1,
+  "autoSelectionOrder": [
+    "cu130",
+    "cu129",
+    "cu128",
+    "cu126",
+    "cu124",
+    "cu121",
+    "cu118"
+  ],
+  "builds": [
+    {
+      "key": "cu130",
+      "label": "CUDA 13.0",
+      "cudaVersion": "13.0",
+      "torchIndex": "https://download.pytorch.org/whl/cu130",
+      "driverRequirements": {
+        "linux": "580.0",
+        "win32": "580.0"
+      },
+      "supportedArchitectures": {
+        "linux": [
+          "x64",
+          "arm64"
+        ],
+        "win32": [
+          "x64"
+        ]
+      },
+      "notes": "Uses the CUDA 13.x minor-compatibility driver floor."
+    },
+    {
+      "key": "cu129",
+      "label": "CUDA 12.9",
+      "cudaVersion": "12.9",
+      "torchIndex": "https://download.pytorch.org/whl/cu129",
+      "driverRequirements": {
+        "linux": "575.51.03",
+        "win32": "576.02"
+      },
+      "supportedArchitectures": {
+        "linux": [
+          "x64",
+          "arm64"
+        ],
+        "win32": [
+          "x64"
+        ]
+      }
+    },
+    {
+      "key": "cu128",
+      "label": "CUDA 12.8",
+      "cudaVersion": "12.8",
+      "torchIndex": "https://download.pytorch.org/whl/cu128",
+      "driverRequirements": {
+        "linux": "570.26",
+        "win32": "570.65"
+      },
+      "supportedArchitectures": {
+        "linux": [
+          "x64",
+          "arm64"
+        ],
+        "win32": [
+          "x64"
+        ]
+      }
+    },
+    {
+      "key": "cu126",
+      "label": "CUDA 12.6",
+      "cudaVersion": "12.6",
+      "torchIndex": "https://download.pytorch.org/whl/cu126",
+      "driverRequirements": {
+        "linux": "560.28.03",
+        "win32": "560.76"
+      },
+      "supportedArchitectures": {
+        "linux": [
+          "x64"
+        ],
+        "win32": [
+          "x64"
+        ]
+      }
+    },
+    {
+      "key": "cu124",
+      "label": "CUDA 12.4",
+      "cudaVersion": "12.4",
+      "torchIndex": "https://download.pytorch.org/whl/cu124",
+      "driverRequirements": {
+        "linux": "550.54.14",
+        "win32": "551.61"
+      },
+      "supportedArchitectures": {
+        "linux": [
+          "x64"
+        ],
+        "win32": [
+          "x64"
+        ]
+      }
+    },
+    {
+      "key": "cu121",
+      "label": "CUDA 12.1",
+      "cudaVersion": "12.1",
+      "torchIndex": "https://download.pytorch.org/whl/cu121",
+      "driverRequirements": {
+        "linux": "530.30.02",
+        "win32": "531.14"
+      },
+      "supportedArchitectures": {
+        "linux": [
+          "x64"
+        ],
+        "win32": [
+          "x64"
+        ]
+      }
+    },
+    {
+      "key": "cu118",
+      "label": "CUDA 11.8",
+      "cudaVersion": "11.8",
+      "torchIndex": "https://download.pytorch.org/whl/cu118",
+      "driverRequirements": {
+        "linux": "520.61.05",
+        "win32": "520.06"
+      },
+      "supportedArchitectures": {
+        "linux": [
+          "x64"
+        ],
+        "win32": [
+          "x64"
+        ]
+      }
+    }
+  ]
+}

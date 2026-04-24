@@ -27,11 +27,20 @@ def get_device():
     else:
         return "cpu"
 
+
+def get_device_fallback_order():
+    """優先デバイスからCPUまでのフォールバック順を返す"""
+    primary_device = get_device()
+    devices = [primary_device]
+    if primary_device != "cpu":
+        devices.append("cpu")
+    return devices
+
 def cleanup_memory():
     """メモリクリーンアップを実行"""
     if torch.backends.mps.is_available():
         torch.mps.empty_cache()
-    elif torch.cuda.is_available():
+    if torch.cuda.is_available():
         torch.cuda.empty_cache()
     gc.collect()
 
@@ -44,50 +53,35 @@ def load_model_with_device_fallback():
     
     print(f"[model] Loading model: {model_name}")
     
-    try:
-        # まずはモデルを読み込み
-        model = SentenceTransformer(model_name)
-        
-        # デバイスを決定して移動
-        device = get_device()
-        print(f"[model] Attempting to use device: {device}")
-        
-        # MPSデバイスの場合、torch.compileを無効化してwarningを防ぐ
-        if device == "mps":
-            # SentenceTransformerの内部でtorch.compileが使用されないよう設定
-            if hasattr(model, '_modules'):
-                for module in model._modules.values():
-                    if hasattr(module, '_is_compiled'):
-                        module._is_compiled = False
-        
-        model.to(device)
-        model_device = device
-        print(f"[model] Model loaded successfully on {device}")
-        emb_dim = model.get_sentence_embedding_dimension()
-        print(f"[model] Embedding dimension: {emb_dim}")
-        
-    except Exception as e:
-        print(f"[model] Failed to load model on {device}: {e}")
-        
-        # MPSで失敗した場合はCPUにフォールバック
-        if device == "mps":
-            print("[model] Falling back to CPU...")
-            try:
-                if model is not None:
-                    model.to("cpu")
-                else:
-                    model = SentenceTransformer(model_name)
-                    model.to("cpu")
-                model_device = "cpu"
-                cleanup_memory()
-                print("[model] Model loaded successfully on CPU")
-            except Exception as cpu_e:
-                print(f"[model] Failed to load model on CPU: {cpu_e}")
-                raise cpu_e
-        else:
-            raise e
-    
-    return model
+    model = SentenceTransformer(model_name)
+
+    # MPSデバイスの場合、torch.compileを無効化してwarningを防ぐ
+    if hasattr(model, '_modules'):
+        for module in model._modules.values():
+            if hasattr(module, '_is_compiled'):
+                module._is_compiled = False
+
+    last_error = None
+    for device in get_device_fallback_order():
+        try:
+            print(f"[model] Attempting to use device: {device}")
+            model.to(device)
+            model_device = device
+            print(f"[model] Model loaded successfully on {device}")
+            emb_dim = model.get_sentence_embedding_dimension()
+            print(f"[model] Embedding dimension: {emb_dim}")
+            return model
+        except Exception as e:
+            last_error = e
+            print(f"[model] Failed to load model on {device}: {e}")
+            cleanup_memory()
+            if device != "cpu":
+                print("[model] Falling back to CPU...")
+
+    if last_error is not None:
+        raise last_error
+
+    raise RuntimeError("Failed to load the model on any device")
 
 def get_model():
     """モデルインスタンスを取得（遅延読み込み）"""
@@ -99,6 +93,7 @@ def encode_code(codes: list[str], batch_size: int = 8, max_retries: int = 3, sho
     """コードをエンコードし、メモリエラー時は自動的にバッチサイズを調整"""
     from tqdm import tqdm
     import sys
+    global model_device
 
     current_model = get_model()
 
@@ -130,9 +125,9 @@ def encode_code(codes: list[str], batch_size: int = 8, max_retries: int = 3, sho
                     batch_size = max(1, batch_size // 2)
                     print(f"[model] Reducing batch size to {batch_size} and retrying...")
                     
-                    # 最後の試行でMPSが失敗した場合、CPUにフォールバック
-                    if attempt == max_retries - 2 and model_device == "mps":
-                        print("[model] Falling back to CPU due to persistent MPS memory issues...")
+                    # 最後の試行でGPU系デバイスが失敗した場合、CPUにフォールバック
+                    if attempt == max_retries - 2 and model_device in ("mps", "cuda"):
+                        print(f"[model] Falling back to CPU due to persistent {model_device.upper()} memory issues...")
                         current_model.to("cpu")
                         model_device = "cpu"
                         cleanup_memory()

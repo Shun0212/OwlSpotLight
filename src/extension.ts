@@ -10,19 +10,34 @@ import * as fs from 'fs';
 const DEFAULT_SERVER_HOST = '127.0.0.1';
 const DEFAULT_SERVER_PORT = 8000;
 const SERVER_PORT_SCAN_LIMIT = 20;
-const CUDA_12_8_TORCH_INDEX = 'https://download.pytorch.org/whl/cu128';
-const CUDA_12_4_TORCH_INDEX = 'https://download.pytorch.org/whl/cu124';
-const CUDA_12_X_MIN_DRIVER = '527.41';
-const CUDA_12_8_RECOMMENDED_DRIVER = '570.0';
+const TORCH_BUILD_MATRIX_PATH = path.resolve(__dirname, '..', 'model_server', 'torch_build_matrix.json');
 
 let activeServerPort = DEFAULT_SERVER_PORT;
 
 type TorchMode = 'auto' | 'cpu' | 'cuda' | 'skip';
+type TorchPlatformKey = 'linux' | 'win32';
 
 type NvidiaGpuInfo = {
 	available: boolean;
 	driverVersion?: string;
 	gpuName?: string;
+	detectionSource?: string;
+};
+
+type TorchBuildSpec = {
+	key: string;
+	label: string;
+	cudaVersion: string;
+	torchIndex: string;
+	driverRequirements: Partial<Record<TorchPlatformKey, string>>;
+	supportedArchitectures: Partial<Record<TorchPlatformKey, string[]>>;
+	notes?: string;
+};
+
+type TorchBuildMatrix = {
+	schemaVersion: number;
+	autoSelectionOrder: string[];
+	builds: TorchBuildSpec[];
 };
 
 type TorchInstallOption = {
@@ -30,11 +45,12 @@ type TorchInstallOption = {
 	description: string;
 	value: TorchMode;
 	torchIndex?: string;
+	torchBuildKey?: string;
 };
 
 function parseVersion(version: string): number[] {
 	return version
-		.split('.')
+		.split(/[^0-9]+/)
 		.map((part) => Number.parseInt(part, 10))
 		.filter((part) => Number.isFinite(part));
 }
@@ -58,10 +74,284 @@ function compareVersions(left: string, right: string): number {
 	return 0;
 }
 
+function loadTorchBuildMatrix(): TorchBuildMatrix {
+	const raw = fs.readFileSync(TORCH_BUILD_MATRIX_PATH, 'utf8');
+	const parsed = JSON.parse(raw) as Partial<TorchBuildMatrix>;
+	if (!Array.isArray(parsed.builds) || !Array.isArray(parsed.autoSelectionOrder)) {
+		throw new Error(`Invalid torch build matrix: ${TORCH_BUILD_MATRIX_PATH}`);
+	}
+
+	return {
+		schemaVersion: typeof parsed.schemaVersion === 'number' ? parsed.schemaVersion : 1,
+		autoSelectionOrder: parsed.autoSelectionOrder,
+		builds: parsed.builds as TorchBuildSpec[]
+	};
+}
+
+function normalizeNodeArch(arch: string): string {
+	switch (arch) {
+		case 'x64':
+			return 'x64';
+		case 'arm64':
+			return 'arm64';
+		default:
+			return arch;
+	}
+}
+
+function getCurrentTorchPlatform(): TorchPlatformKey | undefined {
+	const platform = os.platform();
+	if (platform === 'linux' || platform === 'win32') {
+		return platform;
+	}
+
+	return undefined;
+}
+
+function buildSupportedOnCurrentPlatform(build: TorchBuildSpec, platformKey: TorchPlatformKey, architecture: string): boolean {
+	const supportedArchitectures = build.supportedArchitectures[platformKey];
+	return Array.isArray(supportedArchitectures) && supportedArchitectures.includes(architecture);
+}
+
+function getAvailableTorchBuildsForCurrentPlatform(matrix: TorchBuildMatrix): TorchBuildSpec[] {
+	const platformKey = getCurrentTorchPlatform();
+	if (!platformKey) {
+		return [];
+	}
+
+	const architecture = normalizeNodeArch(os.arch());
+	return matrix.builds.filter((build) => buildSupportedOnCurrentPlatform(build, platformKey, architecture));
+}
+
+function getDriverRequirement(build: TorchBuildSpec, platformKey: TorchPlatformKey): string | undefined {
+	return build.driverRequirements[platformKey];
+}
+
+function buildTorchBuildMap(matrix: TorchBuildMatrix): Map<string, TorchBuildSpec> {
+	return new Map(matrix.builds.map((build) => [build.key, build]));
+}
+
+function getOrderedAvailableTorchBuilds(matrix: TorchBuildMatrix): TorchBuildSpec[] {
+	const availableBuilds = getAvailableTorchBuildsForCurrentPlatform(matrix);
+	const availableBuildMap = new Map(availableBuilds.map((build) => [build.key, build]));
+	const orderedBuilds: TorchBuildSpec[] = [];
+
+	for (const buildKey of matrix.autoSelectionOrder) {
+		const build = availableBuildMap.get(buildKey);
+		if (build) {
+			orderedBuilds.push(build);
+			availableBuildMap.delete(buildKey);
+		}
+	}
+
+	for (const build of availableBuildMap.values()) {
+		orderedBuilds.push(build);
+	}
+
+	return orderedBuilds;
+}
+
+function getExecutableCandidateFromDir(directory: string | undefined, executableName: string): string | undefined {
+	if (!directory) {
+		return undefined;
+	}
+
+	const trimmed = directory.trim();
+	if (!trimmed) {
+		return undefined;
+	}
+
+	if (path.basename(trimmed).toLowerCase() === executableName.toLowerCase()) {
+		return trimmed;
+	}
+
+	return path.join(trimmed, executableName);
+}
+
+function getXdgExecutableCandidates(executableName: string): string[] {
+	const candidates: string[] = [];
+	const xdgBinHome = process.env.XDG_BIN_HOME;
+	if (xdgBinHome) {
+		candidates.push(path.join(xdgBinHome, executableName));
+	}
+
+	const xdgDataHome = process.env.XDG_DATA_HOME;
+	if (xdgDataHome) {
+		candidates.push(path.resolve(xdgDataHome, '..', 'bin', executableName));
+	}
+
+	return candidates;
+}
+
+function getWindowsPythonScriptExecutableCandidates(executableName: string): string[] {
+	const baseDirs = [
+		process.env.APPDATA ? path.join(process.env.APPDATA, 'Python') : undefined,
+		process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Programs', 'Python') : undefined
+	].filter((value): value is string => Boolean(value));
+
+	const candidates: string[] = [];
+	for (const baseDir of baseDirs) {
+		try {
+			const entries = fs.readdirSync(baseDir, { withFileTypes: true });
+			for (const entry of entries) {
+				if (!entry.isDirectory()) {
+					continue;
+				}
+
+				if (!/^Python\d+/i.test(entry.name)) {
+					continue;
+				}
+
+				candidates.push(path.join(baseDir, entry.name, 'Scripts', executableName));
+			}
+		} catch {
+			// Ignore unreadable directories and continue searching other install patterns.
+		}
+	}
+
+	return candidates;
+}
+
+function getUvCandidatePaths(platform: NodeJS.Platform): string[] {
+	const homeDir = os.homedir();
+	const executableName = platform === 'win32' ? 'uv.exe' : 'uv';
+	const candidates: string[] = [
+		...getXdgExecutableCandidates(executableName)
+	];
+
+	for (const envDir of [
+		process.env.UV_INSTALL_DIR,
+		process.env.UV_UNMANAGED_INSTALL,
+		process.env.PIPX_BIN_DIR
+	]) {
+		const candidate = getExecutableCandidateFromDir(envDir, executableName);
+		if (candidate) {
+			candidates.push(candidate);
+		}
+	}
+
+	if (platform === 'win32') {
+		candidates.push(
+			path.join(homeDir, '.local', 'bin', executableName),
+			path.join(homeDir, '.cargo', 'bin', executableName),
+			path.join(homeDir, 'AppData', 'Local', 'Programs', 'uv', executableName),
+			path.join(homeDir, 'scoop', 'shims', executableName)
+		);
+
+		const localAppData = process.env.LOCALAPPDATA;
+		if (localAppData) {
+			candidates.push(
+				path.join(localAppData, 'Microsoft', 'WinGet', 'Links', executableName),
+				path.join(
+					localAppData,
+					'Microsoft',
+					'WinGet',
+					'Packages',
+					'astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe',
+					executableName
+				)
+			);
+		}
+
+		candidates.push(...getWindowsPythonScriptExecutableCandidates(executableName));
+	} else {
+		candidates.push(
+			path.join(homeDir, '.local', 'bin', executableName),
+			path.join(homeDir, '.cargo', 'bin', executableName),
+			path.join('/opt/homebrew', 'bin', executableName),
+			path.join('/usr', 'local', 'bin', executableName),
+			path.join('/opt', 'local', 'bin', executableName),
+			path.join('/usr', 'bin', executableName)
+		);
+	}
+
+	return Array.from(new Set(candidates));
+}
+
+function isExecutableUsable(executablePath: string, args: string[]): boolean {
+	try {
+		cp.execFileSync(executablePath, args, { stdio: 'ignore' });
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+function resolveUvExecutable(): string | undefined {
+	if (isExecutableUsable('uv', ['--version'])) {
+		return 'uv';
+	}
+
+	for (const candidate of getUvCandidatePaths(os.platform())) {
+		if (!fs.existsSync(candidate)) {
+			continue;
+		}
+
+		if (isExecutableUsable(candidate, ['--version'])) {
+			return candidate;
+		}
+	}
+
+	return undefined;
+}
+
+function getNvidiaSmiCandidatePaths(platform: NodeJS.Platform): string[] {
+	const candidates: string[] = [];
+	if (platform === 'win32') {
+		for (const programFilesDir of [
+			process.env.PROGRAMFILES,
+			process.env.ProgramW6432,
+			process.env['ProgramFiles(x86)']
+		]) {
+			if (!programFilesDir) {
+				continue;
+			}
+
+			candidates.push(path.join(programFilesDir, 'NVIDIA Corporation', 'NVSMI', 'nvidia-smi.exe'));
+		}
+
+		if (process.env.SYSTEMROOT) {
+			candidates.push(path.join(process.env.SYSTEMROOT, 'System32', 'nvidia-smi.exe'));
+		}
+	} else {
+		candidates.push(
+			path.join('/usr', 'bin', 'nvidia-smi'),
+			path.join('/usr', 'local', 'bin', 'nvidia-smi'),
+			path.join('/opt', 'bin', 'nvidia-smi')
+		);
+	}
+
+	return Array.from(new Set(candidates));
+}
+
+function resolveNvidiaSmiExecutable(): string | undefined {
+	const executableName = os.platform() === 'win32' ? 'nvidia-smi.exe' : 'nvidia-smi';
+	if (isExecutableUsable(executableName, ['--help'])) {
+		return executableName;
+	}
+
+	for (const candidate of getNvidiaSmiCandidatePaths(os.platform())) {
+		if (!fs.existsSync(candidate)) {
+			continue;
+		}
+
+		if (isExecutableUsable(candidate, ['--help'])) {
+			return candidate;
+		}
+	}
+
+	return undefined;
+}
+
 function detectNvidiaGpuInfo(): NvidiaGpuInfo {
+	const nvidiaSmiExecutable = resolveNvidiaSmiExecutable();
+	if (!nvidiaSmiExecutable) {
+		return { available: false };
+	}
+
 	try {
 		const output = cp.execFileSync(
-			'nvidia-smi',
+			nvidiaSmiExecutable,
 			['--query-gpu=name,driver_version', '--format=csv,noheader'],
 			{ encoding: 'utf8' }
 		).trim();
@@ -78,95 +368,110 @@ function detectNvidiaGpuInfo(): NvidiaGpuInfo {
 		return {
 			available: true,
 			driverVersion,
-			gpuName
+			gpuName,
+			detectionSource: nvidiaSmiExecutable
 		};
 	} catch {
 		return { available: false };
 	}
 }
 
-function getUvCandidatePaths(platform: NodeJS.Platform): string[] {
-	const homeDir = os.homedir();
-	const candidates: string[] = [];
-
-	if (platform === 'win32') {
-		candidates.push(
-			path.join(homeDir, '.local', 'bin', 'uv.exe'),
-			path.join(homeDir, 'AppData', 'Local', 'Programs', 'uv', 'uv.exe')
-		);
-
-		const localAppData = process.env.LOCALAPPDATA;
-		if (localAppData) {
-			candidates.push(
-				path.join(localAppData, 'Microsoft', 'WinGet', 'Packages', 'astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe', 'uv.exe')
-			);
-		}
-	} else {
-		candidates.push(
-			path.join(homeDir, '.local', 'bin', 'uv'),
-			path.join(homeDir, '.cargo', 'bin', 'uv')
-		);
+function getAutoTorchRecommendation(
+	matrix: TorchBuildMatrix,
+	gpuInfo: NvidiaGpuInfo
+): { build?: TorchBuildSpec; reason: string } {
+	if (os.platform() === 'darwin') {
+		return {
+			reason: 'CUDA PyTorch wheels are not supported on macOS. Installs the CPU build; Apple Silicon can still use MPS acceleration at runtime.'
+		};
 	}
 
-	return candidates;
-}
-
-function resolveUvExecutable(): string | undefined {
-	try {
-		cp.execFileSync('uv', ['--version'], { stdio: 'ignore' });
-		return 'uv';
-	} catch {
-		for (const candidate of getUvCandidatePaths(os.platform())) {
-			if (!fs.existsSync(candidate)) {
-				continue;
-			}
-
-			try {
-				cp.execFileSync(candidate, ['--version'], { stdio: 'ignore' });
-				return candidate;
-			} catch {
-				// Ignore unusable candidate and continue searching.
-			}
-		}
+	const platformKey = getCurrentTorchPlatform();
+	const architecture = normalizeNodeArch(os.arch());
+	if (!platformKey) {
+		return {
+			reason: `No CUDA PyTorch builds are configured for platform ${os.platform()}. Falls back to the CPU build automatically.`
+		};
 	}
 
-	return undefined;
-}
+	const orderedBuilds = getOrderedAvailableTorchBuilds(matrix);
+	if (orderedBuilds.length === 0) {
+		return {
+			reason: `No CUDA PyTorch builds are configured for ${platformKey}/${architecture}. Falls back to the CPU build automatically.`
+		};
+	}
 
-function getAutoTorchRecommendation(gpuInfo: NvidiaGpuInfo): { torchIndex?: string; reason: string } {
 	if (!gpuInfo.available || !gpuInfo.driverVersion) {
 		return {
-			reason: 'No NVIDIA GPU detected. Falls back to the CPU build automatically.'
+			reason: gpuInfo.available
+				? `Detected ${gpuInfo.gpuName ?? 'an NVIDIA GPU'}, but could not determine a compatible driver version. Falls back to the CPU build automatically.`
+				: 'No NVIDIA GPU detected. Falls back to the CPU build automatically.'
 		};
 	}
 
-	if (compareVersions(gpuInfo.driverVersion, CUDA_12_8_RECOMMENDED_DRIVER) >= 0) {
-		return {
-			torchIndex: CUDA_12_8_TORCH_INDEX,
-			reason: `Detected ${gpuInfo.gpuName ?? 'NVIDIA GPU'} with driver ${gpuInfo.driverVersion}; CUDA 12.8 is recommended.`
-		};
+	for (const build of orderedBuilds) {
+		const minDriver = getDriverRequirement(build, platformKey);
+		if (minDriver && compareVersions(gpuInfo.driverVersion, minDriver) >= 0) {
+			return {
+				build,
+				reason: `Detected ${gpuInfo.gpuName ?? 'NVIDIA GPU'} with driver ${gpuInfo.driverVersion}; ${build.label} is the newest supported build for this driver on ${platformKey}/${architecture}.`
+			};
+		}
 	}
 
-	if (compareVersions(gpuInfo.driverVersion, CUDA_12_X_MIN_DRIVER) >= 0) {
-		return {
-			torchIndex: CUDA_12_4_TORCH_INDEX,
-			reason: `Detected NVIDIA driver ${gpuInfo.driverVersion}; CUDA 12.4 is the safer automatic choice for this driver range.`
-		};
-	}
-
+	const oldestBuild = orderedBuilds[orderedBuilds.length - 1];
+	const minDriver = oldestBuild ? getDriverRequirement(oldestBuild, platformKey) : undefined;
 	return {
-		reason: `Detected NVIDIA driver ${gpuInfo.driverVersion}, which is older than the supported CUDA 12.x range. Falls back to the CPU build automatically.`
+		reason: `Detected NVIDIA driver ${gpuInfo.driverVersion}, which is older than the supported OwlSpotlight CUDA matrix${minDriver ? ` (${oldestBuild.label} requires >= ${minDriver})` : ''}. Falls back to the CPU build automatically.`
 	};
 }
 
 function getTorchInstallOptions(): { options: TorchInstallOption[]; gpuInfo: NvidiaGpuInfo; autoReason: string } {
+	const matrix = loadTorchBuildMatrix();
+	const platform = os.platform();
 	const gpuInfo = detectNvidiaGpuInfo();
-	const autoRecommendation = getAutoTorchRecommendation(gpuInfo);
+	const autoRecommendation = getAutoTorchRecommendation(matrix, gpuInfo);
 	const options: TorchInstallOption[] = [];
 
-	if (autoRecommendation.torchIndex) {
+	if (platform === 'darwin') {
+		options.push(
+			{
+				label: 'CPU / MPS (Recommended)',
+				description: 'Install the CPU PyTorch build. Apple Silicon can still use MPS acceleration at runtime.',
+				value: 'cpu'
+			},
+			{
+				label: 'Skip PyTorch installation',
+				description: 'Prepare the environment without installing PyTorch.',
+				value: 'skip'
+			}
+		);
+
+		return { options, gpuInfo, autoReason: autoRecommendation.reason };
+	}
+
+	const platformKey = getCurrentTorchPlatform();
+	const orderedBuilds = getOrderedAvailableTorchBuilds(matrix);
+	if (!platformKey || orderedBuilds.length === 0) {
+		options.push(
+			{
+				label: 'CPU (Recommended)',
+				description: 'Install the CPU-only PyTorch build.',
+				value: 'cpu'
+			},
+			{
+				label: 'Skip PyTorch installation',
+				description: 'Prepare the environment without installing PyTorch.',
+				value: 'skip'
+			}
+		);
+
+		return { options, gpuInfo, autoReason: autoRecommendation.reason };
+	}
+
+	if (autoRecommendation.build) {
 		options.push({
-			label: 'GPU (Auto Recommended)',
+			label: `GPU (Auto Recommended: ${autoRecommendation.build.label})`,
 			description: autoRecommendation.reason,
 			value: 'auto'
 		});
@@ -188,25 +493,22 @@ function getTorchInstallOptions(): { options: TorchInstallOption[]; gpuInfo: Nvi
 		});
 	}
 
-	options.push(
-		{
-			label: 'CUDA 12.8 (Manual)',
-			description: 'Install PyTorch from the official CUDA 12.8 wheel index (~3.6GB download).',
+	for (const build of orderedBuilds) {
+		const minDriver = getDriverRequirement(build, platformKey);
+		options.push({
+			label: `${build.label} (Manual)`,
+			description: `Install PyTorch from the official ${build.key} wheel index${minDriver ? ` (min driver ${minDriver} on ${platformKey})` : ''}.`,
 			value: 'cuda',
-			torchIndex: CUDA_12_8_TORCH_INDEX
-		},
-		{
-			label: 'CUDA 12.4 (Manual)',
-			description: 'Install PyTorch from the official CUDA 12.4 wheel index if 12.8 is too new for your driver.',
-			value: 'cuda',
-			torchIndex: CUDA_12_4_TORCH_INDEX
-		},
-		{
-			label: 'Skip PyTorch installation',
-			description: 'Prepare the environment without installing PyTorch.',
-			value: 'skip'
-		}
-	);
+			torchIndex: build.torchIndex,
+			torchBuildKey: build.key
+		});
+	}
+
+	options.push({
+		label: 'Skip PyTorch installation',
+		description: 'Prepare the environment without installing PyTorch.',
+		value: 'skip'
+	});
 
 	return { options, gpuInfo, autoReason: autoRecommendation.reason };
 }
@@ -1456,15 +1758,24 @@ export function activate(context: vscode.ExtensionContext) {
 		const uvExecutable = resolveUvExecutable();
 		if (!uvExecutable) {
 			const installHint = platform === 'win32'
-				? 'Install uv with `winget install --id=astral-sh.uv -e` or from https://docs.astral.sh/uv/getting-started/installation/.'
-				: 'Install uv with `curl -LsSf https://astral.sh/uv/install.sh | sh`, `brew install uv`, or from https://docs.astral.sh/uv/getting-started/installation/.';
+				? 'Install uv with `winget install --id=astral-sh.uv -e`, `scoop install main/uv`, `pipx install uv`, or from https://docs.astral.sh/uv/getting-started/installation/.'
+				: 'Install uv with `curl -LsSf https://astral.sh/uv/install.sh | sh`, `brew install uv`, `pipx install uv`, `cargo install --locked uv`, or from https://docs.astral.sh/uv/getting-started/installation/.';
 			vscode.window.showErrorMessage(
 				`uv was not found in PATH or common install locations. ${installHint}`
 			);
 			return;
 		}
 
-		const { options: torchOptions, gpuInfo, autoReason } = getTorchInstallOptions();
+		let torchOptions: TorchInstallOption[];
+		let gpuInfo: NvidiaGpuInfo;
+		let autoReason: string;
+		try {
+			({ options: torchOptions, gpuInfo, autoReason } = getTorchInstallOptions());
+		} catch (error) {
+			vscode.window.showErrorMessage(`Failed to load the OwlSpotlight torch build matrix: ${error}`);
+			return;
+		}
+
 		const torchChoice = await vscode.window.showQuickPick(torchOptions, {
 			placeHolder: 'Select the PyTorch build to install during setup',
 			ignoreFocusOut: true
@@ -1475,6 +1786,9 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 
 		const scriptArgs: string[] = ['--torch-mode', torchChoice.value];
+		if (torchChoice.torchBuildKey) {
+			scriptArgs.push('--torch-build', torchChoice.torchBuildKey);
+		}
 		if (torchChoice.torchIndex) {
 			scriptArgs.push('--torch-index', torchChoice.torchIndex);
 		}
@@ -1504,8 +1818,13 @@ export function activate(context: vscode.ExtensionContext) {
 		owlOutputChannel.appendLine(`[OwlSpotlight] PyTorch option: ${torchChoice.label}`);
 		if (gpuInfo.available) {
 			owlOutputChannel.appendLine(`[OwlSpotlight] NVIDIA GPU: ${gpuInfo.gpuName ?? 'Detected'} (driver ${gpuInfo.driverVersion ?? 'unknown'})`);
+			if (gpuInfo.detectionSource) {
+				owlOutputChannel.appendLine(`[OwlSpotlight] NVIDIA detection source: ${gpuInfo.detectionSource}`);
+			}
+		} else if (platform === 'darwin') {
+			owlOutputChannel.appendLine('[OwlSpotlight] CUDA detection: skipped on macOS. The CPU build can still use MPS acceleration at runtime.');
 		} else {
-			owlOutputChannel.appendLine('[OwlSpotlight] NVIDIA GPU: Not detected via nvidia-smi');
+			owlOutputChannel.appendLine('[OwlSpotlight] NVIDIA GPU: Not detected via nvidia-smi in PATH or common install locations.');
 		}
 		owlOutputChannel.appendLine(`[OwlSpotlight] Auto recommendation: ${autoReason}`);
 		owlOutputChannel.appendLine('---');
