@@ -881,11 +881,85 @@ async def graph_neighbors_api(req: GraphNeighborsRequest):
 
         callers_idx = _expand_neighbors(graph, target_idx, "callers", req.depth, req.limit)
         callees_idx = _expand_neighbors(graph, target_idx, "callees", req.depth, req.limit)
+        target = functions[target_idx]
+        target_file = target.get("file")
+
+        def _annotate(idx: int) -> Dict:
+            fn = dict(functions[idx])
+            fn["is_external"] = bool(target_file and fn.get("file") and fn["file"] != target_file)
+            return fn
+
         return {
-            "target": functions[target_idx],
-            "callers": [functions[i] for i in callers_idx],
-            "callees": [functions[i] for i in callees_idx],
+            "target": target,
+            "callers": [_annotate(i) for i in callers_idx],
+            "callees": [_annotate(i) for i in callees_idx],
         }
+
+
+class GraphUsageCountsRef(BaseModel):
+    file: Optional[str] = None
+    lineno: Optional[int] = None
+    name: Optional[str] = None
+    class_name: Optional[str] = None
+
+
+class GraphUsageCountsRequest(BaseModel):
+    directory: str
+    file_ext: str = ".py"
+    refs: List[GraphUsageCountsRef] = []
+
+
+@app.post("/graph/usage_counts", tags=["search"])
+async def graph_usage_counts_api(req: GraphUsageCountsRequest):
+    """Return the number of callers (total and cross-file) for each ref.
+
+    Used by the webview to decorate search results with a compact
+    "used in N file(s)" badge without fetching the full neighbor list.
+    """
+    with index_lock:
+        build_index(req.directory, req.file_ext, update_state=True)
+        if not global_index_state.indexer or not global_index_state.indexer.functions:
+            return {"counts": []}
+        functions = global_index_state.indexer.functions
+        graph = global_index_state.get_call_graph() or {}
+        callers_map = graph.get("callers", {})
+
+        out = []
+        for ref in req.refs:
+            idx = resolve_target(
+                functions,
+                file=ref.file,
+                lineno=ref.lineno,
+                name=ref.name,
+                class_name=ref.class_name,
+            )
+            if idx is None:
+                out.append({
+                    "file": ref.file,
+                    "lineno": ref.lineno,
+                    "name": ref.name,
+                    "total_callers": 0,
+                    "external_callers": 0,
+                    "resolved": False,
+                })
+                continue
+            target_file = functions[idx].get("file")
+            callers = callers_map.get(idx, []) or []
+            total = len(callers)
+            external = 0
+            for c_idx in callers:
+                c_file = functions[c_idx].get("file") if 0 <= c_idx < len(functions) else None
+                if c_file and target_file and c_file != target_file:
+                    external += 1
+            out.append({
+                "file": ref.file,
+                "lineno": ref.lineno,
+                "name": ref.name,
+                "total_callers": total,
+                "external_callers": external,
+                "resolved": True,
+            })
+        return {"counts": out}
 
 
 
