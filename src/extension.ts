@@ -5,6 +5,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as cp from 'child_process';
 import * as net from 'net';
+import * as fs from 'fs';
 
 const DEFAULT_SERVER_HOST = '127.0.0.1';
 const DEFAULT_SERVER_PORT = 8000;
@@ -82,6 +83,54 @@ function detectNvidiaGpuInfo(): NvidiaGpuInfo {
 	} catch {
 		return { available: false };
 	}
+}
+
+function getUvCandidatePaths(platform: NodeJS.Platform): string[] {
+	const homeDir = os.homedir();
+	const candidates: string[] = [];
+
+	if (platform === 'win32') {
+		candidates.push(
+			path.join(homeDir, '.local', 'bin', 'uv.exe'),
+			path.join(homeDir, 'AppData', 'Local', 'Programs', 'uv', 'uv.exe')
+		);
+
+		const localAppData = process.env.LOCALAPPDATA;
+		if (localAppData) {
+			candidates.push(
+				path.join(localAppData, 'Microsoft', 'WinGet', 'Packages', 'astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe', 'uv.exe')
+			);
+		}
+	} else {
+		candidates.push(
+			path.join(homeDir, '.local', 'bin', 'uv'),
+			path.join(homeDir, '.cargo', 'bin', 'uv')
+		);
+	}
+
+	return candidates;
+}
+
+function resolveUvExecutable(): string | undefined {
+	try {
+		cp.execFileSync('uv', ['--version'], { stdio: 'ignore' });
+		return 'uv';
+	} catch {
+		for (const candidate of getUvCandidatePaths(os.platform())) {
+			if (!fs.existsSync(candidate)) {
+				continue;
+			}
+
+			try {
+				cp.execFileSync(candidate, ['--version'], { stdio: 'ignore' });
+				return candidate;
+			} catch {
+				// Ignore unusable candidate and continue searching.
+			}
+		}
+	}
+
+	return undefined;
 }
 
 function getAutoTorchRecommendation(gpuInfo: NvidiaGpuInfo): { torchIndex?: string; reason: string } {
@@ -1404,14 +1453,13 @@ export function activate(context: vscode.ExtensionContext) {
 
 		const serverDir = path.join(context.extensionPath, 'model_server');
 		const platform = os.platform();
-		try {
-			cp.execFileSync('uv', ['--version'], { stdio: 'ignore' });
-		} catch {
+		const uvExecutable = resolveUvExecutable();
+		if (!uvExecutable) {
 			const installHint = platform === 'win32'
 				? 'Install uv with `winget install --id=astral-sh.uv -e` or from https://docs.astral.sh/uv/getting-started/installation/.'
 				: 'Install uv with `curl -LsSf https://astral.sh/uv/install.sh | sh`, `brew install uv`, or from https://docs.astral.sh/uv/getting-started/installation/.';
 			vscode.window.showErrorMessage(
-				`uv was not found in PATH. ${installHint}`
+				`uv was not found in PATH or common install locations. ${installHint}`
 			);
 			return;
 		}
@@ -1434,7 +1482,7 @@ export function activate(context: vscode.ExtensionContext) {
 			scriptArgs.push('--force-recreate');
 		}
 
-		const setupCommand = 'uv';
+		const setupCommand = uvExecutable;
 		const setupArgs: string[] = [
 			'run',
 			'--no-project',

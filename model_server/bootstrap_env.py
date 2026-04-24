@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import platform
 import re
 import shutil
@@ -17,6 +18,38 @@ CUDA_12_4_TORCH_INDEX = "https://download.pytorch.org/whl/cu124"
 DEFAULT_TORCH_INDEX = CUDA_12_8_TORCH_INDEX
 CUDA_12_X_MIN_DRIVER = "527.41"
 CUDA_12_8_RECOMMENDED_DRIVER = "570.0"
+
+
+def get_uv_candidate_paths() -> list[Path]:
+    home = Path.home()
+    candidates: list[Path] = []
+
+    if platform.system() == "Windows":
+        candidates.extend(
+            [
+                home / ".local" / "bin" / "uv.exe",
+                home / "AppData" / "Local" / "Programs" / "uv" / "uv.exe",
+            ]
+        )
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            candidates.append(
+                Path(local_app_data)
+                / "Microsoft"
+                / "WinGet"
+                / "Packages"
+                / "astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe"
+                / "uv.exe"
+            )
+    else:
+        candidates.extend(
+            [
+                home / ".local" / "bin" / "uv",
+                home / ".cargo" / "bin" / "uv",
+            ]
+        )
+
+    return candidates
 
 
 def parse_args() -> argparse.Namespace:
@@ -98,10 +131,10 @@ def run_best_effort_command(cmd: Iterable[str], *, env: dict[str, str] | None = 
     subprocess.run([str(part) for part in cmd], env=env, check=False)
 
 
-def uninstall_existing_torch_packages(python_env_path: Path) -> None:
+def uninstall_existing_torch_packages(uv_path: str, python_env_path: Path) -> None:
     run_best_effort_command(
         [
-            "uv",
+            uv_path,
             "pip",
             "uninstall",
             "--python",
@@ -111,6 +144,48 @@ def uninstall_existing_torch_packages(python_env_path: Path) -> None:
             "torchaudio",
         ]
     )
+
+
+def install_cpu_torch(uv_path: str, python_env_path: Path, torch_requirements: Path) -> None:
+    uninstall_existing_torch_packages(uv_path, python_env_path)
+    run_command(
+        [uv_path, "pip", "install", "--python", str(python_env_path), "-r", str(torch_requirements)]
+    )
+
+
+def install_cuda_torch(uv_path: str, python_env_path: Path, torch_index: str) -> None:
+    uninstall_existing_torch_packages(uv_path, python_env_path)
+    run_command(
+        [
+            uv_path,
+            "pip",
+            "install",
+            "--python",
+            str(python_env_path),
+            "--reinstall",
+            "torch",
+            "--index-url",
+            torch_index,
+        ]
+    )
+
+
+def validate_torch_import(python_env_path: Path) -> tuple[bool, str]:
+    result = subprocess.run(
+        [str(python_env_path), "-c", "import torch; print(torch.__version__)"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    if result.returncode == 0:
+        version = result.stdout.strip() or "unknown"
+        return True, f"PyTorch import succeeded ({version})."
+
+    stderr = (result.stderr or "").strip()
+    stdout = (result.stdout or "").strip()
+    detail = stderr or stdout or f"python exited with code {result.returncode}"
+    return False, detail
 
 
 def parse_version(version: str) -> tuple[int, ...]:
@@ -186,8 +261,11 @@ def ensure_uv() -> str:
     uv_path = shutil.which("uv")
     if uv_path:
         return uv_path
+    for candidate in get_uv_candidate_paths():
+        if candidate.is_file():
+            return str(candidate)
     raise SystemExit(
-        "uv was not found in PATH. Install it from https://docs.astral.sh/uv/getting-started/installation/"
+        "uv was not found in PATH or common install locations. Install it from https://docs.astral.sh/uv/getting-started/installation/"
     )
 
 
@@ -205,7 +283,7 @@ def current_python_spec() -> str:
 
 def main() -> None:
     args = parse_args()
-    ensure_uv()
+    uv_path = ensure_uv()
 
     project_root = Path(__file__).resolve().parent
     env_dir = (project_root / args.env_dir).resolve()
@@ -218,7 +296,7 @@ def main() -> None:
 
     if not env_dir.exists():
         print(f"[bootstrap] Creating virtual environment at {env_dir} with uv")
-        run_command(["uv", "venv", "--python", python_spec, str(env_dir)])
+        run_command([uv_path, "venv", "--python", python_spec, str(env_dir)])
     else:
         print(f"[bootstrap] Reusing existing environment at {env_dir}")
 
@@ -227,37 +305,40 @@ def main() -> None:
     requirements_path = (project_root / args.requirements).resolve()
     if not requirements_path.exists():
         raise SystemExit(f"Requirements file not found: {requirements_path}")
-    run_command(["uv", "pip", "install", "--python", str(python_env_path), "-r", str(requirements_path)])
+    run_command([uv_path, "pip", "install", "--python", str(python_env_path), "-r", str(requirements_path)])
 
     selected_torch_mode = args.torch_mode
     selected_torch_index = args.torch_index
+    torch_requirements = (project_root / args.torch_requirements).resolve()
 
     if args.torch_mode == "auto":
         selected_torch_mode, selected_torch_index = resolve_auto_torch_installation()
 
     if selected_torch_mode == "cpu":
-        torch_requirements = (project_root / args.torch_requirements).resolve()
         if not torch_requirements.exists():
             raise SystemExit(f"Torch requirements file not found: {torch_requirements}")
-        uninstall_existing_torch_packages(python_env_path)
-        run_command(
-            ["uv", "pip", "install", "--python", str(python_env_path), "-r", str(torch_requirements)]
-        )
+        install_cpu_torch(uv_path, python_env_path, torch_requirements)
     elif selected_torch_mode == "cuda":
-        uninstall_existing_torch_packages(python_env_path)
-        run_command(
-            [
-                "uv",
-                "pip",
-                "install",
-                "--python",
-                str(python_env_path),
-                "--reinstall",
-                "torch",
-                "--index-url",
-                selected_torch_index or DEFAULT_TORCH_INDEX,
-            ]
-        )
+        install_cuda_torch(uv_path, python_env_path, selected_torch_index or DEFAULT_TORCH_INDEX)
+
+        import_ok, import_detail = validate_torch_import(python_env_path)
+        if import_ok:
+            print(f"[bootstrap] {import_detail}")
+        elif args.torch_mode == "auto":
+            if not torch_requirements.exists():
+                raise SystemExit(f"Torch requirements file not found: {torch_requirements}")
+            print("[bootstrap] CUDA PyTorch import failed after installation; falling back to the CPU build.")
+            print(f"[bootstrap] Torch import error: {import_detail}")
+            install_cpu_torch(uv_path, python_env_path, torch_requirements)
+            cpu_import_ok, cpu_import_detail = validate_torch_import(python_env_path)
+            if not cpu_import_ok:
+                raise SystemExit(f"CPU PyTorch import failed after fallback: {cpu_import_detail}")
+            print(f"[bootstrap] {cpu_import_detail}")
+        else:
+            raise SystemExit(
+                "CUDA PyTorch import failed after installation. "
+                f"Torch import error: {import_detail}"
+            )
     else:
         print("[bootstrap] Skipping PyTorch installation as requested")
 
