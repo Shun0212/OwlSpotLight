@@ -404,7 +404,7 @@ input[type=text]::placeholder {
 
 .result-item {
   margin: 0 0 0.35em 0;
-  padding: 0.55em 0.7em;
+  padding: 0.65em 0.75em;
   border-radius: 5px;
   background: transparent;
   cursor: pointer;
@@ -426,7 +426,7 @@ input[type=text]::placeholder {
 /* 結果ヘッダー行（タイトル + スコア） */
 .result-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 0.5em;
 }
@@ -450,10 +450,11 @@ input[type=text]::placeholder {
   font-size: 0.72em;
   font-weight: 600;
   font-family: var(--vscode-editor-font-family, monospace);
-  padding: 0.1em 0.45em;
+  padding: 0.12em 0.48em;
   border-radius: 8px;
   white-space: nowrap;
   flex-shrink: 0;
+  margin-top: 0.05em;
 }
 .score-badge.score-high {
   background: rgba(46, 160, 67, 0.2);
@@ -494,20 +495,23 @@ input[type=text]::placeholder {
   max-width: 100%; 
   box-sizing: border-box;
   display: block;
-  margin-top: 0.15em;
+  margin-top: 0.2em;
 }
 .result-snippet { 
   font-size: 0.82em; 
   color: var(--vscode-foreground, #d4d4d4); 
-  opacity: 0.8;
-  margin-top: 0.2em; 
+  opacity: 0.86;
+  margin-top: 0.35em; 
+  padding: 0.45em 0.55em;
+  border-radius: 4px;
+  background: var(--vscode-textCodeBlock-background, rgba(128,128,128,0.08));
   word-break: break-word; 
   white-space: pre-line; 
-  max-height: 2.6em; 
+  max-height: 4.4em; 
   overflow: hidden; 
   display: -webkit-box; 
-  -webkit-line-clamp: 2; 
-  line-clamp: 2;
+  -webkit-line-clamp: 3; 
+  line-clamp: 3;
   -webkit-box-orient: vertical; 
   box-sizing: border-box;
   font-family: var(--vscode-editor-font-family, 'Courier New', monospace);
@@ -618,16 +622,28 @@ input[type=text]::placeholder {
 .result-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.25em;
-  margin: 0.25em 0 0.1em 0;
+  gap: 0.3em;
+  margin: 0.35em 0 0.1em 0;
 }
 
 .meta-badge {
   font-size: 0.72em;
-  padding: 0.08em 0.45em;
+  padding: 0.1em 0.48em;
   border-radius: 999px;
   color: var(--vscode-badge-foreground, #fff);
   background: var(--vscode-badge-background, #4d4d4d);
+  white-space: nowrap;
+}
+
+.meta-badge.type-badge {
+  color: var(--vscode-foreground, #d4d4d4);
+  background: rgba(128,128,128,0.16);
+}
+
+.meta-badge.score-meta {
+  color: var(--vscode-descriptionForeground, #999);
+  background: rgba(128,128,128,0.12);
+  font-family: var(--vscode-editor-font-family, monospace);
 }
 
 /* ===== Tabs ===== */

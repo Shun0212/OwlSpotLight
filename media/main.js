@@ -499,6 +499,21 @@ window.onload = function() {
         const statusEl = document.getElementById('status');
         const emptyEl = document.getElementById('emptyState');
         const resultTypeFilter = document.getElementById('resultTypeFilter')?.value || 'all';
+        const escapeHtml = (value) => String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+        const formatPct = (value) => {
+            if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+            return Math.max(0, Math.min(100, value * 100)).toFixed(0) + '%';
+        };
+        const symbolLabel = (result) => {
+            if (result.symbol_kind === 'code_block') return 'CodeBlock';
+            if (result.class_name || result.symbol_kind === 'method') return 'Method';
+            return 'Function';
+        };
         const visibleResults = results.filter((r) => {
             if (resultTypeFilter === 'functions') return !r.class_name && r.symbol_kind !== 'code_block';
             if (resultTypeFilter === 'methods') return !!r.class_name || r.symbol_kind === 'method';
@@ -525,7 +540,7 @@ window.onload = function() {
         });
 
         // 類似度の最大値を取得（バー表示の正規化用）
-        const maxSimilarity = visibleResults.reduce((max, r) => Math.max(max, r.similarity || r.score || 0), 0);
+        const maxScore = visibleResults.reduce((max, r) => Math.max(max, r.hybrid_score || r.score || r.similarity || 0), 0);
 
         visibleResults.forEach(function(r, index) {
             let relPath = r.file_path || r.file || '';
@@ -549,44 +564,51 @@ window.onload = function() {
             if (r.symbol_kind === 'code_block') {
                 const staticInfo = r.python_static || {};
                 const calls = Array.isArray(staticInfo.calls) && staticInfo.calls.length
-                    ? ' <span class="codeblock-calls">calls: ' + staticInfo.calls.slice(0, 3).join(', ') + '</span>'
+                    ? ' <span class="codeblock-calls">calls: ' + escapeHtml(staticInfo.calls.slice(0, 3).join(', ')) + '</span>'
                     : '';
                 displayTitle = '<span class="function-name">CodeBlock</span>' + calls;
                 titleClass += ' codeblock-title';
                 itemClass += ' codeblock-item';
             } else if (className) {
-                displayTitle = '<span class="class-name">' + className + '</span>.<span class="method-name">' + functionName + '</span>';
+                displayTitle = '<span class="class-name">' + escapeHtml(className) + '</span>.<span class="method-name">' + escapeHtml(functionName) + '</span>';
                 titleClass += ' method-title';
                 itemClass += ' method-item';
             } else {
-                displayTitle = '<span class="function-name">' + functionName + '</span>';
+                displayTitle = '<span class="function-name">' + escapeHtml(functionName) + '</span>';
                 titleClass += ' function-title';
                 itemClass += ' function-item';
             }
 
             resultDiv.className = itemClass;
 
-            // 類似度バッジ
+            // スコアバッジ。hybrid は順位用、semantic/BM25 は内訳として表示する。
             const hasScore = typeof r.score === 'number' || typeof r.similarity === 'number';
-            const similarity = hasScore ? (typeof r.similarity === 'number' ? r.similarity : r.score) : 0;
+            const rankScore = typeof r.hybrid_score === 'number' ? r.hybrid_score : (typeof r.score === 'number' ? r.score : r.similarity || 0);
+            const semanticPct = formatPct(r.semantic_similarity);
+            const bm25Pct = formatPct(r.bm25_score);
+            const rankPct = formatPct(rankScore);
             let scoreClass = 'score-low';
             let barClass = 'bar-low';
-            if (similarity >= 0.7) { scoreClass = 'score-high'; barClass = 'bar-high'; }
-            else if (similarity >= 0.4) { scoreClass = 'score-mid'; barClass = 'bar-mid'; }
+            if (rankScore >= 0.7) { scoreClass = 'score-high'; barClass = 'bar-high'; }
+            else if (rankScore >= 0.4) { scoreClass = 'score-mid'; barClass = 'bar-mid'; }
             const scoreBadge = hasScore
-                ? '<span class="score-badge ' + scoreClass + '" title="Relative similarity">Similarity ' + (similarity * 100).toFixed(0) + '%</span>'
+                ? '<span class="score-badge ' + scoreClass + '" title="Rank score used for ordering; relative within this result set">Rank ' + rankPct + '</span>'
                 : '';
             const staticInfo = r.python_static || {};
             const metaBadges = [];
+            metaBadges.push('<span class="meta-badge type-badge">' + symbolLabel(r) + '</span>');
             if (Array.isArray(staticInfo.framework_tags)) {
-                staticInfo.framework_tags.slice(0, 2).forEach(tag => metaBadges.push('<span class="meta-badge">' + tag + '</span>'));
+                staticInfo.framework_tags.slice(0, 2).forEach(tag => metaBadges.push('<span class="meta-badge">' + escapeHtml(tag) + '</span>'));
             }
             if (Array.isArray(staticInfo.routes) && staticInfo.routes.length) {
                 const route = staticInfo.routes[0];
-                metaBadges.push('<span class="meta-badge">' + route.method + ' ' + (route.path || '') + '</span>');
+                metaBadges.push('<span class="meta-badge">' + escapeHtml(route.method + ' ' + (route.path || '')) + '</span>');
             }
-            if (typeof r.bm25_score === 'number' && r.bm25_score > 0) {
-                metaBadges.push('<span class="meta-badge">BM25 ' + (r.bm25_score * 100).toFixed(0) + '%</span>');
+            if (semanticPct && r.search_mode !== 'bm25') {
+                metaBadges.push('<span class="meta-badge score-meta">Semantic ' + semanticPct + '</span>');
+            }
+            if (bm25Pct && r.bm25_score > 0) {
+                metaBadges.push('<span class="meta-badge score-meta">BM25 ' + bm25Pct + '</span>');
             }
             const metaLine = metaBadges.length ? '<div class="result-meta">' + metaBadges.join('') + '</div>' : '';
 
@@ -595,9 +617,13 @@ window.onload = function() {
             const rankBadge = '<span class="' + rankClass + '">' + (index + 1) + '</span>';
 
             // 類似度バー
-            const barWidth = maxSimilarity > 0 ? ((similarity / maxSimilarity) * 100).toFixed(1) : '0';
+            const barWidth = maxScore > 0 ? ((rankScore / maxScore) * 100).toFixed(1) : '0';
             const scoreBar = hasScore
                 ? '<div class="score-bar-wrapper"><div class="score-bar ' + barClass + '" style="width:' + barWidth + '%;"></div></div>'
+                : '';
+            const snippetSource = r.raw_code || r.code || '';
+            const snippet = snippetSource
+                ? escapeHtml(String(snippetSource).trim().split('\n').slice(0, 3).join('\n'))
                 : '';
 
             resultDiv.innerHTML = 
@@ -606,9 +632,9 @@ window.onload = function() {
                   '<div class="' + titleClass + '">' + displayTitle + '</div>' +
                   scoreBadge +
                 '</div>' +
-                '<div class="result-path">' + relPath + ':' + (r.lineno || r.line_number || 1) + '</div>' +
+                '<div class="result-path">' + escapeHtml(relPath) + ':' + (r.lineno || r.line_number || 1) + '</div>' +
                 metaLine +
-                '<div class="result-snippet">' + (r.code ? r.code.split('\n').slice(0,2).join(' ') : '') + '</div>' +
+                '<div class="result-snippet">' + snippet + '</div>' +
                 scoreBar;
 
             resultDiv.onclick = function() {
