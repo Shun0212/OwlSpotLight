@@ -21,10 +21,17 @@ from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 import shutil
 import time
+import psutil
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
 
 OWL_INDEX_DIR = ".owl_index"
+
+
+def get_memory_usage_mb() -> float:
+    """現在のプロセスのRSSメモリ使用量をMB単位で返す"""
+    process = psutil.Process(os.getpid())
+    return process.memory_info().rss / 1024 / 1024
 
 from extractors import extract_functions
 from indexer import CodeIndexer
@@ -1073,7 +1080,7 @@ async def build_index_api(req: BuildIndexRequest):
             exclude_paths=req.exclude_paths,
             strip_comments_for_embeddings=req.strip_comments_for_embeddings
         )
-    return {"num_functions": len(results), "num_files": file_count, "embedding_time_ms": round(embedding_time_ms, 1)}
+    return {"num_functions": len(results), "num_files": file_count, "embedding_time_ms": round(embedding_time_ms, 1), "memory_usage_mb": round(get_memory_usage_mb(), 1)}
 
 @app.post("/force_rebuild_index")
 async def force_rebuild_index_api(req: BuildIndexRequest):
@@ -1089,7 +1096,7 @@ async def force_rebuild_index_api(req: BuildIndexRequest):
             exclude_paths=req.exclude_paths,
             strip_comments_for_embeddings=req.strip_comments_for_embeddings
         )
-    return {"num_functions": len(results), "num_files": file_count, "embedding_time_ms": round(embedding_time_ms, 1), "message": "Index forcefully rebuilt"}
+    return {"num_functions": len(results), "num_files": file_count, "embedding_time_ms": round(embedding_time_ms, 1), "memory_usage_mb": round(get_memory_usage_mb(), 1), "message": "Index forcefully rebuilt"}
 
 @app.get("/index_status")
 async def index_status():
@@ -1193,16 +1200,18 @@ def search_functions_for_queries(
     normalized_search_mode = normalize_search_mode(search_mode)
 
     cleaned_queries = [q.strip() for q in queries if isinstance(q, str) and q.strip()]
+    memory_mb = round(get_memory_usage_mb(), 1)
     if not results:
         return {
             "items": [{"query": q, "results": []} for q in cleaned_queries],
             "num_functions": len(results),
             "num_files": file_count,
             "message": "No functions found.",
-            "embedding_time_ms": round(index_embedding_time_ms, 1)
+            "embedding_time_ms": round(index_embedding_time_ms, 1),
+            "memory_usage_mb": memory_mb
         }
     if not cleaned_queries:
-        return {"items": [], "num_functions": len(results), "num_files": file_count, "embedding_time_ms": round(index_embedding_time_ms, 1)}
+        return {"items": [], "num_functions": len(results), "num_files": file_count, "embedding_time_ms": round(index_embedding_time_ms, 1), "memory_usage_mb": memory_mb}
 
     if normalized_search_mode == "bm25":
         items = []
@@ -1215,7 +1224,7 @@ def search_functions_for_queries(
                 strip_comments_for_embeddings=strip_comments_for_embeddings
             )
             items.append({"query": query, "results": found})
-        return {"items": items, "num_functions": len(results), "num_files": file_count, "search_mode": "bm25", "embedding_time_ms": round(index_embedding_time_ms, 1)}
+        return {"items": items, "num_functions": len(results), "num_files": file_count, "search_mode": "bm25", "embedding_time_ms": round(index_embedding_time_ms, 1), "memory_usage_mb": memory_mb}
 
     if embeddings is None or faiss_index is None:
         return {
@@ -1223,7 +1232,8 @@ def search_functions_for_queries(
             "num_functions": len(results),
             "num_files": file_count,
             "message": "No embedding index found.",
-            "embedding_time_ms": round(index_embedding_time_ms, 1)
+            "embedding_time_ms": round(index_embedding_time_ms, 1),
+            "memory_usage_mb": memory_mb
         }
 
     items = []
@@ -1250,7 +1260,8 @@ def search_functions_for_queries(
         "search_mode": "semantic",
         "embedding_time_ms": round(total_embedding_time_ms, 1),
         "index_embedding_time_ms": round(index_embedding_time_ms, 1),
-        "query_embedding_time_ms": round(total_query_embedding_time_ms, 1)
+        "query_embedding_time_ms": round(total_query_embedding_time_ms, 1),
+        "memory_usage_mb": round(get_memory_usage_mb(), 1)
     }
 
 
@@ -1285,7 +1296,8 @@ def build_index_and_search(
         "search_mode": searched.get("search_mode", normalize_search_mode(search_mode)),
         "embedding_time_ms": searched.get("embedding_time_ms", 0.0),
         "index_embedding_time_ms": searched.get("index_embedding_time_ms", 0.0),
-        "query_embedding_time_ms": searched.get("query_embedding_time_ms", 0.0)
+        "query_embedding_time_ms": searched.get("query_embedding_time_ms", 0.0),
+        "memory_usage_mb": searched.get("memory_usage_mb", 0.0)
     }
     if "message" in searched:
         payload["message"] = searched["message"]

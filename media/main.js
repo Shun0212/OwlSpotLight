@@ -339,6 +339,9 @@ window.onload = function() {
                 const detail = parts.length ? ` (${parts.join(', ')})` : '';
                 statusText += ` ⏱️ ${meta.embedding_time_ms.toFixed(1)}ms${detail}`;
             }
+            if (meta && typeof meta.memory_usage_mb === 'number') {
+                statusText += ` | RSS ${meta.memory_usage_mb.toFixed(1)}MB`;
+            }
             statusEl.textContent = statusText;
         }
         const scopeInfoEl = byId('scope-info');
@@ -1190,7 +1193,8 @@ window.onload = function() {
             renderResults(currentResults, currentFolderPath || '', {
                 embedding_time_ms: msg.embedding_time_ms,
                 index_embedding_time_ms: msg.index_embedding_time_ms,
-                query_embedding_time_ms: msg.query_embedding_time_ms
+                query_embedding_time_ms: msg.query_embedding_time_ms,
+                memory_usage_mb: msg.memory_usage_mb
             });
             return;
         }
@@ -1219,9 +1223,17 @@ window.onload = function() {
                 const count = Array.isArray(runRecord.items) ? runRecord.items.length : 0;
                 let statusText = `Batch finished: ${count} queries`;
                 if (typeof currentBatchResult.embedding_time_ms === 'number') {
-                    statusText += `  ${currentBatchResult.embedding_time_ms.toFixed(1)}ms`;
+                    statusText += ` ⏱️ ${currentBatchResult.embedding_time_ms.toFixed(1)}ms`;
+                }
+                if (typeof currentBatchResult.memory_usage_mb === 'number') {
+                    statusText += ` | RSS ${currentBatchResult.memory_usage_mb.toFixed(1)}MB`;
                 }
                 expStatus.textContent = statusText;
+            }
+            const expScopeInfoEl = byId('exp-scope-info');
+            if (expScopeInfoEl && currentBatchResult) {
+                expScopeInfoEl.textContent = formatScopeInfo(currentBatchResult, currentFolderPath);
+                expScopeInfoEl.style.display = expScopeInfoEl.textContent ? '' : 'none';
             }
             setExperimentalMode('run');
             saveState();
