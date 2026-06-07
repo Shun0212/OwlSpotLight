@@ -22,10 +22,12 @@ from dotenv import load_dotenv
 import shutil
 import time
 import psutil
+import random
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
 
 OWL_INDEX_DIR = ".owl_index"
+RANDOM_SEARCH_SEED = 42
 
 
 def get_memory_usage_mb() -> float:
@@ -667,6 +669,8 @@ def normalize_search_mode(search_mode: Optional[str]) -> str:
     mode = (search_mode or "semantic").strip().lower()
     if mode in {"bm25", "keyword", "lexical"}:
         return "bm25"
+    if mode in {"random", "shuffle"}:
+        return "random"
     return "semantic"
 
 
@@ -697,22 +701,10 @@ def function_text_for_bm25(
     strip_comments_for_embeddings: bool = False
 ) -> str:
     code_text = str(func.get("code", "") or "")
-    if strip_comments_for_embeddings:
-        code_text = prepare_text_for_embedding(code_text, file_ext, True)
-
-    # Python docstring等のコメント相当テキストは除外モード時にBM25対象外にする
-    docstring_text = str(func.get("docstring", "") or "")
-    if strip_comments_for_embeddings:
-        docstring_text = ""
-
-    return "\n".join(
-        str(part) for part in [
-            func.get("name", ""),
-            func.get("function_name", ""),
-            func.get("class_name", ""),
-            docstring_text,
-            code_text,
-        ] if part
+    return prepare_text_for_embedding(
+        code_text,
+        file_ext,
+        strip_comments_for_embeddings
     )
 
 
@@ -789,6 +781,20 @@ def bm25_search_functions(
 
     ranked = sorted(scores.items(), key=lambda x: (-x[1], x[0]))[:top_k]
     return [functions[idx] for idx, _ in ranked]
+
+
+def random_search_functions(
+    functions: List[dict],
+    top_k: int,
+    seed: int = RANDOM_SEARCH_SEED
+) -> List[dict]:
+    if not functions or top_k <= 0:
+        return []
+
+    indices = list(range(len(functions)))
+    rng = random.Random(seed)
+    rng.shuffle(indices)
+    return [functions[idx] for idx in indices[:top_k]]
 
 # ファイルのハッシュ計算関数
 def file_hash(path):
@@ -1225,6 +1231,13 @@ def search_functions_for_queries(
             )
             items.append({"query": query, "results": found})
         return {"items": items, "num_functions": len(results), "num_files": file_count, "search_mode": "bm25", "embedding_time_ms": round(index_embedding_time_ms, 1), "memory_usage_mb": memory_mb}
+
+    if normalized_search_mode == "random":
+        items = []
+        for query in cleaned_queries:
+            found = random_search_functions(results, top_k, seed=RANDOM_SEARCH_SEED)
+            items.append({"query": query, "results": found})
+        return {"items": items, "num_functions": len(results), "num_files": file_count, "search_mode": "random", "random_seed": RANDOM_SEARCH_SEED, "embedding_time_ms": round(index_embedding_time_ms, 1), "memory_usage_mb": memory_mb}
 
     if embeddings is None or faiss_index is None:
         return {

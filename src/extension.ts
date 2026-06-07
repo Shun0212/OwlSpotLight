@@ -102,7 +102,7 @@ function historyToCsv(
         };
 
         for (const run of runs) {
-                const searchMode = typeof run.searchMode === 'string' ? run.searchMode : 'semantic';
+                const searchMode = typeof run.searchMode === 'string' ? run.searchMode : 'random';
                 const includePaths = Array.isArray(run.includePaths) ? run.includePaths.join('|') : '';
                 const excludePaths = Array.isArray(run.excludePaths) ? run.excludePaths.join('|') : '';
                 const stripComments = !!run.stripCommentsFromEmbeddings;
@@ -582,12 +582,18 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                 const normalizeBoolean = (value: unknown, fallback = false): boolean => {
                         return typeof value === 'boolean' ? value : fallback;
                 };
-                const normalizeSearchMode = (value: unknown): 'semantic' | 'bm25' => {
+                const normalizeSearchMode = (value: unknown): 'semantic' | 'bm25' | 'random' => {
                         if (typeof value !== 'string') {
-                                return 'semantic';
+                                return 'random';
                         }
                         const mode = value.trim().toLowerCase();
-                        return mode === 'bm25' ? 'bm25' : 'semantic';
+                        if (mode === 'bm25') {
+                                return 'bm25';
+                        }
+                        if (mode === 'random') {
+                                return 'random';
+                        }
+                        return 'semantic';
                 };
                 const normalizeHistoryRuns = (value: unknown): BatchHistoryRun[] => {
                         if (!Array.isArray(value)) {
@@ -1337,6 +1343,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
       <select id="searchModeSelect">
         <option value="semantic">Semantic (Embeddings)</option>
         <option value="bm25">BM25 (Keyword)</option>
+        <option value="random" selected>Random (Seed 42)</option>
       </select>
       <label><input type="checkbox" id="stripCommentsToggle"> Embed w/o comments</label>
       <input id="includePathsInput" type="text" placeholder="Include folders/patterns (comma separated)" />
