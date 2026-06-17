@@ -3,7 +3,7 @@
   "displayName": "owlspotlight",
   "description": "Highlight similar code snippets using semantic search.",
   "publisher": "Shun0212",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "keywords": [
     "semantic search",
     "code search",
@@ -151,6 +151,21 @@
           "type": "string",
           "default": "",
           "description": "Google Gemini API key for translation"
+        },
+        "owlspotlight.geminiModel": {
+          "type": "string",
+          "default": "gemini-3.5-flash",
+          "enum": [
+            "gemini-3.5-flash",
+            "gemini-3.1-flash-lite",
+            "gemini-3.1-pro-preview"
+          ],
+          "enumDescriptions": [
+            "Stable default model for translation.",
+            "Stable, lighter Gemini 3.1 option.",
+            "Preview Gemini 3.1 Pro option."
+          ],
+          "description": "Gemini model used for Japanese query translation"
         },
         "owlspotlight.autoStartServer": {
           "type": "boolean",

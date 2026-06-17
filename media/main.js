@@ -25,6 +25,8 @@ window.onload = function() {
         const statsStatusText = document.getElementById('stats-status')?.textContent || '';
         const translateToggle = document.getElementById('translateToggle');
         const translateEnabled = translateToggle ? !!translateToggle.checked : false;
+        const geminiModelSelect = document.getElementById('geminiModelSelect');
+        const geminiModel = geminiModelSelect ? geminiModelSelect.value : 'gemini-3.5-flash';
 
         return {
             activeTab,
@@ -38,6 +40,7 @@ window.onload = function() {
             statusText,
             statsStatusText,
             translateEnabled,
+            geminiModel,
             currentSearchQuery,
             currentStatsData,
             currentFolderPath,
@@ -86,6 +89,10 @@ window.onload = function() {
             if (typeof state.translateEnabled === 'boolean') {
                 const tToggle = document.getElementById('translateToggle');
                 if (tToggle) tToggle.checked = !!state.translateEnabled;
+            }
+            if (state.geminiModel && document.getElementById('geminiModelSelect')) {
+                const sel = document.getElementById('geminiModelSelect');
+                if (sel) sel.value = state.geminiModel;
             }
             if (state.statsFilter && document.getElementById('statsFilter')) {
                 const sf = document.getElementById('statsFilter');
@@ -153,6 +160,10 @@ window.onload = function() {
             if (typeof external.translateEnabled === 'boolean') {
                 const tToggle = document.getElementById('translateToggle');
                 if (tToggle) tToggle.checked = !!external.translateEnabled;
+            }
+            if (external.geminiModel && document.getElementById('geminiModelSelect')) {
+                const sel = document.getElementById('geminiModelSelect');
+                if (sel) sel.value = external.geminiModel;
             }
             if (external.statsFilter && document.getElementById('statsFilter')) {
                 const sf = document.getElementById('statsFilter');
@@ -264,6 +275,22 @@ window.onload = function() {
         function syncSegmentedControls() {
           document.querySelectorAll('.segmented-control').forEach(syncSegmentedControl);
           updateSearchBehaviorSummary();
+          updateTranslationSummary();
+        }
+        function getGeminiModelLabel(model) {
+          return {
+            'gemini-3.5-flash': '3.5 Flash',
+            'gemini-3.1-flash-lite': '3.1 Lite',
+            'gemini-3.1-pro-preview': '3.1 Pro'
+          }[model] || model;
+        }
+        function updateTranslationSummary() {
+          const summary = document.getElementById('translationSummary');
+          if (!summary) return;
+          const enabled = !!document.getElementById('translateToggle')?.checked;
+          const model = document.getElementById('geminiModelSelect')?.value || 'gemini-3.5-flash';
+          summary.textContent = (enabled ? 'On' : 'Off') + ' · ' + getGeminiModelLabel(model);
+          summary.title = summary.textContent;
         }
         function updateSearchBehaviorSummary() {
           const summary = document.querySelector('#searchBehaviorPanel .option-summary');
@@ -294,6 +321,7 @@ window.onload = function() {
                 syncSegmentedControl(control);
                 select.dispatchEvent(new Event('change', { bubbles: true }));
                 updateSearchBehaviorSummary();
+                updateTranslationSummary();
                 saveState();
               };
             });
@@ -449,6 +477,19 @@ window.onload = function() {
           translateToggle.onchange = () => {
             const enable = translateToggle.checked;
             vscode.postMessage({ command: 'updateTranslationSettings', enable });
+            updateTranslationSummary();
+            saveState();
+          };
+        }
+        const geminiModelSelect = document.getElementById('geminiModelSelect');
+        if (geminiModelSelect) {
+          geminiModelSelect.onchange = () => {
+            vscode.postMessage({
+              command: 'updateTranslationSettings',
+              model: geminiModelSelect.value
+            });
+            syncSegmentedControls();
+            updateTranslationSummary();
             saveState();
           };
         }
@@ -834,6 +875,21 @@ window.onload = function() {
                 if (msg.type === 'translationSettings') {
                         const tToggle = document.getElementById('translateToggle');
                         if (tToggle) { tToggle.checked = !!msg.enable; }
+                        const modelSelect = document.getElementById('geminiModelSelect');
+                        if (modelSelect) {
+                                if (Array.isArray(msg.models) && msg.models.length) {
+                                        const currentValue = msg.model || modelSelect.value;
+                                        modelSelect.innerHTML = msg.models.map(model => {
+                                                const label = getGeminiModelLabel(model);
+                                                return '<option value="' + escapeHtml(model) + '">' + escapeHtml(label) + '</option>';
+                                        }).join('');
+                                        modelSelect.value = currentValue;
+                                } else if (msg.model) {
+                                        modelSelect.value = msg.model;
+                                }
+                        }
+                        syncSegmentedControls();
+                        updateTranslationSummary();
                 }
                 if (msg.type === 'translatedQuery') {
                         const el = document.getElementById('translatedQuery');
