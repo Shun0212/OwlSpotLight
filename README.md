@@ -25,7 +25,11 @@ Find functions, methods, classes, Python CodeBlocks, routes, tests, and call-hea
 
 ### Why OwlSpotlight?
 
-OwlSpotlight is not just generic chunk search. It builds a local semantic index from code structure with NightOwl-CodeEmbedding, then combines dense retrieval with lightweight BM25 lexical ranking and literal keyword matching.
+OwlSpotlight lets you search your codebase by **describing what code does**, instead of remembering names or guessing keywords. Type a query in natural language (English or Japanese) from the VS Code sidebar, and it finds the matching functions, methods, classes, top-level code blocks, FastAPI routes, and tests, then jumps straight to the location and highlights the definition. You can also select a block in the editor and find similar code, scope the search to only your changed git files, and choose between hybrid / semantic / BM25 / literal-keyword modes.
+
+Everything runs locally on `127.0.0.1`, so your code never leaves your machine, and the index refreshes automatically as you edit. AI agents can use the same search through the built-in Codex MCP bridge.
+
+Under the hood, it is more than generic chunk search: the retrieval engine is **NightOwl-CodeEmbedding** — a ~150M-parameter code-embedding model I built myself (a bi-encoder on the ModernBERT architecture, fine-tuned for code retrieval from my own NightOwl base model trained from scratch). OwlSpotlight builds a local semantic index from your code's structure, then blends this model's dense retrieval with lightweight BM25 lexical ranking and literal keyword matching.
 
 | What you need | OwlSpotlight gives you |
 |---|---|
@@ -248,7 +252,11 @@ FastAPI background server
 
 ### OwlSpotlight とは
 
-OwlSpotlight は、VS Code 上でローカルコードを自然言語検索するための拡張機能です。単なるチャンク検索ではなく、Python の構造・呼び出し・import・FastAPI route・pytest などの静的解析メタデータを使い、semantic embedding、BM25、完全一致キーワード検索を組み合わせて検索します。
+OwlSpotlight は、関数やクラスの名前を覚えていなくても「**そのコードが何をしているか**」を説明するだけでコードを探せる VS Code 拡張機能です。サイドバーから自然言語（日本語・英語）でクエリを入力すると、該当する関数・メソッド・クラス・トップレベルのコードブロック・FastAPI route・テストを見つけて、その場所へジャンプし、定義をハイライト表示します。エディタで選択したコードから類似コードを探したり、検索範囲を git の変更ファイルだけに絞ったり、Hybrid / Semantic / BM25 / 完全一致キーワードのモードを切り替えることもできます。
+
+検索・インデックスはすべて `127.0.0.1` のローカルサーバーで動くのでコードが外部に出ることはなく、ファイルを編集するとインデックスも自動で更新されます。さらに、組み込みの Codex MCP ブリッジを通じて AI エージェントから同じ検索を利用できます。
+
+内部的には単なるチャンク検索ではありません。検索エンジンには、私自身が開発した独自のコード埋め込みモデル **NightOwl-CodeEmbedding**（約150Mパラメータ、ModernBERT アーキテクチャの Bi-Encoder。ゼロから学習させた自作 base model「NightOwl」をコード検索向けに fine-tune）を採用し、Python の構造・呼び出し・import・FastAPI route・pytest などの静的解析メタデータと、このモデルによる dense retrieval・BM25・完全一致キーワード検索を組み合わせて検索します。
 
 **Codex MCP 対応**: sidebar から OwlSpotlight を Codex に登録し、Codex 内で `owlspotlight.search_code` を直接使えます。Claude Code 対応は数日中に追加予定です。
 
