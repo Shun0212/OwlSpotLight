@@ -3,10 +3,25 @@ import numpy as np
 import os
 import torch
 import gc
+import time
 import warnings
+import logging
+import builtins as _builtins
+import progress
+
+# 詳細なサーバーログは既定でオフ。OWLSPOTLIGHT_DEBUG=1 で再度有効化できる。
+OWL_DEBUG = os.environ.get("OWLSPOTLIGHT_DEBUG", "").strip().lower() in ("1", "true", "yes", "on")
+
+def print(*args, **kwargs):  # noqa: A001 - 冗長ログを抑制するためモジュール内で組み込み print を上書き
+    if OWL_DEBUG:
+        _builtins.print(*args, **kwargs)
 
 # MPSデバイス使用時のtorch.compile警告を抑制
 warnings.filterwarnings("ignore", message=".*torch.compile.*mps.*", category=UserWarning)
+# Sentence Transformers のバージョン不一致など冗長な警告ログを抑制
+warnings.filterwarnings("ignore", message=".*Sentence Transformers version.*")
+if not OWL_DEBUG:
+    logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
 
 DEFAULT_MODEL = "Shuu12121/NightOwl-CodeEmbedding"
 model_name = os.environ.get("OWL_MODEL_NAME", DEFAULT_MODEL)
@@ -90,30 +105,47 @@ def get_model():
     return model
 
 def encode_code(codes: list[str], batch_size: int = 8, max_retries: int = 3, show_progress: bool = True) -> np.ndarray:
-    """コードをエンコードし、メモリエラー時は自動的にバッチサイズを調整"""
-    from tqdm import tqdm
-    import sys
+    """コードをエンコードし、メモリエラー時は自動的にバッチサイズを調整。
+
+    バッチごとに進捗を progress モジュールへ報告するため、内部のtqdmバーは無効化し、
+    代わりに拡張機能側で実際の割合を表示できるようにする。"""
     global model_device
 
     current_model = get_model()
+    total = len(codes)
 
-    # 環境変数や件数に応じて進捗表示を制御
-    progress_enabled = (
-        show_progress
-        and progress_env not in ("0", "false")
-        and len(codes) >= 10
-    )
+    # 進捗を報告するか（環境変数で抑制可能）
+    report = show_progress and progress_env not in ("0", "false") and total > 0
 
     for attempt in range(max_retries):
         try:
-            return current_model.encode(
-                codes,
-                batch_size=batch_size,
-                normalize_embeddings=True,
-                show_progress_bar=progress_enabled,
-                convert_to_numpy=True
-            )
-        
+            if report:
+                progress.start("Embedding", total)
+            chunks = []
+            t0 = time.time()
+            for start_idx in range(0, total, batch_size):
+                batch = codes[start_idx:start_idx + batch_size]
+                emb = current_model.encode(
+                    batch,
+                    batch_size=batch_size,
+                    normalize_embeddings=True,
+                    show_progress_bar=False,
+                    convert_to_numpy=True
+                )
+                chunks.append(emb)
+                done = min(start_idx + batch_size, total)
+                if report:
+                    # ライブな進捗はサイドバー UI（/index_progress）に表示。
+                    # 出力パネルは追記専用でバーを上書きできないため、進捗はここでは出さない。
+                    progress.update(done, total)
+            if report:
+                progress.finish()
+                # 出力パネルには要約を1行だけ。
+                _builtins.print(f"[embed] {total} items in {time.time() - t0:.1f}s", flush=True)
+            if chunks:
+                return np.vstack(chunks)
+            return current_model.encode([], normalize_embeddings=True, convert_to_numpy=True)
+
         except (RuntimeError, torch.cuda.OutOfMemoryError) as e:
             error_msg = str(e).lower()
             if "memory" in error_msg or "out of memory" in error_msg:

@@ -317,11 +317,20 @@ button:focus {
 }
 
 .secondary-action {
+  background: var(--vscode-button-background, #0078d4);
+  color: var(--vscode-button-foreground, #ffffff);
+}
+
+.secondary-action:hover {
+  background: var(--vscode-button-hoverBackground, #106ebe);
+}
+
+#searchOptionsBtn {
   background: var(--vscode-button-secondaryBackground, #5a5d5e);
   color: var(--vscode-button-secondaryForeground, #ffffff);
 }
 
-.secondary-action:hover {
+#searchOptionsBtn:hover {
   background: var(--vscode-button-secondaryHoverBackground, #6c7172);
 }
 
@@ -346,6 +355,10 @@ button:focus {
 .option-panel {
   border-top: 1px solid var(--vscode-sideBarSectionHeader-border, #e0e0e0);
   padding-top: 0.35em;
+}
+
+.option-panel label {
+  margin-top: 0.5em;
 }
 
 .option-panel summary {
@@ -445,8 +458,7 @@ button:focus {
 }
 
 .owlignore-actions button {
-  padding: 0.32em 0.55em;
-  font-size: 0.9em;
+  flex: 1 1 auto;
 }
 
 .owlignore-label {
@@ -551,12 +563,13 @@ input[type=text]::placeholder {
 }
 
 /* ===== Status ===== */
-.status { 
+.status {
   padding: 0.4em 0.8em 0.25em 0.8em;
-  color: var(--vscode-descriptionForeground, #666666); 
+  color: var(--vscode-descriptionForeground, #666666);
   font-size: 0.88em;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.4em;
   min-height: 1.5em;
 }
@@ -574,6 +587,36 @@ input[type=text]::placeholder {
 }
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* ===== Indeterminate progress bar (indexing/搜索中) ===== */
+.owl-progress {
+  flex: 1 1 100%;
+  position: relative;
+  height: 8px;
+  margin-top: 0.45em;
+  border-radius: 4px;
+  background: rgba(128, 128, 128, 0.22);
+  overflow: hidden;
+}
+.owl-progress-bar {
+  position: absolute;
+  top: 0;
+  left: -45%;
+  height: 100%;
+  width: 45%;
+  border-radius: 3px;
+  background: var(--vscode-progressBar-background, var(--vscode-button-background, #0078d4));
+  animation: owl-progress-slide 1.15s ease-in-out infinite;
+}
+@keyframes owl-progress-slide {
+  0% { left: -45%; width: 45%; }
+  50% { width: 60%; }
+  100% { left: 100%; width: 45%; }
+}
+.owl-progress-bar.determinate {
+  animation: none;
+  transition: width 0.3s ease;
 }
 
 /* ===== Results ===== */

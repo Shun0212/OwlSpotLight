@@ -255,7 +255,7 @@ window.onload = function() {
             console.log('setupAndStartBtn clicked');
             const statusEl = document.getElementById('status');
             if (statusEl) {
-              statusEl.innerHTML = '<span class="loading-spinner"></span> Checking environment...';
+              statusEl.innerHTML = loadingHTML('Checking environment...');
             }
             vscode.postMessage({ command: 'setupAndStart' });
             saveState();
@@ -287,6 +287,18 @@ window.onload = function() {
             saveState();
           };
         }
+        if (document.getElementById('languageSelect')) {
+          document.getElementById('languageSelect').onchange = () => {
+            updateGeneralSummary();
+            saveState();
+          };
+        }
+        if (document.getElementById('scopeSelect')) {
+          document.getElementById('scopeSelect').onchange = () => {
+            updateGeneralSummary();
+            saveState();
+          };
+        }
         if (document.getElementById('resultTypeFilter')) {
           document.getElementById('resultTypeFilter').onchange = () => {
             renderResults(currentResults, currentFolderPath || '');
@@ -306,6 +318,17 @@ window.onload = function() {
           document.querySelectorAll('.segmented-control').forEach(syncSegmentedControl);
           updateSearchBehaviorSummary();
           updateTranslationSummary();
+          updateGeneralSummary();
+        }
+        function updateGeneralSummary() {
+          const summary = document.getElementById('generalSummary');
+          if (!summary) return;
+          const langSel = document.getElementById('languageSelect');
+          const langLabel = langSel ? (langSel.options[langSel.selectedIndex]?.text || langSel.value) : '';
+          const scope = document.getElementById('scopeSelect')?.value || 'all';
+          const scopeLabel = { all: 'All', source: 'Source', changed: 'Changed' }[scope] || scope;
+          summary.textContent = [langLabel, scopeLabel].filter(Boolean).join(' · ');
+          summary.title = summary.textContent;
         }
         function getGeminiModelLabel(model) {
           return {
@@ -384,7 +407,7 @@ window.onload = function() {
             const txt = document.getElementById('serverStatusText');
             if (!el || !txt) return;
             if (online) {
-                el.className = 'server-status online hidden';
+                el.className = 'server-status online';
                 txt.textContent = port ? `Online (${port})` : 'Online';
             } else if (typeof port === 'string' && port.length > 0) {
                 el.className = 'server-status pending';
@@ -494,10 +517,62 @@ window.onload = function() {
             updateOwlIgnoreMeta(info?.path || '.owlignore');
         }
         // ローディング表示ヘルパー
+        function loadingHTML(message) {
+            return '<span class="loading-spinner"></span> <span class="loading-msg">' + (message || '') + '</span>';
+        }
+        function formatDuration(sec) {
+            if (sec === null || sec === undefined || !isFinite(sec) || sec < 0) return '';
+            const s = Math.round(sec);
+            if (s < 60) return s + 's';
+            const m = Math.floor(s / 60);
+            const rem = s % 60;
+            return m + 'm' + (rem ? rem + 's' : '');
+        }
+        function applyIndexProgress(p) {
+            const statusEl = document.getElementById('status');
+            if (!statusEl) return;
+            let progressWrap = statusEl.querySelector('.owl-progress');
+            // 実際の進捗データが無いときはバーを出さない（不確定アニメーションは廃止）
+            if (!p || !p.active || !p.total) {
+                if (progressWrap) progressWrap.remove();
+                return;
+            }
+            // ローディングの土台（スピナー＋メッセージ）が無ければ作る
+            let msg = statusEl.querySelector('.loading-msg');
+            if (!msg) {
+                statusEl.innerHTML = loadingHTML(p.phase || 'Indexing');
+                msg = statusEl.querySelector('.loading-msg');
+            }
+            // 本物の進捗バー（最初から determinate でアニメーションしない）
+            if (!progressWrap) {
+                progressWrap = document.createElement('div');
+                progressWrap.className = 'owl-progress';
+                const newBar = document.createElement('div');
+                newBar.className = 'owl-progress-bar determinate';
+                newBar.style.left = '0';
+                newBar.style.width = '0%';
+                progressWrap.appendChild(newBar);
+                statusEl.appendChild(progressWrap);
+            }
+            const bar = progressWrap.querySelector('.owl-progress-bar');
+            const pct = Math.max(0, Math.min(100, Math.round((p.current / p.total) * 100)));
+            bar.style.left = '0';
+            bar.style.width = pct + '%';
+            if (msg) {
+                let text = (p.phase || 'Indexing') + ' ' + p.current + '/' + p.total + ' (' + pct + '%)';
+                const elapsed = formatDuration(p.elapsed);
+                const eta = formatDuration(p.eta);
+                const timing = [];
+                if (elapsed) timing.push(elapsed);
+                if (eta) timing.push('ETA ' + eta);
+                if (timing.length) text += ' · ' + timing.join(', ');
+                msg.textContent = text;
+            }
+        }
         function showLoading(statusId) {
             const el = document.getElementById(statusId);
             if (el) {
-                el.innerHTML = '<span class="loading-spinner"></span> Searching...';
+                el.innerHTML = loadingHTML('Searching...');
             }
         }
 
@@ -1072,6 +1147,9 @@ window.onload = function() {
                 if (msg.type === 'agentSearchEvents') {
                         addAgentSearchEvents(msg.events);
                 }
+                if (msg.type === 'indexProgress') {
+                        applyIndexProgress(msg.progress);
+                }
                 if (msg.type === 'agentFeedbackStatus') {
                         const item = document.querySelector('.agent-review-item[data-event-id="' + msg.eventId + '"]');
                         const status = item ? item.querySelector('.agent-feedback-status') : null;
@@ -1087,8 +1165,10 @@ window.onload = function() {
                 if (msg.type === 'status') {
                         const statusEl = document.getElementById('status');
                         if (statusEl) {
-                                if (msg.message && msg.message.toLowerCase().includes('search')) {
-                                        statusEl.innerHTML = '<span class="loading-spinner"></span> ' + msg.message;
+                                const lower = (msg.message || '').toLowerCase();
+                                const busy = /search|index|building|embedding|setting up|starting|checking/.test(lower);
+                                if (busy) {
+                                        statusEl.innerHTML = loadingHTML(msg.message);
                                 } else {
                                         statusEl.textContent = msg.message;
                                 }

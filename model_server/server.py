@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+import asyncio
 from sentence_transformers import SentenceTransformer
 import torch
 from threading import Lock
@@ -30,9 +31,19 @@ OWL_INDEX_DIR = ".owl_index"
 
 from extractors import extract_functions
 from indexer import CodeIndexer
+import progress
 
 # モデル管理を model.py から import
 from model import get_model, get_current_device, cleanup_memory, encode_code, DEFAULT_MODEL, get_device
+
+import builtins as _builtins
+
+# 詳細なサーバーログは既定でオフ。OWLSPOTLIGHT_DEBUG=1 で再度有効化できる。
+OWL_DEBUG = os.environ.get("OWLSPOTLIGHT_DEBUG", "").strip().lower() in ("1", "true", "yes", "on")
+
+def print(*args, **kwargs):  # noqa: A001 - 冗長ログを抑制するためモジュール内で組み込み print を上書き
+    if OWL_DEBUG:
+        _builtins.print(*args, **kwargs)
 
 # グローバル変数
 model_name = os.environ.get("OWL_MODEL_NAME", DEFAULT_MODEL)
@@ -737,18 +748,23 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
             results_func_ids.append(func_id(func))
     added_modified_funcs = []
     if added_or_modified:
-        if len(added_or_modified) < 16:
-            for fpath in tqdm(added_or_modified, desc="Indexing (serial, diff)", disable=False, file=sys.stdout):
+        scan_total = len(added_or_modified)
+        progress.start("Scanning files", scan_total)
+        scanned = 0
+        if scan_total < 16:
+            for fpath in tqdm(added_or_modified, desc="Indexing (serial, diff)", disable=not OWL_DEBUG, file=sys.stdout):
                 funcs = process_file(fpath)
                 added_modified_funcs.extend(funcs)
                 file_to_funcs[fpath] = funcs
                 for func in funcs:
                     results.append(func)
                     results_func_ids.append(func_id(func))
+                scanned += 1
+                progress.update(scanned, scan_total)
         else:
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 for res, fpath in zip(
-                    tqdm(executor.map(process_file, added_or_modified), total=len(added_or_modified), desc="Indexing (parallel, diff)", disable=False, file=sys.stdout),
+                    tqdm(executor.map(process_file, added_or_modified), total=scan_total, desc="Indexing (parallel, diff)", disable=not OWL_DEBUG, file=sys.stdout),
                     added_or_modified
                 ):
                     added_modified_funcs.extend(res)
@@ -756,6 +772,8 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
                     for func in res:
                         results.append(func)
                         results_func_ids.append(func_id(func))
+                    scanned += 1
+                    progress.update(scanned, scan_total)
 
     # --- 埋め込み再利用ロジックの厳密化 ---
     if update_state:
@@ -831,7 +849,10 @@ async def embed(req: EmbedRequest):
 async def build_index_api(req: BuildIndexRequest):
     print(f"/build_index called for directory: {req.directory}")
     with index_lock:
-        results, file_count, _ = build_index(req.directory, req.file_ext, update_state=True)
+        try:
+            results, file_count, _ = await asyncio.to_thread(build_index, req.directory, req.file_ext, update_state=True)
+        finally:
+            progress.finish()
     return {"num_functions": len(results), "num_files": file_count}
 
 @app.post("/force_rebuild_index")
@@ -840,7 +861,10 @@ async def force_rebuild_index_api(req: BuildIndexRequest):
     print(f"/force_rebuild_index called for directory: {req.directory}")
     with index_lock:
         global_index_state.clear_cache()
-        results, file_count, _ = build_index(req.directory, req.file_ext, update_state=True)
+        try:
+            results, file_count, _ = await asyncio.to_thread(build_index, req.directory, req.file_ext, update_state=True)
+        finally:
+            progress.finish()
     return {"num_functions": len(results), "num_files": file_count, "message": "Index forcefully rebuilt"}
 
 @app.get("/index_status")
@@ -857,6 +881,11 @@ async def index_status():
         up_to_date=up_to_date
     )
 
+@app.get("/index_progress")
+async def index_progress():
+    """インデックス作成の進捗（実際の割合）を返す。"""
+    return progress.snapshot()
+
 @app.post("/search")
 async def search_api(query: str, top_k: int = 5):
     print(f"/search called with query: {query}")
@@ -868,9 +897,19 @@ async def search_api(query: str, top_k: int = 5):
 
 @app.post("/search_functions_simple")
 async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
+    search_mode = req.search_mode if req.search_mode in {"semantic", "bm25", "hybrid", "keyword"} else "hybrid"
+    semantic_weight = max(0.0, min(1.0, req.semantic_weight))
+    # キーワード/BM25 は埋め込み(FAISS インデックス)が不要。意味検索/ハイブリッドのみ埋め込みを構築する。
+    needs_embeddings = search_mode in {"semantic", "hybrid"}
     with index_lock:
-        # build_indexを必ず呼び、差分埋め込みロジックを統一
-        results, file_count, indexer = build_index(req.directory, req.file_ext, update_state=True)
+        # 意味検索/ハイブリッド: 埋め込みを構築 (update_state=True)
+        # キーワード/BM25: 関数リストのみ取得し埋め込み計算をスキップ (update_state=False)
+        try:
+            results, file_count, indexer = await asyncio.to_thread(
+                build_index, req.directory, req.file_ext, 8, needs_embeddings
+            )
+        finally:
+            progress.finish()
         def record_agent_event(found: list[dict], search_mode_value: str, semantic_weight_value: float, message: Optional[str] = None):
             if not req.capture_agent_event:
                 return None
@@ -899,8 +938,9 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
         print("file_ext:", global_index_state.file_ext)
         embeddings = global_index_state.embeddings
         faiss_index = global_index_state.faiss_index
-        if not results or embeddings is None or faiss_index is None:
-            agent_event = record_agent_event([], req.search_mode, req.semantic_weight, "No functions found.")
+        # 意味検索/ハイブリッドのみ埋め込み必須。キーワード/BM25 は関数リストだけで検索する。
+        if not results or (needs_embeddings and (embeddings is None or faiss_index is None)):
+            agent_event = record_agent_event([], search_mode, semantic_weight, "No functions found.")
             return {"results": [], "message": "No functions found.", "agent_event_id": agent_event["id"] if agent_event else None}
         search_results = results
         search_embeddings = embeddings
@@ -913,7 +953,7 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
                 if os.path.abspath(func.get("file", func.get("file_path", ""))) in include_files
             ]
             if not scoped_indices:
-                agent_event = record_agent_event([], req.search_mode, req.semantic_weight, "No functions found in the selected file scope.")
+                agent_event = record_agent_event([], search_mode, semantic_weight, "No functions found in the selected file scope.")
                 return {
                     "results": [],
                     "message": "No functions found in the selected file scope.",
@@ -923,13 +963,13 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
                     "agent_event_id": agent_event["id"] if agent_event else None,
                 }
             search_results = [results[index] for index in scoped_indices]
-            search_embeddings = embeddings[scoped_indices]
-            scoped_faiss_index = faiss.IndexFlatL2(search_embeddings.shape[1])
-            scoped_faiss_index.add(search_embeddings)
-            faiss_index = scoped_faiss_index
             index_to_result_index = scoped_indices
-        search_mode = req.search_mode if req.search_mode in {"semantic", "bm25", "hybrid", "keyword"} else "hybrid"
-        semantic_weight = max(0.0, min(1.0, req.semantic_weight))
+            # 埋め込みを使うモードのときのみ、スコープ済み FAISS インデックスを構築
+            if needs_embeddings and embeddings is not None and faiss_index is not None:
+                search_embeddings = embeddings[scoped_indices]
+                scoped_faiss_index = faiss.IndexFlatL2(search_embeddings.shape[1])
+                scoped_faiss_index.add(search_embeddings)
+                faiss_index = scoped_faiss_index
 
         if search_mode == "keyword":
             scoped_keyword_matches = keyword_search_matches(search_results, req.query)
@@ -960,7 +1000,7 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
         semantic_scores: dict[int, float] = {}
         semantic_distances: dict[int, float] = {}
         if search_mode in {"semantic", "hybrid"}:
-            query_emb = encode_code([req.query], batch_size=1)  # クエリは1つなのでバッチサイズ1
+            query_emb = encode_code([req.query], batch_size=1, show_progress=False)  # クエリは1つなので進捗報告は不要
             semantic_k = len(search_results) if search_mode == "hybrid" else min(req.top_k, len(search_results))
             D, I = faiss_index.search(query_emb, semantic_k)
             valid_distances = [

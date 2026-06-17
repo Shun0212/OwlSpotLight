@@ -171,6 +171,18 @@
           ],
           "description": "Gemini model used for Japanese query translation"
         },
+        "owlspotlight.serverHost": {
+          "type": "string",
+          "default": "127.0.0.1",
+          "description": "Host/IP address the OwlSpotlight search server binds to and the extension connects to. Default 127.0.0.1 (localhost). Note: codex/MCP integration expects 127.0.0.1:8000 unless OWLSPOTLIGHT_SERVER_URL is set. Restart the server after changing this."
+        },
+        "owlspotlight.serverPort": {
+          "type": "number",
+          "default": 8000,
+          "minimum": 1024,
+          "maximum": 65535,
+          "description": "Local server port for the OwlSpotlight search server. If the port is busy, the next available port is used automatically. Restart the server after changing this."
+        },
         "owlspotlight.autoStartServer": {
           "type": "boolean",
           "default": false,

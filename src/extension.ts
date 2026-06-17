@@ -9,6 +9,17 @@ import * as fs from 'fs';
 
 const DEFAULT_SERVER_HOST = '127.0.0.1';
 const DEFAULT_SERVER_PORT = 8000;
+
+// SIGTERM で落ちない uvicorn が孤児化(PPID=1)してポートを占有し続けるのを防ぐため、
+// 一定時間後に SIGKILL へエスカレーションする。
+function terminateServerProcess(proc: cp.ChildProcess): void {
+	proc.kill();
+	setTimeout(() => {
+		if (!proc.killed && proc.exitCode === null) {
+			proc.kill('SIGKILL');
+		}
+	}, 3000);
+}
 const SERVER_PORT_SCAN_LIMIT = 20;
 const TORCH_BUILD_MATRIX_PATH = path.resolve(__dirname, '..', 'model_server', 'torch_build_matrix.json');
 const DEFAULT_GEMINI_TRANSLATION_MODEL = 'gemini-3.5-flash';
@@ -525,8 +536,38 @@ function getTorchInstallOptions(): { options: TorchInstallOption[]; gpuInfo: Nvi
 	return { options, gpuInfo, autoReason: autoRecommendation.reason };
 }
 
+function getConfiguredBasePort(): number {
+	const configured = vscode.workspace.getConfiguration('owlspotlight').get<number>('serverPort', DEFAULT_SERVER_PORT);
+	if (typeof configured === 'number' && Number.isInteger(configured) && configured >= 1024 && configured <= 65535) {
+		return configured;
+	}
+	return DEFAULT_SERVER_PORT;
+}
+
+// uvicorn の --host に渡すバインドアドレス（0.0.0.0 で全インターフェース待受など）。
+function getConfiguredHost(): string {
+	const configured = vscode.workspace.getConfiguration('owlspotlight').get<string>('serverHost', DEFAULT_SERVER_HOST);
+	if (typeof configured === 'string' && configured.trim().length > 0) {
+		return configured.trim();
+	}
+	return DEFAULT_SERVER_HOST;
+}
+
+// ローカルの拡張機能が接続するためのアドレス。0.0.0.0 / :: などのワイルドカードは
+// クライアントから直接接続できないため、ループバックに読み替える。
+function getConnectHost(): string {
+	const host = getConfiguredHost();
+	if (host === '0.0.0.0' || host === '*') {
+		return '127.0.0.1';
+	}
+	if (host === '::' || host === '[::]') {
+		return '[::1]';
+	}
+	return host;
+}
+
 function getServerBaseUrl(port: number = activeServerPort): string {
-	return `http://${DEFAULT_SERVER_HOST}:${port}`;
+	return `http://${getConnectHost()}:${port}`;
 }
 
 function getServerUrl(endpoint: string, port: number = activeServerPort): string {
@@ -542,7 +583,7 @@ async function isOwlServerReachable(port: number): Promise<boolean> {
 	}
 }
 
-async function isPortAvailable(port: number, host: string = DEFAULT_SERVER_HOST): Promise<boolean> {
+async function isPortAvailable(port: number, host: string = getConfiguredHost()): Promise<boolean> {
 	return new Promise((resolve) => {
 		const server = net.createServer();
 		server.unref();
@@ -554,9 +595,27 @@ async function isPortAvailable(port: number, host: string = DEFAULT_SERVER_HOST)
 	});
 }
 
+// ホスト(IP)がこのマシンでバインド可能か（OSに割り当てられているか）を確認する。
+// EADDRNOTAVAIL は「そのIPはこの端末に存在しない」ことを示す。EADDRINUSE は使用中だが
+// バインド自体は可能なので true 扱い。
+async function canBindHost(host: string): Promise<boolean> {
+	return new Promise((resolve) => {
+		const server = net.createServer();
+		server.unref();
+		server.once('error', (err: NodeJS.ErrnoException) => {
+			resolve(err.code === 'EADDRINUSE');
+		});
+		server.once('listening', () => {
+			server.close(() => resolve(true));
+		});
+		server.listen(0, host);
+	});
+}
+
 async function findRunningServerPort(): Promise<number | undefined> {
+	const basePort = getConfiguredBasePort();
 	for (let offset = 0; offset < SERVER_PORT_SCAN_LIMIT; offset++) {
-		const port = DEFAULT_SERVER_PORT + offset;
+		const port = basePort + offset;
 		if (await isOwlServerReachable(port)) {
 			return port;
 		}
@@ -597,15 +656,16 @@ async function findLaunchServerPort(): Promise<{ port: number; reusedExisting: b
 		return { port: runningPort, reusedExisting: true };
 	}
 
+	const basePort = getConfiguredBasePort();
 	for (let offset = 0; offset < SERVER_PORT_SCAN_LIMIT; offset++) {
-		const port = DEFAULT_SERVER_PORT + offset;
+		const port = basePort + offset;
 		if (await isPortAvailable(port)) {
 			return { port, reusedExisting: false };
 		}
 	}
 
 	throw new Error(
-		`No available OwlSpotlight server port found in range ${DEFAULT_SERVER_PORT}-${DEFAULT_SERVER_PORT + SERVER_PORT_SCAN_LIMIT - 1}.`
+		`No available OwlSpotlight server port found in range ${basePort}-${basePort + SERVER_PORT_SCAN_LIMIT - 1}.`
 	);
 }
 
@@ -1423,6 +1483,14 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 		});
 	}
 
+	public notifyServerStatus(online: boolean, port?: number) {
+		this._view?.webview.postMessage({ type: 'serverStatus', online, port });
+	}
+
+	public notifyError(message: string) {
+		this._view?.webview.postMessage({ type: 'error', message });
+	}
+
 	private stopAgentSearchPolling() {
 		if (this._agentSearchPoll) {
 			clearInterval(this._agentSearchPoll);
@@ -1458,6 +1526,68 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 		};
 		this._agentSearchPoll = setInterval(poll, 2500);
 		void poll();
+	}
+
+	private pollIndexProgress(webviewView: vscode.WebviewView, serverPort: number): () => void {
+		let stopped = false;
+		const tick = async () => {
+			if (stopped) { return; }
+			try {
+				const res = await fetch(getServerUrl('/index_progress', serverPort));
+				if (res.ok && !stopped) {
+					const data: any = await res.json();
+					webviewView.webview.postMessage({ type: 'indexProgress', progress: data });
+				}
+			} catch {
+				// Progress polling is best-effort; ignore transient failures.
+			}
+		};
+		const timer = setInterval(tick, 400);
+		void tick();
+		return () => {
+			stopped = true;
+			clearInterval(timer);
+			webviewView.webview.postMessage({ type: 'indexProgress', progress: { active: false } });
+		};
+	}
+
+	private async setupAndStartServer(webviewView: vscode.WebviewView): Promise<boolean> {
+		const serverDir = path.join(this._context.extensionPath, 'model_server');
+		const venvDir = path.join(serverDir, '.venv');
+		const pythonBin = os.platform() === 'win32'
+			? path.join(venvDir, 'Scripts', 'python.exe')
+			: path.join(venvDir, 'bin', 'python');
+		try {
+			const bindHost = getConfiguredHost();
+			if (!(await canBindHost(bindHost))) {
+				const errMsg = `このIPアドレス (${bindHost}) はこの端末で使用できません。設定 owlspotlight.serverHost を 127.0.0.1 などバインド可能なアドレスに変更してください。\nThis IP address (${bindHost}) is not available on this machine. Change the owlspotlight.serverHost setting to a bindable address such as 127.0.0.1.`;
+				this.notifyServerStatus(false);
+				this.notifyError(errMsg);
+				void vscode.window.showErrorMessage(errMsg, { modal: true });
+				return false;
+			}
+			webviewView.webview.postMessage({ type: 'serverStatus', online: false, message: 'Checking setup...' });
+			if (!fs.existsSync(pythonBin)) {
+				webviewView.webview.postMessage({ type: 'status', message: 'Setting up Python environment...' });
+				const setupResult = await vscode.commands.executeCommand<boolean | undefined>('owlspotlight.setupEnv');
+				if (setupResult === false || !fs.existsSync(pythonBin)) {
+					webviewView.webview.postMessage({ type: 'error', message: 'Environment setup did not complete. Check the OwlSpotlight OUTPUT panel.' });
+					return false;
+				}
+			}
+			webviewView.webview.postMessage({ type: 'status', message: 'Starting server...' });
+			await vscode.commands.executeCommand('owlspotlight.startServer');
+			const serverPort = await waitForActiveServerPort(60000, 2000);
+			webviewView.webview.postMessage({ type: 'serverStatus', online: serverPort !== undefined, port: serverPort });
+			webviewView.webview.postMessage({
+				type: 'status',
+				message: serverPort !== undefined ? 'Server is ready. Enter a query to search.' : 'Server start requested, but readiness check timed out. Check the OwlSpotlight OUTPUT panel.'
+			});
+			return serverPort !== undefined;
+		} catch {
+			webviewView.webview.postMessage({ type: 'error', message: 'Setup and start failed. Check the OwlSpotlight OUTPUT panel.' });
+			return false;
+		}
 	}
 
        async resolveWebviewView(
@@ -1644,12 +1774,18 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					serverUp = false;
 				}
 				if (!serverUp) {
-					await vscode.window.showWarningMessage(
-						'The search server is not running. Please start the server from the sidebar or command palette.',
+					const choice = await vscode.window.showWarningMessage(
+						'The search server is not running. Start it now?',
 						{ modal: true },
-						'OK'
+						'Start Server'
 					);
-					return;
+					if (choice !== 'Start Server') {
+						return;
+					}
+					const started = await this.setupAndStartServer(webviewView);
+					if (!started) {
+						return;
+					}
 				}
                                 let query = msg.text;
                                 const fileExt = msg.lang || '.py';
@@ -1680,16 +1816,21 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					webviewView.webview.postMessage({ type: 'error', message: 'Failed to search. Make sure the server is running.' });
 					return;
 				}
-				const res = await fetch(getServerUrl('/search_functions_simple', serverPort), {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ directory: folderPath, query, top_k: 30, file_ext: fileExt, include_files: includeFiles, search_mode: searchMode })
-				});
-				const data: any = await res.json();
-				if (data && data.results && Array.isArray(data.results) && data.results.length > 0) {
-					webviewView.webview.postMessage({ type: 'results', results: data.results, folderPath });
-				} else {
-					webviewView.webview.postMessage({ type: 'results', results: [], folderPath });
+				const stopProgress = this.pollIndexProgress(webviewView, serverPort);
+				try {
+					const res = await fetch(getServerUrl('/search_functions_simple', serverPort), {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ directory: folderPath, query, top_k: 30, file_ext: fileExt, include_files: includeFiles, search_mode: searchMode })
+					});
+					const data: any = await res.json();
+					if (data && data.results && Array.isArray(data.results) && data.results.length > 0) {
+						webviewView.webview.postMessage({ type: 'results', results: data.results, folderPath });
+					} else {
+						webviewView.webview.postMessage({ type: 'results', results: [], folderPath });
+					}
+				} finally {
+					stopProgress();
 				}
 			}
 			if (msg.command === 'getClassStats') {
@@ -1882,32 +2023,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				void vscode.commands.executeCommand('owlspotlight.startServer');
 			}
 			if (msg.command === 'setupAndStart') {
-				const serverDir = path.join(this._context.extensionPath, 'model_server');
-				const venvDir = path.join(serverDir, '.venv');
-				const pythonBin = os.platform() === 'win32'
-					? path.join(venvDir, 'Scripts', 'python.exe')
-					: path.join(venvDir, 'bin', 'python');
-				try {
-					webviewView.webview.postMessage({ type: 'serverStatus', online: false, message: 'Checking setup...' });
-					if (!fs.existsSync(pythonBin)) {
-						webviewView.webview.postMessage({ type: 'status', message: 'Setting up Python environment...' });
-						const setupResult = await vscode.commands.executeCommand<boolean | undefined>('owlspotlight.setupEnv');
-						if (setupResult === false || !fs.existsSync(pythonBin)) {
-							webviewView.webview.postMessage({ type: 'error', message: 'Environment setup did not complete. Check the OwlSpotlight OUTPUT panel.' });
-							return;
-						}
-					}
-					webviewView.webview.postMessage({ type: 'status', message: 'Starting server...' });
-					await vscode.commands.executeCommand('owlspotlight.startServer');
-					const serverPort = await waitForActiveServerPort(60000, 2000);
-					webviewView.webview.postMessage({ type: 'serverStatus', online: serverPort !== undefined, port: serverPort });
-					webviewView.webview.postMessage({
-						type: 'status',
-						message: serverPort !== undefined ? 'Server is ready. Enter a query to search.' : 'Server start requested, but readiness check timed out. Check the OwlSpotlight OUTPUT panel.'
-					});
-				} catch {
-					webviewView.webview.postMessage({ type: 'error', message: 'Setup and start failed. Check the OwlSpotlight OUTPUT panel.' });
-				}
+				await this.setupAndStartServer(webviewView);
 			}
 			if (msg.command === 'stopServer') {
 				console.log('[OwlSpotlight] stopServer command received from Webview');
@@ -1932,12 +2048,18 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 						webviewView.webview.postMessage({ type: 'error', message: 'Failed to clear cache. Make sure the server is running.' });
 						return;
 					}
-					const res = await fetch(getServerUrl('/force_rebuild_index', serverPort), {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify({ directory: folderPath, file_ext: fileExt })
-					});
-					const data = await res.json();
+					const stopProgress = this.pollIndexProgress(webviewView, serverPort);
+					let data: any;
+					try {
+						const res = await fetch(getServerUrl('/force_rebuild_index', serverPort), {
+							method: 'POST',
+							headers: { 'Content-Type': 'application/json' },
+							body: JSON.stringify({ directory: folderPath, file_ext: fileExt })
+						});
+						data = await res.json();
+					} finally {
+						stopProgress();
+					}
 					const msg = typeof data === 'object' && data && 'message' in data ? (data as any).message : undefined;
 					webviewView.webview.postMessage({ type: 'status', message: msg || 'Cache cleared and index rebuilt.' });
 				} catch (error) {
@@ -1993,7 +2115,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
   <div class="header">
     <div class="header-left">
       OwlSpotlight
-      <span class="server-status offline hidden" id="serverStatus">
+      <span class="server-status offline" id="serverStatus">
         <span class="status-dot"></span>
         <span id="serverStatusText">Offline</span>
       </span>
@@ -2054,20 +2176,26 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
       <button id="searchOptionsBtn" class="secondary-action" title="Show search options">Options</button>
     </div>
     <div class="search-options" id="searchOptions" style="display:none;">
-      <label>
-        <span>Language</span>
-        <select id="languageSelect" ${selectStyle}>
-          ${options}
-        </select>
-      </label>
-      <label>
-        <span>Scope</span>
-        <select id="scopeSelect" title="Search scope">
-          <option value="all">All</option>
-          <option value="source">Source</option>
-          <option value="changed">Changed</option>
-        </select>
-      </label>
+      <details class="option-panel" id="generalPanel">
+        <summary>
+          <span>Language &amp; Scope</span>
+          <span id="generalSummary" class="option-summary"></span>
+        </summary>
+        <label>
+          <span>Language</span>
+          <select id="languageSelect" ${selectStyle}>
+            ${options}
+          </select>
+        </label>
+        <label>
+          <span>Scope</span>
+          <select id="scopeSelect" title="Search scope">
+            <option value="all">All</option>
+            <option value="source">Source</option>
+            <option value="changed">Changed</option>
+          </select>
+        </label>
+      </details>
       <details class="option-panel" id="searchBehaviorPanel">
         <summary>
           <span>Search behavior</span>
@@ -2317,6 +2445,9 @@ function updatePythonServerConfig() {
 export function activate(context: vscode.ExtensionContext) {
 	console.log('Congratulations, your extension "owlspotlight" is now active!');
 
+	// 設定で指定されたポートを基準にする
+	activeServerPort = getConfiguredBasePort();
+
 	// OUTPUT パネル: サーバー起動・環境構築のログを共通のチャネルに流す
 	const owlOutputChannel = vscode.window.createOutputChannel('OwlSpotlight');
 	const indexStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 90);
@@ -2379,10 +2510,11 @@ export function activate(context: vscode.ExtensionContext) {
 	}
 
 	// サイドバーWebviewViewProvider登録
+	const sidebarProvider = new OwlspotlightSidebarProvider(context, owlOutputChannel);
 	context.subscriptions.push(
 		vscode.window.registerWebviewViewProvider(
 			OwlspotlightSidebarProvider.viewType,
-			new OwlspotlightSidebarProvider(context, owlOutputChannel)
+			sidebarProvider
 		)
 	);
 
@@ -2577,6 +2709,17 @@ export function activate(context: vscode.ExtensionContext) {
 			return;
 		}
 
+		const bindHost = getConfiguredHost();
+		if (!(await canBindHost(bindHost))) {
+			isServerStarting = false;
+			const errMsg = `このIPアドレス (${bindHost}) はこの端末で使用できません。設定 owlspotlight.serverHost を 127.0.0.1 などバインド可能なアドレスに変更してください。\nThis IP address (${bindHost}) is not available on this machine. Change the owlspotlight.serverHost setting to a bindable address such as 127.0.0.1.`;
+			sidebarProvider.notifyServerStatus(false);
+			sidebarProvider.notifyError(errMsg);
+			void vscode.window.showErrorMessage(errMsg, { modal: true });
+			serverOutputChannel.appendLine(`\n[OwlSpotlight] Cannot bind to host "${bindHost}". This address is not assigned to this machine.`);
+			return;
+		}
+
 		try {
 			const launchTarget = await findLaunchServerPort();
 			if (launchTarget.reusedExisting) {
@@ -2592,7 +2735,7 @@ export function activate(context: vscode.ExtensionContext) {
 			if (serverProcess && !serverProcess.killed) {
 				isServerStopping = true;
 				clearServerStartupPoll();
-				serverProcess.kill();
+				terminateServerProcess(serverProcess);
 				serverProcess = undefined;
 			}
 
@@ -2606,7 +2749,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 			const child = cp.spawn(
 				pythonBin,
-				['-m', 'uvicorn', 'server:app', '--host', DEFAULT_SERVER_HOST, '--port', String(selectedPort)],
+				['-m', 'uvicorn', 'server:app', '--host', getConfiguredHost(), '--port', String(selectedPort), '--log-level', 'warning', '--no-access-log'],
 				{
 					cwd: serverDir,
 					env: {
@@ -2624,11 +2767,25 @@ export function activate(context: vscode.ExtensionContext) {
 			child.stdout?.on('data', (data: Buffer) => {
 				serverOutputChannel.append(data.toString());
 			});
+			// stderr はシャットダウン時の resource_tracker 警告などのノイズを行単位で除去する。
+			// 別プロセスから出るためサーバー側の warnings 抑制では消せない。
+			let stderrBuffer = '';
+			const isNoisyServerLine = (line: string) => /resource_tracker|leaked semaphore/.test(line);
 			child.stderr?.on('data', (data: Buffer) => {
-				serverOutputChannel.append(data.toString());
+				stderrBuffer += data.toString();
+				const lines = stderrBuffer.split('\n');
+				stderrBuffer = lines.pop() ?? '';
+				for (const line of lines) {
+					if (isNoisyServerLine(line)) { continue; }
+					serverOutputChannel.appendLine(line);
+				}
 			});
 			child.on('close', async (code: number | null) => {
 				clearServerStartupPoll();
+				if (stderrBuffer.trim().length && !isNoisyServerLine(stderrBuffer)) {
+					serverOutputChannel.appendLine(stderrBuffer);
+				}
+				stderrBuffer = '';
 				if (serverProcess === child) {
 					serverProcess = undefined;
 				}
@@ -2641,7 +2798,8 @@ export function activate(context: vscode.ExtensionContext) {
 					serverOutputChannel.appendLine(`\n[OwlSpotlight] Server process exited (code: ${code})`);
 				}
 				const runningPort = await findRunningServerPort();
-				activeServerPort = runningPort ?? DEFAULT_SERVER_PORT;
+				activeServerPort = runningPort ?? getConfiguredBasePort();
+				sidebarProvider.notifyServerStatus(runningPort !== undefined, runningPort);
 			});
 			child.on('error', (err: Error) => {
 				clearServerStartupPoll();
@@ -2649,7 +2807,8 @@ export function activate(context: vscode.ExtensionContext) {
 				isServerStarting = false;
 				serverProcess = undefined;
 				isServerStopping = false;
-				activeServerPort = DEFAULT_SERVER_PORT;
+				activeServerPort = getConfiguredBasePort();
+				sidebarProvider.notifyServerStatus(false);
 				vscode.window.showErrorMessage(`Failed to start server: ${err.message}`);
 			});
 
@@ -2660,7 +2819,7 @@ export function activate(context: vscode.ExtensionContext) {
 		} catch (err) {
 			clearServerStartupPoll();
 			isServerStarting = false;
-			activeServerPort = DEFAULT_SERVER_PORT;
+			activeServerPort = getConfiguredBasePort();
 			vscode.window.showErrorMessage(`Failed to start server: ${err}`);
 			return;
 		}
@@ -2696,7 +2855,8 @@ export function activate(context: vscode.ExtensionContext) {
 			clearServerStartupPoll();
 			isServerStopping = true;
 			isServerStarting = false;
-			serverProcess.kill();
+			terminateServerProcess(serverProcess);
+			sidebarProvider.notifyServerStatus(false);
 			vscode.window.showInformationMessage('OwlSpotlight server stopping...');
 		} else {
 			void resolveActiveServerPort().then((serverPort) => {
@@ -2716,7 +2876,7 @@ export function activate(context: vscode.ExtensionContext) {
 			clearServerStartupPoll();
 			if (serverProcess && !serverProcess.killed) {
 				isServerStopping = true;
-				serverProcess.kill();
+				terminateServerProcess(serverProcess);
 			}
 		}
 	});
