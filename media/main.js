@@ -9,6 +9,7 @@ window.onload = function() {
     let currentResults = [];
     let owlIgnorePatterns = [];
     let owlIgnoreTree = null;
+    let agentSearchEvents = [];
 
     // 状態保存/復元
     function collectState() {
@@ -44,7 +45,8 @@ window.onload = function() {
             currentSearchQuery,
             currentStatsData,
             currentFolderPath,
-            currentResults
+            currentResults,
+            agentSearchEvents
         };
     }
 
@@ -120,6 +122,10 @@ window.onload = function() {
                 currentStatsData = state.currentStatsData;
                 applyStatsFilter();
             }
+            if (Array.isArray(state.agentSearchEvents) && state.agentSearchEvents.length > 0) {
+                agentSearchEvents = state.agentSearchEvents;
+                renderAgentSearchEvents();
+            }
             syncSegmentedControls();
         } catch (e) {
             console.warn('Failed to restore state', e);
@@ -190,6 +196,10 @@ window.onload = function() {
                 currentStatsData = external.currentStatsData;
                 applyStatsFilter();
             }
+            if (Array.isArray(external.agentSearchEvents) && external.agentSearchEvents.length > 0) {
+                agentSearchEvents = external.agentSearchEvents;
+                renderAgentSearchEvents();
+            }
             // 外部復元後ローカルへも保存
             syncSegmentedControls();
             saveState();
@@ -247,6 +257,11 @@ window.onload = function() {
           document.getElementById('stopServerBtn').onclick = () => {
             console.log('stopServerBtn clicked');
             vscode.postMessage({ command: 'stopServer' });
+          };
+        }
+        if (document.getElementById('agentSetupBtn')) {
+          document.getElementById('agentSetupBtn').onclick = () => {
+            vscode.postMessage({ command: 'generateAgentSetup' });
           };
         }
         if (document.getElementById('searchOptionsBtn')) {
@@ -699,18 +714,141 @@ window.onload = function() {
         saveState();
     }
 
+    function escapeHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function formatAgentEventTime(event) {
+        const created = Number(event?.created_at || 0);
+        if (!created) return '';
+        try {
+            return new Date(created * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        } catch {
+            return '';
+        }
+    }
+
+    function applyAgentSearchEvent(event) {
+        if (!event) return;
+        const query = event.original_query || event.query || '';
+        const searchInput = document.getElementById('searchInput');
+        if (searchInput && query) {
+            searchInput.value = query;
+        }
+        currentSearchQuery = query;
+        if (event.file_ext && document.getElementById('languageSelect')) {
+            document.getElementById('languageSelect').value = event.file_ext;
+        }
+        if (event.search_mode && document.getElementById('searchModeSelect')) {
+            document.getElementById('searchModeSelect').value = event.search_mode;
+        }
+        if (event.scope && document.getElementById('scopeSelect')) {
+            const normalizedScope = ['all', 'source', 'changed'].includes(event.scope) ? event.scope : 'all';
+            document.getElementById('scopeSelect').value = normalizedScope;
+        }
+        currentFolderPath = event.directory || currentFolderPath;
+        currentResults = Array.isArray(event.results) ? event.results : [];
+        syncSegmentedControls();
+        renderResults(currentResults, currentFolderPath || '');
+        const statusEl = document.getElementById('status');
+        if (statusEl) {
+            statusEl.textContent = `Agent search: ${currentResults.length} results`;
+        }
+        saveState();
+    }
+
+    function renderAgentSearchEvents() {
+        const panel = document.getElementById('agentReviewPanel');
+        const list = document.getElementById('agentReviewList');
+        const count = document.getElementById('agentReviewCount');
+        if (!panel || !list) return;
+        if (!agentSearchEvents.length) {
+            panel.style.display = 'none';
+            return;
+        }
+        panel.style.display = 'block';
+        if (count) {
+            count.textContent = agentSearchEvents.length + (agentSearchEvents.length === 1 ? ' search' : ' searches');
+        }
+        list.innerHTML = '';
+        agentSearchEvents.slice(0, 8).forEach(event => {
+            const item = document.createElement('div');
+            item.className = 'agent-review-item';
+            item.setAttribute('data-event-id', event.id);
+            const query = event.original_query || event.query || '';
+            const resultCount = typeof event.result_count === 'number'
+                ? event.result_count
+                : Array.isArray(event.results) ? event.results.length : 0;
+            item.innerHTML =
+                '<div class="agent-review-meta">' +
+                    '<span>' + escapeHtml(event.source || 'agent') + '</span>' +
+                    '<span>' + escapeHtml(event.file_ext || '') + '</span>' +
+                    '<span>' + escapeHtml(event.search_mode || '') + '</span>' +
+                    '<span>' + resultCount + ' results</span>' +
+                    '<span>' + escapeHtml(formatAgentEventTime(event)) + '</span>' +
+                '</div>' +
+                '<div class="agent-review-query">' + escapeHtml(query) + '</div>' +
+                '<div class="agent-review-actions">' +
+                    '<button type="button" class="secondary-action agent-use-query">Use</button>' +
+                    '<button type="button" class="secondary-action agent-show-results">Show Results</button>' +
+                '</div>' +
+                '<textarea class="agent-feedback-input" rows="2" placeholder="Suggest a better query or note what the agent should inspect next"></textarea>' +
+                '<div class="agent-review-actions">' +
+                    '<button type="button" class="secondary-action agent-send-feedback">Send Suggestion</button>' +
+                    '<span class="agent-feedback-status"></span>' +
+                '</div>';
+            item.querySelector('.agent-use-query').onclick = () => {
+                const input = document.getElementById('searchInput');
+                if (input) input.value = query;
+                currentSearchQuery = query;
+                saveState();
+            };
+            item.querySelector('.agent-show-results').onclick = () => {
+                applyAgentSearchEvent(event);
+            };
+            item.querySelector('.agent-send-feedback').onclick = () => {
+                const feedbackInput = item.querySelector('.agent-feedback-input');
+                const suggestion = feedbackInput ? feedbackInput.value.trim() : '';
+                if (!suggestion) return;
+                vscode.postMessage({
+                    command: 'agentSearchFeedback',
+                    eventId: event.id,
+                    query,
+                    suggestion
+                });
+                const status = item.querySelector('.agent-feedback-status');
+                if (status) status.textContent = 'Sending...';
+            };
+            list.appendChild(item);
+        });
+    }
+
+    function addAgentSearchEvents(events) {
+        if (!Array.isArray(events) || !events.length) return;
+        const byId = new Map(agentSearchEvents.map(event => [event.id, event]));
+        events.forEach(event => {
+            if (event && typeof event.id !== 'undefined') {
+                byId.set(event.id, event);
+            }
+        });
+        agentSearchEvents = Array.from(byId.values())
+            .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))
+            .slice(0, 20);
+        renderAgentSearchEvents();
+        applyAgentSearchEvent(agentSearchEvents[0]);
+    }
+
     // 結果描画を関数化（復元時にも利用）
     function renderResults(results, folderPath) {
         const resultsContainer = document.getElementById('results');
         const statusEl = document.getElementById('status');
         const emptyEl = document.getElementById('emptyState');
         const resultTypeFilter = document.getElementById('resultTypeFilter')?.value || 'function_level';
-        const escapeHtml = (value) => String(value ?? '')
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
         const formatScore = (value) => {
             if (typeof value !== 'number' || !Number.isFinite(value)) return null;
             return Math.max(0, Math.min(1, value)).toFixed(2);
@@ -902,6 +1040,14 @@ window.onload = function() {
                 }
                 if (msg.type === 'serverStatus') {
                         setServerStatus(msg.online, msg.message || msg.port);
+                }
+                if (msg.type === 'agentSearchEvents') {
+                        addAgentSearchEvents(msg.events);
+                }
+                if (msg.type === 'agentFeedbackStatus') {
+                        const item = document.querySelector('.agent-review-item[data-event-id="' + msg.eventId + '"]');
+                        const status = item ? item.querySelector('.agent-feedback-status') : null;
+                        if (status) status.textContent = msg.message || '';
                 }
                 if (msg.type === 'owlIgnoreSettings') {
                         setOwlIgnoreSettings(msg);

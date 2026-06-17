@@ -139,6 +139,9 @@ Example `.mcp.json` for Claude Code or Cursor:
 ```
 
 The MCP tool is `owlspotlight.search_code`. It accepts `directory`, `query`, `file_ext`, `top_k`, `scope`, `search_mode`, and optional `server_url`.
+Agent searches are mirrored into the OwlSpotlight sidebar for observability. Human feedback is optional; the companion MCP tool `owlspotlight.get_human_feedback` is only needed when you explicitly enter query-improvement suggestions in the sidebar.
+
+To avoid hand-editing paths, run **OwlSpotlight: Generate Agent Setup** from the Command Palette or click **Agent Setup** in the sidebar. It can create/update the workspace `.mcp.json` and copy agent instructions with the current server URL.
 
 - Cursor: use project `.cursor/mcp.json` or global `~/.cursor/mcp.json`.
 - Claude Code: use `.mcp.json` or `claude mcp add-json`.
@@ -298,6 +301,9 @@ Claude Code / Cursor 向け `.mcp.json` 例:
 ```
 
 MCP tool は `owlspotlight.search_code` です。`directory`, `query`, `file_ext`, `top_k`, `scope`, `search_mode`, `server_url` を受け取ります。
+エージェント経由の検索は OwlSpotlight サイドバーにも反映され、何を検索したか観測できます。人間の feedback は任意です。サイドバーで明示的に改善案を入力した場合だけ、追加 MCP tool `owlspotlight.get_human_feedback` からエージェントが取得できます。
+
+パスを手で書き換えたくない場合は、コマンドパレットの **OwlSpotlight: Generate Agent Setup** またはサイドバーの **Agent Setup** を使ってください。現在の server URL と絶対パス入りで workspace `.mcp.json` を作成/更新し、エージェント向け指示もコピーできます。
 
 ### 開発
 

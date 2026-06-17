@@ -81,6 +81,10 @@
       {
         "command": "owlspotlight.removeVenv",
         "title": "OwlSpotlight: Remove Virtual Environment"
+      },
+      {
+        "command": "owlspotlight.generateAgentSetup",
+        "title": "OwlSpotlight: Generate Agent Setup"
       }
     ],
     "configuration": {

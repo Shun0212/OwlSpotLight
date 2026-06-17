@@ -79,6 +79,15 @@ class SearchFunctionsSimpleRequest(BaseModel):
     include_files: Optional[List[str]] = None
     search_mode: str = "semantic"
     semantic_weight: float = 0.75
+    capture_agent_event: bool = False
+    agent_source: Optional[str] = None
+    original_query: Optional[str] = None
+    scope: Optional[str] = None
+
+class AgentSearchFeedbackRequest(BaseModel):
+    event_id: int
+    suggestion: str
+    query: Optional[str] = None
 
 class FunctionRangeRequest(BaseModel):
     file: str
@@ -96,6 +105,29 @@ class ClassStatsRequest(BaseModel):
 
 # サーバー全体で1つのインデックスを保持
 index_lock = Lock()
+agent_event_lock = Lock()
+agent_search_events: list[dict] = []
+agent_search_feedback: list[dict] = []
+MAX_AGENT_SEARCH_EVENTS = 100
+MAX_AGENT_SEARCH_FEEDBACK = 100
+
+def append_agent_search_event(event: dict) -> dict:
+    with agent_event_lock:
+        next_id = (agent_search_events[-1]["id"] + 1) if agent_search_events else 1
+        stored = {"id": next_id, "created_at": time.time(), **event}
+        agent_search_events.append(stored)
+        if len(agent_search_events) > MAX_AGENT_SEARCH_EVENTS:
+            del agent_search_events[:-MAX_AGENT_SEARCH_EVENTS]
+        return stored
+
+def append_agent_search_feedback(feedback: dict) -> dict:
+    with agent_event_lock:
+        next_id = (agent_search_feedback[-1]["id"] + 1) if agent_search_feedback else 1
+        stored = {"id": next_id, "created_at": time.time(), **feedback}
+        agent_search_feedback.append(stored)
+        if len(agent_search_feedback) > MAX_AGENT_SEARCH_FEEDBACK:
+            del agent_search_feedback[:-MAX_AGENT_SEARCH_FEEDBACK]
+        return stored
 
 # インデックス情報を保持するクラス
 class GlobalIndexerState:
@@ -384,10 +416,15 @@ def bm25_search_scores(functions: list[dict], query: str) -> dict[int, float]:
     for func in functions:
         name = func.get("name", "")
         function_name = func.get("function_name", "")
+        file_path = func.get("file_path") or func.get("file", "")
         source_code = func.get("raw_code") or func.get("code", "")
         parts = [
             name,
             function_name if function_name != name else "",
+            func.get("class_name", ""),
+            func.get("symbol_kind", ""),
+            file_path,
+            os.path.basename(str(file_path)) if file_path else "",
             source_code,
             json.dumps(func.get("python_static", {}), ensure_ascii=False),
         ]
@@ -685,6 +722,27 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
     with index_lock:
         # build_indexを必ず呼び、差分埋め込みロジックを統一
         results, file_count, indexer = build_index(req.directory, req.file_ext, update_state=True)
+        def record_agent_event(found: list[dict], search_mode_value: str, semantic_weight_value: float, message: Optional[str] = None):
+            if not req.capture_agent_event:
+                return None
+            event = {
+                "source": req.agent_source or "agent",
+                "directory": os.path.abspath(req.directory),
+                "query": req.query,
+                "original_query": req.original_query or req.query,
+                "file_ext": req.file_ext,
+                "top_k": req.top_k,
+                "scope": req.scope or ("scoped" if req.include_files else "all"),
+                "search_mode": search_mode_value,
+                "semantic_weight": semantic_weight_value,
+                "include_files_count": len(req.include_files or []),
+                "result_count": len(found),
+                "results": found,
+            }
+            if message:
+                event["message"] = message
+            return append_agent_search_event(event)
+
         # build_index後のキャッシュ状態をprint
         print("indexer_exists:", global_index_state.indexer is not None)
         print("up_to_date:", global_index_state.is_up_to_date())
@@ -693,7 +751,8 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
         embeddings = global_index_state.embeddings
         faiss_index = global_index_state.faiss_index
         if not results or embeddings is None or faiss_index is None:
-            return {"results": [], "message": "No functions found."}
+            agent_event = record_agent_event([], req.search_mode, req.semantic_weight, "No functions found.")
+            return {"results": [], "message": "No functions found.", "agent_event_id": agent_event["id"] if agent_event else None}
         search_results = results
         search_embeddings = embeddings
         index_to_result_index = list(range(len(results)))
@@ -705,12 +764,14 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
                 if os.path.abspath(func.get("file", func.get("file_path", ""))) in include_files
             ]
             if not scoped_indices:
+                agent_event = record_agent_event([], req.search_mode, req.semantic_weight, "No functions found in the selected file scope.")
                 return {
                     "results": [],
                     "message": "No functions found in the selected file scope.",
                     "num_functions": len(results),
                     "num_files": file_count,
                     "scoped_files": len(include_files),
+                    "agent_event_id": agent_event["id"] if agent_event else None,
                 }
             search_results = [results[index] for index in scoped_indices]
             search_embeddings = embeddings[scoped_indices]
@@ -782,6 +843,7 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
             item["hybrid_score"] = hybrid_score
             item["search_mode"] = search_mode
             found.append(item)
+        agent_event = record_agent_event(found, search_mode, semantic_weight)
         return {
             "results": found,
             "num_functions": len(results),
@@ -789,8 +851,33 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
             "scoped_files": len(req.include_files or []),
             "search_mode": search_mode,
             "semantic_weight": semantic_weight,
+            "agent_event_id": agent_event["id"] if agent_event else None,
         }
 
+
+@app.get("/agent_search_events")
+async def agent_search_events_api(since_id: int = 0, limit: int = 20):
+    with agent_event_lock:
+        events = [event for event in agent_search_events if event["id"] > since_id]
+        return {"events": events[-max(1, min(limit, 100)) :]}
+
+@app.post("/agent_search_feedback")
+async def agent_search_feedback_api(req: AgentSearchFeedbackRequest):
+    suggestion = req.suggestion.strip()
+    if not suggestion:
+        raise HTTPException(status_code=400, detail="suggestion is required")
+    stored = append_agent_search_feedback({
+        "event_id": req.event_id,
+        "query": req.query,
+        "suggestion": suggestion,
+    })
+    return {"ok": True, "feedback": stored}
+
+@app.get("/agent_search_feedback")
+async def agent_search_feedback_list_api(since_id: int = 0, limit: int = 20):
+    with agent_event_lock:
+        feedback = [item for item in agent_search_feedback if item["id"] > since_id]
+        return {"feedback": feedback[-max(1, min(limit, 100)) :]}
 
 
 @app.post("/get_class_stats")
