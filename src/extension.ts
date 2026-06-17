@@ -1365,10 +1365,6 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					return;
 				}
                                 let query = msg.text;
-                                const originalQuery = query;
-                                query = await translateJapaneseToEnglish(query);
-                                // Always send both original and translated query to Webview for debugging
-                                webviewView.webview.postMessage({ type: 'translatedQuery', original: originalQuery, translated: query });
                                 const fileExt = msg.lang || '.py';
 				const workspaceFolders = vscode.workspace.workspaceFolders;
 				if (!workspaceFolders || workspaceFolders.length === 0) {
@@ -1378,7 +1374,13 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				const workspaceFolder = workspaceFolders[0];
 				const folderPath = workspaceFolder.uri.fsPath;
 				const scope = (msg.scope === 'source' || msg.scope === 'changed') ? msg.scope as SearchScope : 'all';
-				const searchMode = ['semantic', 'bm25', 'hybrid'].includes(msg.searchMode) ? msg.searchMode : 'semantic';
+				const searchMode = ['semantic', 'bm25', 'hybrid', 'keyword'].includes(msg.searchMode) ? msg.searchMode : 'semantic';
+				const originalQuery = query;
+				if (searchMode !== 'keyword') {
+					query = await translateJapaneseToEnglish(query);
+				}
+				// Always send both original and translated query to Webview for debugging
+				webviewView.webview.postMessage({ type: 'translatedQuery', original: originalQuery, translated: query });
 				const includeFiles = await resolveSearchScopeFiles(workspaceFolder, fileExt, scope);
 				if (scope === 'changed' && includeFiles && includeFiles.length === 0) {
 					webviewView.webview.postMessage({ type: 'results', results: [], folderPath });
@@ -1412,12 +1414,14 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                 const workspaceFolder = workspaceFolders[0];
                 const folderPath = workspaceFolder.uri.fsPath;
                 let query = msg.query || '';
-                const originalQuery = query;
-                query = await translateJapaneseToEnglish(query);
-                webviewView.webview.postMessage({ type: 'translatedQuery', original: originalQuery, translated: query });
                 const fileExt = msg.lang || '.py';
                 const scope = (msg.scope === 'source' || msg.scope === 'changed') ? msg.scope as SearchScope : 'all';
-                const searchMode = ['semantic', 'bm25', 'hybrid'].includes(msg.searchMode) ? msg.searchMode : 'semantic';
+                const searchMode = ['semantic', 'bm25', 'hybrid', 'keyword'].includes(msg.searchMode) ? msg.searchMode : 'semantic';
+                const originalQuery = query;
+                if (searchMode !== 'keyword') {
+                        query = await translateJapaneseToEnglish(query);
+                }
+                webviewView.webview.postMessage({ type: 'translatedQuery', original: originalQuery, translated: query });
                 const includeFiles = await resolveSearchScopeFiles(workspaceFolder, fileExt, scope);
 				webviewView.webview.postMessage({ type: 'status', message: 'Loading class statistics...' });
 				try {
@@ -1788,11 +1792,13 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
             <button type="button" class="segment-btn active" data-value="semantic" title="Embedding-based natural language search">Semantic</button>
             <button type="button" class="segment-btn" data-value="hybrid" title="Semantic search with BM25 keyword boost">Hybrid</button>
             <button type="button" class="segment-btn" data-value="bm25" title="Keyword/token search">BM25</button>
+            <button type="button" class="segment-btn" data-value="keyword" title="Literal keyword match without scoring">Keyword</button>
           </div>
           <select id="searchModeSelect" title="Search mode" class="hidden-select" aria-hidden="true" tabindex="-1">
             <option value="semantic" selected>Semantic</option>
             <option value="hybrid">Hybrid</option>
             <option value="bm25">BM25</option>
+            <option value="keyword">Keyword</option>
           </select>
         </div>
         <div class="option-row">

@@ -427,6 +427,35 @@ def bm25_search_scores(functions: list[dict], query: str) -> dict[int, float]:
             scores[index] = score
     return scores
 
+
+def searchable_function_text(func: dict) -> str:
+    name = func.get("name", "")
+    function_name = func.get("function_name", "")
+    source_code = func.get("raw_code") or func.get("code", "")
+    parts = [
+        name,
+        function_name if function_name != name else "",
+        func.get("class_name", ""),
+        func.get("docstring", ""),
+        source_code,
+        json.dumps(func.get("python_static", {}), ensure_ascii=False),
+    ]
+    return "\n".join(str(part) for part in parts if part)
+
+
+def keyword_search_matches(functions: list[dict], query: str) -> dict[int, list[str]]:
+    keywords = [keyword.strip() for keyword in query.split() if keyword.strip()]
+    if not keywords:
+        return {}
+    folded_keywords = [keyword.casefold() for keyword in keywords]
+
+    matches: dict[int, list[str]] = {}
+    for index, func in enumerate(functions):
+        searchable_text = searchable_function_text(func).casefold()
+        if all(keyword in searchable_text for keyword in folded_keywords):
+            matches[index] = keywords
+    return matches
+
 # ディレクトリ内の全ファイルから関数抽出・インデックス作成（一時的なインデックス、状態保存なし）
 def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, update_state: bool = False):
     import hashlib
@@ -718,8 +747,32 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
             scoped_faiss_index.add(search_embeddings)
             faiss_index = scoped_faiss_index
             index_to_result_index = scoped_indices
-        search_mode = req.search_mode if req.search_mode in {"semantic", "bm25", "hybrid"} else "hybrid"
+        search_mode = req.search_mode if req.search_mode in {"semantic", "bm25", "hybrid", "keyword"} else "hybrid"
         semantic_weight = max(0.0, min(1.0, req.semantic_weight))
+
+        if search_mode == "keyword":
+            scoped_keyword_matches = keyword_search_matches(search_results, req.query)
+            found = []
+            for rank, scoped_index in enumerate(sorted(scoped_keyword_matches)[:req.top_k], start=1):
+                result_index = index_to_result_index[scoped_index]
+                item = dict(results[result_index])
+                item["rank"] = rank
+                item["distance"] = None
+                item["semantic_similarity"] = 0.0
+                item["bm25_score"] = 0.0
+                item["hybrid_score"] = None
+                item["search_mode"] = search_mode
+                item["keyword_match"] = True
+                item["matched_keywords"] = scoped_keyword_matches[scoped_index]
+                found.append(item)
+            return {
+                "results": found,
+                "num_functions": len(results),
+                "num_files": file_count,
+                "scoped_files": len(req.include_files or []),
+                "search_mode": search_mode,
+                "semantic_weight": semantic_weight,
+            }
 
         semantic_scores: dict[int, float] = {}
         semantic_distances: dict[int, float] = {}

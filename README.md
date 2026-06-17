@@ -23,7 +23,7 @@ Find functions, methods, classes, Python CodeBlocks, routes, tests, and call-hea
 
 ### Why OwlSpotlight?
 
-OwlSpotlight is not just generic chunk search. It builds a local semantic index from code structure, then combines ModernBERT embeddings with lightweight BM25 lexical ranking.
+OwlSpotlight is not just generic chunk search. It builds a local semantic index from code structure, then combines ModernBERT embeddings with lightweight BM25 lexical ranking and literal keyword matching.
 
 | What you need | OwlSpotlight gives you |
 |---|---|
@@ -38,7 +38,7 @@ OwlSpotlight is not just generic chunk search. It builds a local semantic index 
 
 ### Highlights
 
-- **Hybrid search**: `hybrid`, `semantic`, or `bm25` mode.
+- **Search modes**: `hybrid`, `semantic`, `bm25`, or literal `keyword` mode.
 - **Python static analysis**: params, return annotations, decorators, imports, calls, assigned names, docstrings, local call graph, import dependencies.
 - **Python CodeBlocks**: searches top-level logic outside functions/classes, grouped between function/class definitions.
 - **Framework-aware metadata**: FastAPI route and pytest symbol hints.
@@ -84,7 +84,7 @@ The sidebar keeps the main search bar compact. Click **Options** to choose:
 |---|---|
 | Language | Python, Java, TypeScript, TSX, JavaScript, JSX |
 | Scope | `All`, `Source`, `Changed` |
-| Mode | `Hybrid`, `Semantic`, `BM25` |
+| Mode | `Hybrid`, `Semantic`, `BM25`, `Keyword` |
 | Type | `All`, `Functions`, `Methods`, `CodeBlocks` |
 
 `Source` auto-detects folders such as `src`, `app`, `lib`, `packages`, `client`, `server`, `backend`, and `frontend`.
@@ -170,6 +170,7 @@ FastAPI background server
         |-- ModernBERT embeddings
         |-- FAISS vector index
         |-- Lightweight BM25 ranking
+        |-- Literal keyword matching
         |-- Disk + memory incremental cache
 ```
 
@@ -224,11 +225,11 @@ FastAPI background server
 
 ### OwlSpotlight とは
 
-OwlSpotlight は、VS Code 上でローカルコードを自然言語検索するための拡張機能です。単なるチャンク検索ではなく、Python の構造・呼び出し・import・FastAPI route・pytest などの静的解析メタデータを使い、semantic embedding と BM25 を組み合わせて検索します。
+OwlSpotlight は、VS Code 上でローカルコードを自然言語検索するための拡張機能です。単なるチャンク検索ではなく、Python の構造・呼び出し・import・FastAPI route・pytest などの静的解析メタデータを使い、semantic embedding、BM25、完全一致キーワード検索を組み合わせて検索します。
 
 ### 主な機能
 
-- **ハイブリッド検索**: `Hybrid`, `Semantic`, `BM25` を切り替え可能。
+- **検索モード**: `Hybrid`, `Semantic`, `BM25`, `Keyword` を切り替え可能。
 - **Python静的解析**: params、return annotation、decorator、import、call、代入名、docstring、call graph、import dependency を抽出。
 - **Python CodeBlock検索**: 関数/クラス外のトップレベル処理も検索対象。
 - **FastAPI / pytest ヒント**: route や test/fixture をメタデータとして保持。
@@ -265,7 +266,7 @@ OwlSpotlight: Start Server
 |---|---|
 | Language | Python, Java, TypeScript, TSX, JavaScript, JSX |
 | Scope | `All`, `Source`, `Changed` |
-| Mode | `Hybrid`, `Semantic`, `BM25` |
+| Mode | `Hybrid`, `Semantic`, `BM25`, `Keyword` |
 | Type | `All`, `Functions`, `Methods`, `CodeBlocks` |
 
 `Source` は `src`, `app`, `lib`, `packages`, `client`, `server`, `backend`, `frontend` などを自動検知します。

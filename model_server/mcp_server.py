@@ -123,7 +123,7 @@ def tool_definitions() -> list[dict[str, Any]]:
                     "search_mode": {
                         "type": "string",
                         "description": "Search ranking mode.",
-                        "enum": ["semantic", "bm25", "hybrid"],
+                        "enum": ["semantic", "bm25", "hybrid", "keyword"],
                         "default": "hybrid",
                     },
                     "server_url": {
@@ -164,7 +164,7 @@ def call_search(arguments: dict[str, Any]) -> dict[str, Any]:
         "file_ext": file_ext,
         "top_k": max(1, min(top_k, 50)),
         "include_files": include_files,
-        "search_mode": search_mode if search_mode in {"semantic", "bm25", "hybrid"} else "hybrid",
+        "search_mode": search_mode if search_mode in {"semantic", "bm25", "hybrid", "keyword"} else "hybrid",
     }
     try:
         result = post_json(f"{server_url}/search_functions_simple", payload)

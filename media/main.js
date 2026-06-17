@@ -297,7 +297,7 @@ window.onload = function() {
           if (!summary) return;
           const mode = document.getElementById('searchModeSelect')?.value || 'semantic';
           const type = document.getElementById('resultTypeFilter')?.value || 'function_level';
-          const modeLabel = { semantic: 'Semantic', hybrid: 'Hybrid', bm25: 'BM25' }[mode] || mode;
+          const modeLabel = { semantic: 'Semantic', hybrid: 'Hybrid', bm25: 'BM25', keyword: 'Keyword' }[mode] || mode;
           const typeLabel = {
             function_level: 'Function-level',
             all: 'All',
@@ -713,7 +713,7 @@ window.onload = function() {
             .replace(/'/g, '&#39;');
         const formatScore = (value) => {
             if (typeof value !== 'number' || !Number.isFinite(value)) return null;
-            return Math.max(0, Math.min(1, value)).toFixed(2);
+            return String(Math.round(Math.max(0, Math.min(1, value)) * 100));
         };
         const symbolLabel = (result) => {
             if (result.symbol_kind === 'code_block') return 'CodeBlock';
@@ -799,7 +799,7 @@ window.onload = function() {
             if (rankScore >= 0.7) { scoreClass = 'score-high'; barClass = 'bar-high'; }
             else if (rankScore >= 0.4) { scoreClass = 'score-mid'; barClass = 'bar-mid'; }
             const scoreBadge = hasScore
-                ? '<span class="score-badge ' + scoreClass + '" title="Relative rank score used for ordering within this result set">Rank ' + rankScoreText + '</span>'
+                ? '<span class="score-badge ' + scoreClass + '" title="Relative score used for ordering within this result set">' + rankScoreText + '</span>'
                 : '';
             const staticInfo = r.python_static || {};
             const metaBadges = [];
@@ -811,7 +811,13 @@ window.onload = function() {
                 const route = staticInfo.routes[0];
                 metaBadges.push('<span class="meta-badge">' + escapeHtml(route.method + ' ' + (route.path || '')) + '</span>');
             }
-            if (semanticScore && r.search_mode !== 'bm25') {
+            if (r.search_mode === 'keyword') {
+                const keywords = Array.isArray(r.matched_keywords) && r.matched_keywords.length
+                    ? ': ' + escapeHtml(r.matched_keywords.join(', '))
+                    : '';
+                metaBadges.push('<span class="meta-badge score-meta" title="Literal keyword match">Keyword match' + keywords + '</span>');
+            }
+            if (semanticScore && r.search_mode !== 'bm25' && r.search_mode !== 'keyword') {
                 metaBadges.push('<span class="meta-badge score-meta" title="Relative semantic score within this search">Semantic ' + semanticScore + '</span>');
             }
             if (bm25Score && r.bm25_score > 0) {
