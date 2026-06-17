@@ -7,6 +7,8 @@ window.onload = function() {
     let currentStatsData = null;
     let currentFolderPath = null;
     let currentResults = [];
+    let owlIgnorePatterns = [];
+    let owlIgnoreTree = null;
 
     // 状態保存/復元
     function collectState() {
@@ -15,8 +17,8 @@ window.onload = function() {
         const searchInput = document.getElementById('searchInput')?.value || '';
         const language = document.getElementById('languageSelect')?.value || '.py';
         const scope = document.getElementById('scopeSelect')?.value || 'all';
-        const searchMode = document.getElementById('searchModeSelect')?.value || 'hybrid';
-        const resultTypeFilter = document.getElementById('resultTypeFilter')?.value || 'all';
+        const searchMode = document.getElementById('searchModeSelect')?.value || 'semantic';
+        const resultTypeFilter = document.getElementById('resultTypeFilter')?.value || 'function_level';
         const searchOptionsVisible = document.getElementById('searchOptions')?.style.display !== 'none';
         const statsFilter = document.getElementById('statsFilter')?.value || 'all';
         const statusText = document.getElementById('status')?.textContent || '';
@@ -111,6 +113,7 @@ window.onload = function() {
                 currentStatsData = state.currentStatsData;
                 applyStatsFilter();
             }
+            syncSegmentedControls();
         } catch (e) {
             console.warn('Failed to restore state', e);
         }
@@ -177,6 +180,7 @@ window.onload = function() {
                 applyStatsFilter();
             }
             // 外部復元後ローカルへも保存
+            syncSegmentedControls();
             saveState();
         } catch (e) {
             console.warn('Failed to restore external state', e);
@@ -248,8 +252,72 @@ window.onload = function() {
             saveState();
           };
         }
+        function syncSegmentedControl(control) {
+          const selectId = control.getAttribute('data-select');
+          const select = selectId ? document.getElementById(selectId) : null;
+          if (!select) return;
+          const currentValue = select.value;
+          control.querySelectorAll('.segment-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.getAttribute('data-value') === currentValue);
+          });
+        }
+        function syncSegmentedControls() {
+          document.querySelectorAll('.segmented-control').forEach(syncSegmentedControl);
+          updateSearchBehaviorSummary();
+        }
+        function updateSearchBehaviorSummary() {
+          const summary = document.querySelector('#searchBehaviorPanel .option-summary');
+          if (!summary) return;
+          const mode = document.getElementById('searchModeSelect')?.value || 'semantic';
+          const type = document.getElementById('resultTypeFilter')?.value || 'function_level';
+          const modeLabel = { semantic: 'Semantic', hybrid: 'Hybrid', bm25: 'BM25' }[mode] || mode;
+          const typeLabel = {
+            function_level: 'Function-level',
+            all: 'All',
+            functions: 'Functions',
+            methods: 'Methods',
+            codeblocks: 'CodeBlocks'
+          }[type] || type;
+          summary.textContent = modeLabel + ' · ' + typeLabel;
+          summary.title = summary.textContent;
+        }
+        function setupSegmentedControls() {
+          document.querySelectorAll('.segmented-control').forEach(control => {
+            const selectId = control.getAttribute('data-select');
+            const select = selectId ? document.getElementById(selectId) : null;
+            if (!select) return;
+            control.querySelectorAll('.segment-btn').forEach(btn => {
+              btn.onclick = () => {
+                const value = btn.getAttribute('data-value');
+                if (!value) return;
+                select.value = value;
+                syncSegmentedControl(control);
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+                updateSearchBehaviorSummary();
+                saveState();
+              };
+            });
+            syncSegmentedControl(control);
+          });
+        }
+        setupSegmentedControls();
+        if (document.getElementById('refreshOwlIgnoreTreeBtn')) {
+          document.getElementById('refreshOwlIgnoreTreeBtn').onclick = () => {
+            vscode.postMessage({ command: 'requestOwlIgnoreSettings', maxDepth: 4 });
+          };
+        }
+        if (document.getElementById('saveOwlIgnoreBtn')) {
+          document.getElementById('saveOwlIgnoreBtn').onclick = () => {
+            vscode.postMessage({ command: 'saveOwlIgnorePatterns', patterns: owlIgnorePatterns, maxDepth: 4 });
+          };
+        }
+        if (document.getElementById('resetOwlIgnoreBtn')) {
+          document.getElementById('resetOwlIgnoreBtn').onclick = () => {
+            vscode.postMessage({ command: 'resetOwlIgnorePatterns' });
+          };
+        }
 
-        // サーバーステータスのポーリング（Extension Host経由）
+        // サーバーステータス確認（必要な操作時のみ Extension Host 経由で実行）
         function checkServerStatus() {
             vscode.postMessage({ command: 'checkServerStatus' });
         }
@@ -258,7 +326,7 @@ window.onload = function() {
             const txt = document.getElementById('serverStatusText');
             if (!el || !txt) return;
             if (online) {
-                el.className = 'server-status online';
+                el.className = 'server-status online hidden';
                 txt.textContent = port ? `Online (${port})` : 'Online';
             } else if (typeof port === 'string' && port.length > 0) {
                 el.className = 'server-status pending';
@@ -268,9 +336,105 @@ window.onload = function() {
                 txt.textContent = 'Offline';
             }
         }
-        checkServerStatus();
-        setInterval(checkServerStatus, 5000);
-
+        function normalizeOwlIgnorePattern(pattern) {
+            if (!pattern || typeof pattern !== 'string') return '';
+            return pattern.trim().replace(/\\/g, '/').replace(/^\/+/, '');
+        }
+        function toDirPattern(relPath) {
+            const normalized = normalizeOwlIgnorePattern(relPath);
+            if (!normalized || normalized === '.') return '';
+            return normalized.endsWith('/') ? normalized : normalized + '/';
+        }
+        function renderOwlIgnorePatternPreview() {
+            const input = document.getElementById('owlIgnorePatternsInput');
+            if (!input) return;
+            input.value = owlIgnorePatterns.length ? owlIgnorePatterns.join('\n') : '(none)';
+        }
+        function setOwlIgnorePattern(relPath, checked) {
+            const dirPattern = toDirPattern(relPath);
+            if (!dirPattern) return;
+            const filePattern = dirPattern.replace(/\/$/, '');
+            const set = new Set(owlIgnorePatterns.map(normalizeOwlIgnorePattern).filter(Boolean));
+            if (checked) {
+                set.add(dirPattern);
+            } else {
+                set.delete(dirPattern);
+                set.delete(filePattern);
+            }
+            owlIgnorePatterns = Array.from(set).sort((a, b) => a.localeCompare(b));
+            renderOwlIgnorePatternPreview();
+            updateOwlIgnoreMeta();
+        }
+        function flattenOwlIgnoreTree(node, depth = 0) {
+            const list = [];
+            if (!node || typeof node !== 'object') return list;
+            if (node.rel_path && node.rel_path !== '.') {
+                list.push({ ...node, depth });
+            }
+            if (Array.isArray(node.children)) {
+                node.children.forEach(child => {
+                    list.push(...flattenOwlIgnoreTree(child, depth + 1));
+                });
+            }
+            return list;
+        }
+        function renderOwlIgnoreTree() {
+            const tree = document.getElementById('owlIgnoreTree');
+            if (!tree) {
+                renderOwlIgnorePatternPreview();
+                return;
+            }
+            tree.innerHTML = '';
+            const nodes = [];
+            if (owlIgnoreTree && Array.isArray(owlIgnoreTree.children)) {
+                owlIgnoreTree.children.forEach(child => {
+                    nodes.push(...flattenOwlIgnoreTree(child, 0));
+                });
+            }
+            if (!nodes.length) {
+                tree.textContent = 'No directories found.';
+                renderOwlIgnorePatternPreview();
+                return;
+            }
+            nodes.forEach(node => {
+                const row = document.createElement('label');
+                row.className = 'dir-tree-row';
+                row.style.paddingLeft = Math.max(0, (node.depth || 0) * 14) + 'px';
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                const dirPattern = toDirPattern(node.rel_path);
+                checkbox.checked = owlIgnorePatterns.some(pattern => {
+                    const normalized = normalizeOwlIgnorePattern(pattern);
+                    return normalized === normalizeOwlIgnorePattern(dirPattern) ||
+                        normalized === normalizeOwlIgnorePattern(dirPattern.replace(/\/$/, ''));
+                });
+                checkbox.onchange = () => {
+                    setOwlIgnorePattern(node.rel_path, checkbox.checked);
+                    saveState();
+                };
+                const name = document.createElement('span');
+                name.className = 'dir-tree-label';
+                name.textContent = node.name;
+                row.appendChild(checkbox);
+                row.appendChild(name);
+                tree.appendChild(row);
+            });
+            renderOwlIgnorePatternPreview();
+        }
+        function updateOwlIgnoreMeta(path) {
+            const meta = document.getElementById('owlIgnoreMeta');
+            if (!meta) return;
+            meta.textContent = owlIgnorePatterns.length ? `${owlIgnorePatterns.length} rules` : 'No rules';
+            if (path) meta.title = path;
+        }
+        function setOwlIgnoreSettings(info) {
+            owlIgnorePatterns = Array.isArray(info?.patterns)
+                ? info.patterns.map(normalizeOwlIgnorePattern).filter(Boolean)
+                : [];
+            owlIgnoreTree = info?.tree || null;
+            renderOwlIgnoreTree();
+            updateOwlIgnoreMeta(info?.path || '.owlignore');
+        }
         // ローディング表示ヘルパー
         function showLoading(statusId) {
             const el = document.getElementById(statusId);
@@ -290,6 +454,7 @@ window.onload = function() {
         }
 
         vscode.postMessage({ command: 'requestTranslationSettings' });
+        vscode.postMessage({ command: 'requestOwlIgnoreSettings' });
 	
     document.getElementById('searchBtn').onclick = () => {
                 const text = (document.getElementById('searchInput')).value;
@@ -297,7 +462,7 @@ window.onload = function() {
                         currentSearchQuery = text;
                         const lang = document.getElementById('languageSelect')?.value || '.py';
                         const scope = document.getElementById('scopeSelect')?.value || 'all';
-                        const searchMode = document.getElementById('searchModeSelect')?.value || 'hybrid';
+                        const searchMode = document.getElementById('searchModeSelect')?.value || 'semantic';
                         showLoading('status');
                         // 空状態を非表示
                         const empty = document.getElementById('emptyState');
@@ -319,7 +484,7 @@ window.onload = function() {
                 console.log('Loading class stats with query:', query);
                 const lang = document.getElementById('languageSelect')?.value || '.py';
                 const scope = document.getElementById('scopeSelect')?.value || 'all';
-                const searchMode = document.getElementById('searchModeSelect')?.value || 'hybrid';
+                const searchMode = document.getElementById('searchModeSelect')?.value || 'semantic';
                 showLoading('stats-status');
                 vscode.postMessage({ command: 'getClassStats', query: query, lang, scope, searchMode });
                 saveState();
@@ -498,16 +663,16 @@ window.onload = function() {
         const resultsContainer = document.getElementById('results');
         const statusEl = document.getElementById('status');
         const emptyEl = document.getElementById('emptyState');
-        const resultTypeFilter = document.getElementById('resultTypeFilter')?.value || 'all';
+        const resultTypeFilter = document.getElementById('resultTypeFilter')?.value || 'function_level';
         const escapeHtml = (value) => String(value ?? '')
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#39;');
-        const formatPct = (value) => {
+        const formatScore = (value) => {
             if (typeof value !== 'number' || !Number.isFinite(value)) return null;
-            return Math.max(0, Math.min(100, value * 100)).toFixed(0) + '%';
+            return Math.max(0, Math.min(1, value)).toFixed(2);
         };
         const symbolLabel = (result) => {
             if (result.symbol_kind === 'code_block') return 'CodeBlock';
@@ -517,6 +682,7 @@ window.onload = function() {
         const visibleResults = results.filter((r) => {
             if (resultTypeFilter === 'functions') return !r.class_name && r.symbol_kind !== 'code_block';
             if (resultTypeFilter === 'methods') return !!r.class_name || r.symbol_kind === 'method';
+            if (resultTypeFilter === 'function_level') return r.symbol_kind !== 'code_block';
             if (resultTypeFilter === 'codeblocks') return r.symbol_kind === 'code_block';
             return true;
         });
@@ -584,15 +750,15 @@ window.onload = function() {
             // スコアバッジ。hybrid は順位用、semantic/BM25 は内訳として表示する。
             const hasScore = typeof r.score === 'number' || typeof r.similarity === 'number';
             const rankScore = typeof r.hybrid_score === 'number' ? r.hybrid_score : (typeof r.score === 'number' ? r.score : r.similarity || 0);
-            const semanticPct = formatPct(r.semantic_similarity);
-            const bm25Pct = formatPct(r.bm25_score);
-            const rankPct = formatPct(rankScore);
+            const semanticScore = formatScore(r.semantic_similarity);
+            const bm25Score = formatScore(r.bm25_score);
+            const rankScoreText = formatScore(rankScore);
             let scoreClass = 'score-low';
             let barClass = 'bar-low';
             if (rankScore >= 0.7) { scoreClass = 'score-high'; barClass = 'bar-high'; }
             else if (rankScore >= 0.4) { scoreClass = 'score-mid'; barClass = 'bar-mid'; }
             const scoreBadge = hasScore
-                ? '<span class="score-badge ' + scoreClass + '" title="Rank score used for ordering; relative within this result set">Rank ' + rankPct + '</span>'
+                ? '<span class="score-badge ' + scoreClass + '" title="Relative rank score used for ordering within this result set">Rank ' + rankScoreText + '</span>'
                 : '';
             const staticInfo = r.python_static || {};
             const metaBadges = [];
@@ -604,11 +770,11 @@ window.onload = function() {
                 const route = staticInfo.routes[0];
                 metaBadges.push('<span class="meta-badge">' + escapeHtml(route.method + ' ' + (route.path || '')) + '</span>');
             }
-            if (semanticPct && r.search_mode !== 'bm25') {
-                metaBadges.push('<span class="meta-badge score-meta">Semantic ' + semanticPct + '</span>');
+            if (semanticScore && r.search_mode !== 'bm25') {
+                metaBadges.push('<span class="meta-badge score-meta" title="Relative semantic score within this search">Semantic ' + semanticScore + '</span>');
             }
-            if (bm25Pct && r.bm25_score > 0) {
-                metaBadges.push('<span class="meta-badge score-meta">BM25 ' + bm25Pct + '</span>');
+            if (bm25Score && r.bm25_score > 0) {
+                metaBadges.push('<span class="meta-badge score-meta" title="Relative BM25 score within this search">BM25 ' + bm25Score + '</span>');
             }
             const metaLine = metaBadges.length ? '<div class="result-meta">' + metaBadges.join('') + '</div>' : '';
 
@@ -680,6 +846,13 @@ window.onload = function() {
                 }
                 if (msg.type === 'serverStatus') {
                         setServerStatus(msg.online, msg.message || msg.port);
+                }
+                if (msg.type === 'owlIgnoreSettings') {
+                        setOwlIgnoreSettings(msg);
+                }
+                if (msg.type === 'owlIgnoreStatus' || msg.type === 'owlIgnoreError') {
+                        const meta = document.getElementById('owlIgnoreMeta');
+                        if (meta) meta.textContent = msg.message;
                 }
                 if (msg.type === 'status') {
                         const statusEl = document.getElementById('status');

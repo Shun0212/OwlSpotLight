@@ -48,6 +48,9 @@ body {
   letter-spacing: 0;
   transition: all 0.3s ease;
 }
+.server-status.hidden {
+  display: none;
+}
 .server-status .status-dot {
   width: 7px;
   height: 7px;
@@ -318,6 +321,180 @@ button:focus {
   gap: 0.45em;
   font-size: 0.82em;
   color: var(--vscode-descriptionForeground, #999);
+}
+
+.option-panel {
+  border-top: 1px solid var(--vscode-sideBarSectionHeader-border, #e0e0e0);
+  padding-top: 0.35em;
+}
+
+.option-panel summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5em;
+  min-width: 0;
+  color: var(--vscode-descriptionForeground, #999);
+  font-size: 0.82em;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+
+.option-panel summary::-webkit-details-marker {
+  display: none;
+}
+
+.option-panel summary::before {
+  content: "▸";
+  flex: 0 0 auto;
+  color: var(--vscode-descriptionForeground, #777777);
+}
+
+.option-panel[open] summary::before {
+  content: "▾";
+}
+
+.option-summary {
+  min-width: 0;
+  max-width: 58%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--vscode-descriptionForeground, #777777);
+  font-size: 0.92em;
+  text-align: right;
+}
+
+.option-row {
+  display: grid;
+  grid-template-columns: 4.8em minmax(0, 1fr);
+  align-items: center;
+  gap: 0.45em;
+  margin-top: 0.5em;
+  font-size: 0.82em;
+  color: var(--vscode-descriptionForeground, #999);
+}
+
+.segmented-control {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25em;
+  min-width: 0;
+}
+
+.segment-btn {
+  min-width: 0;
+  padding: 0.34em 0.56em;
+  border-radius: 5px;
+  border: 1px solid var(--vscode-button-secondaryBackground, #5f6a79);
+  background: var(--vscode-button-secondaryBackground, #5f6a79);
+  color: var(--vscode-button-secondaryForeground, #ffffff);
+  font-size: 0.9em;
+  line-height: 1.2;
+}
+
+.segment-btn.active {
+  border-color: var(--vscode-button-background, #0078d4);
+  background: var(--vscode-button-background, #0078d4);
+  color: var(--vscode-button-foreground, #ffffff);
+}
+
+.hidden-select {
+  display: none;
+}
+
+.owlignore-help {
+  margin-top: 0.45em;
+  color: var(--vscode-descriptionForeground, #777777);
+  font-size: 0.8em;
+  line-height: 1.35;
+}
+
+.owlignore-help code {
+  font-family: var(--vscode-editor-font-family, monospace);
+  color: var(--vscode-foreground, #333333);
+}
+
+.owlignore-actions {
+  display: flex;
+  gap: 0.35em;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-top: 0.45em;
+}
+
+.owlignore-actions button {
+  padding: 0.32em 0.55em;
+  font-size: 0.9em;
+}
+
+.owlignore-label {
+  margin-top: 0.5em;
+  color: var(--vscode-descriptionForeground, #777777);
+  font-size: 0.78em;
+}
+
+.owlignore-patterns {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 4.8em;
+  resize: vertical;
+  margin-top: 0.25em;
+  padding: 0.45em 0.55em;
+  border-radius: 5px;
+  border: 1px solid var(--vscode-input-border, #c8c8c8);
+  background: var(--vscode-input-background, #ffffff);
+  color: var(--vscode-input-foreground, #333333);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.82em;
+}
+
+.owlignore-meta {
+  min-width: 0;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--vscode-descriptionForeground, #777777);
+  font-size: 0.92em;
+  text-align: right;
+}
+
+.dir-tree {
+  max-height: 12em;
+  overflow: auto;
+  margin-top: 0.25em;
+  border: 1px solid var(--vscode-input-border, #c8c8c8);
+  border-radius: 5px;
+  background: var(--vscode-sideBar-background, #f8f8f8);
+  padding: 0.25em 0;
+  font-size: 0.82em;
+}
+
+.dir-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  min-height: 1.8em;
+  padding: 0.1em 0.45em;
+  color: var(--vscode-foreground, #333333);
+  cursor: pointer;
+}
+
+.dir-tree-row:hover {
+  background: var(--vscode-list-hoverBackground, rgba(127, 127, 127, 0.12));
+}
+
+.dir-tree-row input {
+  flex: 0 0 auto;
+}
+
+.dir-tree-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .searchbar select,

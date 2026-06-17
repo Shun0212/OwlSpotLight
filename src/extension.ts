@@ -566,6 +566,18 @@ async function resolveActiveServerPort(): Promise<number | undefined> {
 	return undefined;
 }
 
+async function waitForActiveServerPort(timeoutMs: number = 60000, intervalMs: number = 2000): Promise<number | undefined> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		const port = await resolveActiveServerPort();
+		if (port !== undefined) {
+			return port;
+		}
+		await new Promise((resolve) => setTimeout(resolve, intervalMs));
+	}
+	return resolveActiveServerPort();
+}
+
 async function findLaunchServerPort(): Promise<{ port: number; reusedExisting: boolean }> {
 	const runningPort = await findRunningServerPort();
 	if (runningPort !== undefined) {
@@ -992,6 +1004,153 @@ function formatSearchResultLabel(result: any): string {
 	return `${name} - ${similarity}`;
 }
 
+const FALLBACK_OWLIGNORE_PATTERNS = [
+	'node_modules/',
+	'out/',
+	'dist/',
+	'build/',
+	'.venv/',
+	'__pycache__/',
+	'.owl_index/'
+];
+
+function normalizeOwlIgnorePatterns(patterns: unknown): string[] {
+	if (!Array.isArray(patterns)) {
+		return [];
+	}
+	const normalized = patterns
+		.filter((pattern): pattern is string => typeof pattern === 'string')
+		.map((pattern) => pattern.trim().replace(/\\/g, '/'))
+		.map((pattern) => pattern.startsWith('./') ? pattern.slice(2) : pattern)
+		.map((pattern) => pattern.replace(/^\/+/, ''))
+		.filter(Boolean);
+	return Array.from(new Set(normalized)).sort((a, b) => a.localeCompare(b));
+}
+
+function getOwlIgnorePath(workspaceRoot: string): string {
+	return path.join(workspaceRoot, '.owlignore');
+}
+
+function readOwlIgnorePatterns(workspaceRoot: string): string[] {
+	const owlIgnorePath = getOwlIgnorePath(workspaceRoot);
+	if (!fs.existsSync(owlIgnorePath)) {
+		return [];
+	}
+	const lines = fs.readFileSync(owlIgnorePath, 'utf8')
+		.split(/\r?\n/)
+		.filter((line) => line.trim() && !line.trimStart().startsWith('#'));
+	return normalizeOwlIgnorePatterns(lines);
+}
+
+function readGitIgnorePatterns(workspaceRoot: string): string[] {
+	const gitIgnorePath = path.join(workspaceRoot, '.gitignore');
+	if (!fs.existsSync(gitIgnorePath)) {
+		return [];
+	}
+	const lines = fs.readFileSync(gitIgnorePath, 'utf8')
+		.split(/\r?\n/)
+		.filter((line) => line.trim() && !line.trimStart().startsWith('#'));
+	return normalizeOwlIgnorePatterns(lines);
+}
+
+function getDefaultOwlIgnorePatterns(workspaceRoot: string): string[] {
+	const gitIgnorePatterns = readGitIgnorePatterns(workspaceRoot);
+	return gitIgnorePatterns.length ? gitIgnorePatterns : FALLBACK_OWLIGNORE_PATTERNS;
+}
+
+function writeOwlIgnorePatterns(workspaceRoot: string, patterns: string[]): void {
+	const owlIgnorePath = getOwlIgnorePath(workspaceRoot);
+	const normalized = normalizeOwlIgnorePatterns(patterns);
+	const content = [
+		'# OwlSpotlight search ignore patterns',
+		'# Gitignore-style paths, relative to the workspace root.',
+		...normalized,
+		''
+	].join('\n');
+	fs.writeFileSync(owlIgnorePath, content, 'utf8');
+}
+
+type OwlIgnoreTreeNode = {
+	name: string;
+	rel_path: string;
+	checked: boolean;
+	children: OwlIgnoreTreeNode[];
+};
+
+function patternMatchesDirectory(pattern: string, relPath: string): boolean {
+	const normalizedPattern = pattern.replace(/\/$/, '');
+	const normalizedRelPath = relPath.replace(/\/$/, '');
+	return normalizedPattern === normalizedRelPath;
+}
+
+function buildOwlIgnoreTree(
+	workspaceRoot: string,
+	patterns: string[],
+	maxDepth = 4,
+	maxNodes = 1500
+): OwlIgnoreTreeNode {
+	const normalizedPatterns = normalizeOwlIgnorePatterns(patterns);
+	const root = path.resolve(workspaceRoot);
+	const depthLimit = Math.max(1, Math.min(maxDepth, 8));
+	let nodeCount = 0;
+
+	const walk = (absoluteDir: string, depth: number): OwlIgnoreTreeNode[] => {
+		if (depth > depthLimit || nodeCount >= maxNodes) {
+			return [];
+		}
+		let entries: fs.Dirent[] = [];
+		try {
+			entries = fs.readdirSync(absoluteDir, { withFileTypes: true });
+		} catch {
+			return [];
+		}
+		const nodes: OwlIgnoreTreeNode[] = [];
+		for (const entry of entries) {
+			if (!entry.isDirectory()) {
+				continue;
+			}
+			if (['.git', '.svn', '.hg'].includes(entry.name)) {
+				continue;
+			}
+			const absolutePath = path.join(absoluteDir, entry.name);
+			const relPath = path.relative(root, absolutePath).replace(/\\/g, '/');
+			if (!relPath || relPath.startsWith('..')) {
+				continue;
+			}
+			nodeCount += 1;
+			const checked = normalizedPatterns.some((pattern) => patternMatchesDirectory(pattern, relPath));
+			nodes.push({
+				name: entry.name,
+				rel_path: relPath,
+				checked,
+				children: walk(absolutePath, depth + 1)
+			});
+			if (nodeCount >= maxNodes) {
+				break;
+			}
+		}
+		return nodes.sort((a, b) => a.name.localeCompare(b.name));
+	};
+
+	return {
+		name: path.basename(root) || root,
+		rel_path: '.',
+		checked: false,
+		children: walk(root, 1)
+	};
+}
+
+function getOwlIgnorePayload(workspaceRoot: string, maxDepth = 4) {
+	const patterns = readOwlIgnorePatterns(workspaceRoot);
+	const owlIgnorePath = getOwlIgnorePath(workspaceRoot);
+	return {
+		path: owlIgnorePath,
+		patterns,
+		exists: fs.existsSync(owlIgnorePath),
+		tree: buildOwlIgnoreTree(workspaceRoot, patterns, maxDepth)
+	};
+}
+
 // WebviewViewProviderでサイドバーUIをリッチ化
 class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = 'owlspotlight.sidebar';
@@ -1026,6 +1185,13 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                         type: 'translationSettings',
                         enable: enable
                 });
+                const initialWorkspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+                if (initialWorkspaceRoot) {
+                        webviewView.webview.postMessage({
+                                type: 'owlIgnoreSettings',
+                                ...getOwlIgnorePayload(initialWorkspaceRoot)
+                        });
+                }
 
                 // 拡張側に保持している前回状態をWebviewへ送る
                 try {
@@ -1064,6 +1230,49 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                 const config = vscode.workspace.getConfiguration('owlspotlight');
                                 const enable = config.get<boolean>('enableJapaneseTranslation', false);
                                 webviewView.webview.postMessage({ type: 'translationSettings', enable });
+                        }
+                        if (msg.command === 'requestOwlIgnoreSettings') {
+                                const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+                                if (!workspaceRoot) {
+                                        webviewView.webview.postMessage({ type: 'owlIgnoreError', message: 'No workspace folder found.' });
+                                        return;
+                                }
+                                webviewView.webview.postMessage({
+                                        type: 'owlIgnoreSettings',
+                                        ...getOwlIgnorePayload(workspaceRoot, typeof msg.maxDepth === 'number' ? msg.maxDepth : 4)
+                                });
+                                return;
+                        }
+                        if (msg.command === 'saveOwlIgnorePatterns') {
+                                const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+                                if (!workspaceRoot) {
+                                        webviewView.webview.postMessage({ type: 'owlIgnoreError', message: 'No workspace folder found.' });
+                                        return;
+                                }
+                                const patterns = normalizeOwlIgnorePatterns(msg.patterns);
+                                writeOwlIgnorePatterns(workspaceRoot, patterns);
+                                webviewView.webview.postMessage({
+                                        type: 'owlIgnoreSettings',
+                                        ...getOwlIgnorePayload(workspaceRoot, typeof msg.maxDepth === 'number' ? msg.maxDepth : 4)
+                                });
+                                webviewView.webview.postMessage({ type: 'owlIgnoreStatus', message: `.owlignore saved (${patterns.length} patterns).` });
+                                return;
+                        }
+                        if (msg.command === 'resetOwlIgnorePatterns') {
+                                const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+                                if (!workspaceRoot) {
+                                        webviewView.webview.postMessage({ type: 'owlIgnoreError', message: 'No workspace folder found.' });
+                                        return;
+                                }
+                                const defaultPatterns = getDefaultOwlIgnorePatterns(workspaceRoot);
+                                writeOwlIgnorePatterns(workspaceRoot, defaultPatterns);
+                                webviewView.webview.postMessage({
+                                        type: 'owlIgnoreSettings',
+                                        ...getOwlIgnorePayload(workspaceRoot)
+                                });
+                                const source = readGitIgnorePatterns(workspaceRoot).length ? '.gitignore' : 'fallback defaults';
+                                webviewView.webview.postMessage({ type: 'owlIgnoreStatus', message: `Default .owlignore created from ${source}.` });
+                                return;
                         }
                         if (msg.command === 'updateTranslationSettings') {
                                 const config = vscode.workspace.getConfiguration('owlspotlight');
@@ -1110,7 +1319,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				const workspaceFolder = workspaceFolders[0];
 				const folderPath = workspaceFolder.uri.fsPath;
 				const scope = (msg.scope === 'source' || msg.scope === 'changed') ? msg.scope as SearchScope : 'all';
-				const searchMode = ['semantic', 'bm25', 'hybrid'].includes(msg.searchMode) ? msg.searchMode : 'hybrid';
+				const searchMode = ['semantic', 'bm25', 'hybrid'].includes(msg.searchMode) ? msg.searchMode : 'semantic';
 				const includeFiles = await resolveSearchScopeFiles(workspaceFolder, fileExt, scope);
 				if (scope === 'changed' && includeFiles && includeFiles.length === 0) {
 					webviewView.webview.postMessage({ type: 'results', results: [], folderPath });
@@ -1126,7 +1335,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				const res = await fetch(getServerUrl('/search_functions_simple', serverPort), {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ directory: folderPath, query, top_k: 10, file_ext: fileExt, include_files: includeFiles, search_mode: searchMode })
+                                        body: JSON.stringify({ directory: folderPath, query, top_k: 30, file_ext: fileExt, include_files: includeFiles, search_mode: searchMode })
 				});
 				const data: any = await res.json();
 				if (data && data.results && Array.isArray(data.results) && data.results.length > 0) {
@@ -1149,7 +1358,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                 webviewView.webview.postMessage({ type: 'translatedQuery', original: originalQuery, translated: query });
                 const fileExt = msg.lang || '.py';
                 const scope = (msg.scope === 'source' || msg.scope === 'changed') ? msg.scope as SearchScope : 'all';
-                const searchMode = ['semantic', 'bm25', 'hybrid'].includes(msg.searchMode) ? msg.searchMode : 'hybrid';
+                const searchMode = ['semantic', 'bm25', 'hybrid'].includes(msg.searchMode) ? msg.searchMode : 'semantic';
                 const includeFiles = await resolveSearchScopeFiles(workspaceFolder, fileExt, scope);
 				webviewView.webview.postMessage({ type: 'status', message: 'Loading class statistics...' });
 				try {
@@ -1340,11 +1549,11 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					}
 					webviewView.webview.postMessage({ type: 'status', message: 'Starting server...' });
 					await vscode.commands.executeCommand('owlspotlight.startServer');
-					const serverPort = await resolveActiveServerPort();
+					const serverPort = await waitForActiveServerPort(60000, 2000);
 					webviewView.webview.postMessage({ type: 'serverStatus', online: serverPort !== undefined, port: serverPort });
 					webviewView.webview.postMessage({
 						type: 'status',
-						message: serverPort !== undefined ? 'Server is ready. Enter a query to search.' : 'Server start requested. Waiting for model load...'
+						message: serverPort !== undefined ? 'Server is ready. Enter a query to search.' : 'Server start requested, but readiness check timed out. Check the OwlSpotlight OUTPUT panel.'
 					});
 				} catch {
 					webviewView.webview.postMessage({ type: 'error', message: 'Setup and start failed. Check the OwlSpotlight OUTPUT panel.' });
@@ -1434,7 +1643,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
   <div class="header">
     <div class="header-left">
       OwlSpotlight
-      <span class="server-status offline" id="serverStatus">
+      <span class="server-status offline hidden" id="serverStatus">
         <span class="status-dot"></span>
         <span id="serverStatusText">Offline</span>
       </span>
@@ -1487,23 +1696,58 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
           <option value="changed">Changed</option>
         </select>
       </label>
-      <label>
-        <span>Mode</span>
-        <select id="searchModeSelect" title="Search mode">
-          <option value="hybrid">Hybrid</option>
-          <option value="semantic">Semantic</option>
-          <option value="bm25">BM25</option>
-        </select>
-      </label>
-      <label>
-        <span>Type</span>
-        <select id="resultTypeFilter" title="Result type filter">
-          <option value="all">All</option>
-          <option value="functions">Functions</option>
-          <option value="methods">Methods</option>
-          <option value="codeblocks">CodeBlocks</option>
-        </select>
-      </label>
+      <details class="option-panel" id="searchBehaviorPanel">
+        <summary>
+          <span>Search behavior</span>
+          <span class="option-summary">Semantic · Function-level</span>
+        </summary>
+        <div class="option-row">
+          <span>Mode</span>
+          <div class="segmented-control" data-select="searchModeSelect" role="group" aria-label="Search mode">
+            <button type="button" class="segment-btn active" data-value="semantic" title="Embedding-based natural language search">Semantic</button>
+            <button type="button" class="segment-btn" data-value="hybrid" title="Semantic search with BM25 keyword boost">Hybrid</button>
+            <button type="button" class="segment-btn" data-value="bm25" title="Keyword/token search">BM25</button>
+          </div>
+          <select id="searchModeSelect" title="Search mode" class="hidden-select" aria-hidden="true" tabindex="-1">
+            <option value="semantic" selected>Semantic</option>
+            <option value="hybrid">Hybrid</option>
+            <option value="bm25">BM25</option>
+          </select>
+        </div>
+        <div class="option-row">
+          <span>Type</span>
+          <div class="segmented-control" data-select="resultTypeFilter" role="group" aria-label="Result type">
+            <button type="button" class="segment-btn active" data-value="function_level" title="Functions and methods">Function-level</button>
+            <button type="button" class="segment-btn" data-value="all" title="All result types">All</button>
+            <button type="button" class="segment-btn" data-value="functions" title="Standalone functions only">Functions</button>
+            <button type="button" class="segment-btn" data-value="methods" title="Class methods only">Methods</button>
+            <button type="button" class="segment-btn" data-value="codeblocks" title="Code blocks only">CodeBlocks</button>
+          </div>
+          <select id="resultTypeFilter" title="Result type filter" class="hidden-select" aria-hidden="true" tabindex="-1">
+            <option value="function_level" selected>Function-level</option>
+            <option value="all">All</option>
+            <option value="functions">Functions</option>
+            <option value="methods">Methods</option>
+            <option value="codeblocks">CodeBlocks</option>
+          </select>
+        </div>
+      </details>
+      <details class="option-panel owlignore-panel" id="owlIgnorePanel">
+        <summary>
+          <span>Ignored folders</span>
+          <span id="owlIgnoreMeta" class="owlignore-meta">Loading</span>
+        </summary>
+        <div class="owlignore-help">Checked folders are skipped by OwlSpotlight search and saved to <code>.owlignore</code>.</div>
+        <div class="owlignore-actions">
+          <button id="refreshOwlIgnoreTreeBtn" class="secondary-action" title="Reload directory tree">Refresh Tree</button>
+          <button id="saveOwlIgnoreBtn" class="secondary-action" title="Save .owlignore patterns">Save</button>
+          <button id="resetOwlIgnoreBtn" class="secondary-action" title="Create default .owlignore">Defaults</button>
+        </div>
+        <div class="owlignore-label">Rules to save</div>
+        <textarea id="owlIgnorePatternsInput" class="owlignore-patterns" readonly spellcheck="false" placeholder="node_modules/&#10;dist/&#10;.venv/"></textarea>
+        <div class="owlignore-label">Workspace folders</div>
+        <div id="owlIgnoreTree" class="dir-tree"></div>
+      </details>
     </div>
     <div class="status" id="status"></div>
     <div id="translatedQuery" class="translated-query" style="display:none;"></div>
@@ -1809,14 +2053,21 @@ export function activate(context: vscode.ExtensionContext) {
 					body: JSON.stringify({
 						directory: folderPath,
 						query,
-						top_k: 10,
+						top_k: 30,
 						file_ext: fileExt,
 						include_files: includeFiles,
-						search_mode: 'hybrid'
+						search_mode: 'semantic'
 					})
 				});
 			const data: any = await res.json();
-			const results = Array.isArray(data.results) ? data.results : [];
+			const results = (Array.isArray(data.results) ? data.results : []).sort((a: any, b: any) => {
+				const aPriority = a?.symbol_kind === 'code_block' ? 1 : 0;
+				const bPriority = b?.symbol_kind === 'code_block' ? 1 : 0;
+				if (aPriority !== bPriority) {
+					return aPriority - bPriority;
+				}
+				return (Number(b?.score ?? b?.similarity ?? 0) - Number(a?.score ?? a?.similarity ?? 0));
+			});
 			if (results.length === 0) {
 				vscode.window.showInformationMessage('No similar code found.');
 				return;

@@ -77,7 +77,7 @@ class SearchFunctionsSimpleRequest(BaseModel):
     top_k: int = 5
     file_ext: str = ".py"
     include_files: Optional[List[str]] = None
-    search_mode: str = "hybrid"
+    search_mode: str = "semantic"
     semantic_weight: float = 0.75
 
 class FunctionRangeRequest(BaseModel):
@@ -91,6 +91,8 @@ class ClassStatsRequest(BaseModel):
     top_k: int = 50  # 上位何件の関数を取得するか
     file_ext: str = ".py"
     include_files: Optional[List[str]] = None
+    search_mode: str = "semantic"
+    semantic_weight: float = 0.75
 
 # サーバー全体で1つのインデックスを保持
 index_lock = Lock()
@@ -146,9 +148,14 @@ class GlobalIndexerState:
             return False
         # Compare hash values (for speed, only log changed files)
         changed_files = []
+        scan_dir = os.path.abspath(self.directory)
+        spec = load_gitignore_spec(scan_dir)
         for path, info in self.file_info.items():
             if not os.path.exists(path):
                 print(f"[is_up_to_date] File missing: {path}")
+                return False
+            if is_ignored(path, spec, scan_dir):
+                print(f"[is_up_to_date] Indexed file is now ignored: {path}")
                 return False
             hash_now = file_hash(path)
             if hash_now != info["hash"]:
@@ -158,8 +165,6 @@ class GlobalIndexerState:
             return False
         # Detect newly added files that match the target extension and are not ignored
         try:
-            scan_dir = os.path.abspath(self.directory)
-            spec = load_gitignore_spec(scan_dir)
             for root, dirs, files in os.walk(scan_dir):
                 # Respect .gitignore for directories
                 dirs[:] = [d for d in dirs if not is_ignored(os.path.join(root, d), spec, scan_dir)]
@@ -317,14 +322,22 @@ global_index_state = GlobalIndexerState()
 
 def load_gitignore_spec(root_dir: str) -> Optional[PathSpec]:
     """
-    指定ディレクトリ直下の .gitignore を読み込み、Git のワイルドカード仕様
-    をそのまま解釈できる PathSpec を返す。存在しなければ None。
+    指定ディレクトリ直下の .gitignore と .owlignore を読み込み、Git の
+    ワイルドカード仕様をそのまま解釈できる PathSpec を返す。
     """
-    gi_path = os.path.join(root_dir, ".gitignore")
-    if not os.path.exists(gi_path):
+    lines: list[str] = []
+    for ignore_file in [".gitignore", ".owlignore"]:
+        ignore_path = os.path.join(root_dir, ignore_file)
+        if not os.path.exists(ignore_path):
+            continue
+        with open(ignore_path, encoding="utf-8") as f:
+            lines.extend(
+                ln.rstrip("\n")
+                for ln in f
+                if ln.strip() and not ln.lstrip().startswith("#")
+            )
+    if not lines:
         return None
-    with open(gi_path, encoding="utf-8") as f:
-        lines = [ln.rstrip("\n") for ln in f if ln.strip() and not ln.startswith("#")]
     return PathSpec.from_lines(GitWildMatchPattern, lines)
 
 def is_ignored(path: str, spec: Optional[PathSpec], root_dir: str) -> bool:
@@ -367,22 +380,18 @@ def bm25_search_scores(functions: list[dict], query: str) -> dict[int, float]:
     query_tokens = tokenize_for_bm25(query)
     if not query_tokens:
         return {}
-    documents = [
-        tokenize_for_bm25(
-            "\n".join(
-                str(part)
-                for part in [
-                    func.get("name", ""),
-                    func.get("function_name", ""),
-                    func.get("code", ""),
-                    func.get("raw_code", ""),
-                    json.dumps(func.get("python_static", {}), ensure_ascii=False),
-                ]
-                if part
-            )
-        )
-        for func in functions
-    ]
+    documents = []
+    for func in functions:
+        name = func.get("name", "")
+        function_name = func.get("function_name", "")
+        source_code = func.get("raw_code") or func.get("code", "")
+        parts = [
+            name,
+            function_name if function_name != name else "",
+            source_code,
+            json.dumps(func.get("python_static", {}), ensure_ascii=False),
+        ]
+        documents.append(tokenize_for_bm25("\n".join(str(part) for part in parts if part)))
     if not documents:
         return {}
 
@@ -650,7 +659,6 @@ async def force_rebuild_index_api(req: BuildIndexRequest):
 
 @app.get("/index_status")
 async def index_status():
-    print("/index_status called")
     # If no directory is set, consider it up to date (no index to check)
     if global_index_state.directory is None:
         up_to_date = True
@@ -795,6 +803,8 @@ async def get_class_stats(request: ClassStatsRequest):
             top_k=request.top_k,
             file_ext=request.file_ext,
             include_files=request.include_files,
+            search_mode=request.search_mode,
+            semantic_weight=request.semantic_weight,
         )
         search_response = await search_functions_simple_api(search_request)
         search_results = search_response["results"]
