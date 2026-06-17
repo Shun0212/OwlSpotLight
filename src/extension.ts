@@ -942,6 +942,19 @@ async function detectLanguages(): Promise<string[]> {
 }
 
 type SearchScope = 'all' | 'source' | 'changed';
+type AgentSearchEvent = {
+	id: number;
+	created_at: number;
+	source?: string;
+	directory?: string;
+	query?: string;
+	original_query?: string;
+	file_ext?: string;
+	scope?: string;
+	search_mode?: string;
+	result_count?: number;
+	results?: any[];
+};
 
 const supportedSearchExtensions = new Set(['.py', '.java', '.ts', '.tsx', '.js', '.jsx']);
 const sourceDirectoryNames = new Set([
@@ -979,6 +992,15 @@ function execFileText(command: string, args: string[], cwd: string): Promise<str
 				return;
 			}
 			resolve(stdout.toString());
+		});
+	});
+}
+
+function execFileResult(command: string, args: string[], cwd: string): Promise<{ ok: boolean; output: string }> {
+	return new Promise((resolve) => {
+		cp.execFile(command, args, { cwd }, (error, stdout, stderr) => {
+			const output = `${stdout || ''}${stderr || ''}`.trim();
+			resolve({ ok: !error, output });
 		});
 	});
 }
@@ -1043,6 +1065,199 @@ function formatSearchResultLabel(result: any): string {
 		? `Similarity ${(result.similarity * 100).toFixed(0)}%`
 		: 'Similarity n/a';
 	return `${name} - ${similarity}`;
+}
+
+function buildAgentSetupPayload(
+	context: vscode.ExtensionContext,
+	workspaceRoot: string,
+	serverUrl: string
+) {
+	const serverDir = path.join(context.extensionPath, 'model_server');
+	const mcpServerPath = path.join(serverDir, 'mcp_server.py');
+	const venvPython = os.platform() === 'win32'
+		? path.join(serverDir, '.venv', 'Scripts', 'python.exe')
+		: path.join(serverDir, '.venv', 'bin', 'python');
+	const mcpPythonCommand = fs.existsSync(venvPython) ? venvPython : 'python';
+	const mcpConfig = {
+		mcpServers: {
+			owlspotlight: {
+				type: 'stdio',
+				command: mcpPythonCommand,
+				args: [mcpServerPath],
+				env: {
+					OWLSPOTLIGHT_SERVER_URL: serverUrl,
+					OWLSPOTLIGHT_WORKSPACE: workspaceRoot
+				}
+			}
+		}
+	};
+	const codexCommand = [
+		'codex',
+		'mcp',
+		'add',
+		'owlspotlight',
+		'--env',
+		`OWLSPOTLIGHT_SERVER_URL=${serverUrl}`,
+		'--env',
+		`OWLSPOTLIGHT_WORKSPACE=${workspaceRoot}`,
+		'--',
+		mcpPythonCommand,
+		mcpServerPath
+	].map(part => part.includes(' ') ? `"${part.replace(/"/g, '\\"')}"` : part).join(' ');
+	const instructions = [
+		'Use OwlSpotlight before grep/ripgrep for local code search when looking for functions, methods, routes, handlers, storage logic, auth/session logic, or code blocks.',
+		`Workspace: ${workspaceRoot}`,
+		`OwlSpotlight server: ${serverUrl}`,
+		'Codex CLI setup:',
+		`- ${codexCommand}`,
+		'- Restart Codex after adding the MCP server. /mcp should show owlspotlight; project .mcp.json alone is not enough for Codex CLI.',
+		'- Claude Code support is planned in the next few days.',
+		'Available MCP tools:',
+		'- owlspotlight.search_code: semantic/BM25/hybrid/keyword search over this workspace. You can call it with only query; directory defaults to this workspace and file_ext defaults to auto.',
+		'- owlspotlight.grep_repo: repository-wide grep for exact identifiers, call sites, tests, and docs after semantic discovery. Use it for OR patterns like "ClassA|ClassB|torch.multinomial"; patterns containing | are treated as regex alternation when regex is omitted.',
+		'- owlspotlight.mark_results_used: optional; record only the search results or grep locations you actually used as evidence when that is easy to do.',
+		'- owlspotlight.get_human_feedback: optional; read suggestions only when the user explicitly says they reviewed the sidebar.',
+		'Tool-use rule:',
+		'- If owlspotlight.search_code is available in your tool list, call it directly. Do not run command -v owlspotlight, inspect .mcp.json, read mcp_server.py, or reverse-engineer the HTTP API first.',
+		'- If owlspotlight.search_code is not available in your tool list, say the MCP client needs to reload/restart with the generated .mcp.json. Only use direct HTTP fallback after saying the MCP tool is unavailable.',
+		'Example first call:',
+		'- owlspotlight.search_code({"query":"where is login session refreshed"})',
+		'Search workflow:',
+		'1. Start with owlspotlight.search_code for behavior/intent/name-uncertain discovery.',
+		'2. Read the top candidate files around the returned line numbers before concluding.',
+		'3. Once likely identifiers are known, use owlspotlight.grep_repo for exhaustive references across the repository.',
+		'4. Optionally call owlspotlight.mark_results_used for only the ranks or grep locations you actually referenced; skip it if it would slow down the task.',
+		'5. Do not wait for human fallback. Use the mirrored sidebar only as observability unless the user explicitly asks for review.'
+	].join('\n');
+	return { mcpConfig, instructions, codexCommand, mcpPythonCommand, mcpServerPath };
+}
+
+function mergeOwlspotlightMcpConfig(existing: any, owlspotlightEntry: any): any {
+	const base = existing && typeof existing === 'object' && !Array.isArray(existing) ? existing : {};
+	return {
+		...base,
+		mcpServers: {
+			...(base.mcpServers && typeof base.mcpServers === 'object' ? base.mcpServers : {}),
+			owlspotlight: owlspotlightEntry
+		}
+	};
+}
+
+async function registerCodexMcp(
+	workspaceRoot: string,
+	serverUrl: string,
+	mcpPythonCommand: string,
+	mcpServerPath: string
+): Promise<boolean> {
+	await execFileResult('codex', ['mcp', 'remove', 'owlspotlight'], workspaceRoot);
+	const result = await execFileResult(
+		'codex',
+		[
+			'mcp',
+			'add',
+			'owlspotlight',
+			'--env',
+			`OWLSPOTLIGHT_SERVER_URL=${serverUrl}`,
+			'--env',
+			`OWLSPOTLIGHT_WORKSPACE=${workspaceRoot}`,
+			'--',
+			mcpPythonCommand,
+			mcpServerPath
+		],
+		workspaceRoot
+	);
+	if (!result.ok) {
+		vscode.window.showErrorMessage(result.output || 'Failed to register OwlSpotlight MCP with Codex CLI.');
+		return false;
+	}
+	return true;
+}
+
+async function removeCodexMcp(workspaceRoot: string): Promise<boolean> {
+	const result = await execFileResult('codex', ['mcp', 'remove', 'owlspotlight'], workspaceRoot);
+	if (!result.ok) {
+		vscode.window.showErrorMessage(result.output || 'Failed to remove OwlSpotlight MCP from Codex CLI.');
+		return false;
+	}
+	return true;
+}
+
+async function generateAgentSetup(context: vscode.ExtensionContext): Promise<void> {
+	const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+	if (!workspaceRoot) {
+		vscode.window.showWarningMessage('No workspace folder found.');
+		return;
+	}
+	const serverPort = await resolveActiveServerPort();
+	const serverUrl = getServerBaseUrl(serverPort ?? activeServerPort);
+	const { mcpConfig, instructions, codexCommand, mcpPythonCommand, mcpServerPath } = buildAgentSetupPayload(context, workspaceRoot, serverUrl);
+	const mcpJson = JSON.stringify(mcpConfig, null, 2);
+	const combined = [
+		'Agent instructions:',
+		instructions,
+		'',
+		'Codex CLI command:',
+		codexCommand,
+		'',
+		'.mcp.json:',
+		mcpJson
+	].join('\n');
+	const pick = await vscode.window.showQuickPick(
+		[
+			{ label: 'Register Codex MCP globally', value: 'registerCodex' },
+			{ label: 'Remove Codex MCP registration', value: 'removeCodex' },
+			{ label: 'Create/update workspace .mcp.json', value: 'write' },
+			{ label: 'Copy Codex CLI command to clipboard', value: 'copyCodex' },
+			{ label: 'Copy .mcp.json to clipboard', value: 'copyMcp' },
+			{ label: 'Copy agent instructions to clipboard', value: 'copyInstructions' },
+			{ label: 'Copy both to clipboard', value: 'copyBoth' }
+		],
+		{ placeHolder: 'Register OwlSpotlight for Codex or generate MCP setup for Cursor and similar clients' }
+	);
+	if (!pick) {
+		return;
+	}
+	if (pick.value === 'registerCodex') {
+		const registered = await registerCodexMcp(workspaceRoot, serverUrl, mcpPythonCommand, mcpServerPath);
+		if (registered) {
+			await vscode.env.clipboard.writeText(instructions);
+			vscode.window.showInformationMessage('Registered OwlSpotlight MCP with Codex CLI. Restart Codex and run /mcp to verify.');
+		}
+		return;
+	}
+	if (pick.value === 'removeCodex') {
+		const removed = await removeCodexMcp(workspaceRoot);
+		if (removed) {
+			vscode.window.showInformationMessage('Removed OwlSpotlight MCP from Codex CLI. Restart Codex if a session is already open.');
+		}
+		return;
+	}
+	if (pick.value === 'write') {
+		const mcpPath = path.join(workspaceRoot, '.mcp.json');
+		let existing: any = {};
+		if (fs.existsSync(mcpPath)) {
+			try {
+				existing = JSON.parse(fs.readFileSync(mcpPath, 'utf8'));
+			} catch (error) {
+				vscode.window.showErrorMessage(`Could not parse existing .mcp.json: ${error}`);
+				return;
+			}
+		}
+		const merged = mergeOwlspotlightMcpConfig(existing, mcpConfig.mcpServers.owlspotlight);
+		fs.writeFileSync(mcpPath, JSON.stringify(merged, null, 2) + '\n', 'utf8');
+		await vscode.env.clipboard.writeText(instructions);
+		vscode.window.showInformationMessage('Updated workspace .mcp.json and copied OwlSpotlight agent instructions.');
+		return;
+	}
+	const text = pick.value === 'copyMcp'
+		? mcpJson
+		: pick.value === 'copyCodex'
+			? codexCommand
+			: pick.value === 'copyInstructions'
+			? instructions
+			: combined;
+	await vscode.env.clipboard.writeText(text);
+	vscode.window.showInformationMessage('OwlSpotlight agent setup copied to clipboard.');
 }
 
 const FALLBACK_OWLIGNORE_PATTERNS = [
@@ -1196,11 +1411,54 @@ function getOwlIgnorePayload(workspaceRoot: string, maxDepth = 4) {
 class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = 'owlspotlight.sidebar';
 	private _view?: vscode.WebviewView;
+	private _agentSearchPoll?: NodeJS.Timeout;
+	private _lastAgentSearchEventId = 0;
 
 	constructor(
 		private readonly _context: vscode.ExtensionContext,
 		private readonly _outputChannel?: vscode.OutputChannel
-	) {}
+	) {
+		this._context.subscriptions.push({
+			dispose: () => this.stopAgentSearchPolling()
+		});
+	}
+
+	private stopAgentSearchPolling() {
+		if (this._agentSearchPoll) {
+			clearInterval(this._agentSearchPoll);
+			this._agentSearchPoll = undefined;
+		}
+	}
+
+	private startAgentSearchPolling(webviewView: vscode.WebviewView) {
+		this.stopAgentSearchPolling();
+		const poll = async () => {
+			if (!webviewView.visible) {
+				return;
+			}
+			const serverPort = await resolveActiveServerPort();
+			if (serverPort === undefined) {
+				return;
+			}
+			try {
+				const res = await fetch(getServerUrl('/agent_search_events?since_id=0&limit=20', serverPort));
+				if (!res.ok) {
+					return;
+				}
+				const data: any = await res.json();
+				const events: AgentSearchEvent[] = Array.isArray(data?.events) ? data.events : [];
+				if (events.length === 0) {
+					return;
+				}
+				this._lastAgentSearchEventId = Math.max(this._lastAgentSearchEventId, ...events.map((event) => Number(event.id) || 0));
+				webviewView.webview.postMessage({ type: 'agentSearchEvents', events });
+			} catch {
+				// The server can be started/stopped independently; ignore transient polling failures.
+			}
+		};
+		this._agentSearchPoll = setInterval(poll, 2500);
+		void poll();
+	}
 
        async resolveWebviewView(
                webviewView: vscode.WebviewView,
@@ -1218,6 +1476,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                } catch {}
                const langs = await detectLanguages();
                webviewView.webview.html = this.getHtmlForWebview(webviewView.webview, langs);
+               this.startAgentSearchPolling(webviewView);
 
                 const config = vscode.workspace.getConfiguration('owlspotlight');
                 // フラットな設定取得に対応
@@ -1269,6 +1528,10 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					vscode.window.showErrorMessage('Failed to open URL: ' + msg.url);
 				}
 				return;
+                        }
+                        if (msg.command === 'generateAgentSetup') {
+                                await generateAgentSetup(this._context);
+                                return;
                         }
                         if (msg.command === 'requestTranslationSettings') {
                                 const config = vscode.workspace.getConfiguration('owlspotlight');
@@ -1343,6 +1606,30 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                         model: geminiModel,
                                         models: GEMINI_TRANSLATION_MODELS
                                 });
+                        }
+                        if (msg.command === 'agentSearchFeedback') {
+                                const serverPort = await resolveActiveServerPort();
+                                if (serverPort === undefined) {
+                                        webviewView.webview.postMessage({ type: 'error', message: 'OwlSpotlight server is not running.' });
+                                        return;
+                                }
+                                try {
+                                        const suggestion = typeof msg.suggestion === 'string' ? msg.suggestion : '';
+                                        const eventId = Number(msg.eventId);
+                                        const res = await fetch(getServerUrl('/agent_search_feedback', serverPort), {
+                                                method: 'POST',
+                                                headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({ event_id: eventId, suggestion, query: msg.query || '' })
+                                        });
+                                        if (res.ok) {
+                                                webviewView.webview.postMessage({ type: 'agentFeedbackStatus', eventId, message: 'Suggestion sent to agent feedback.' });
+                                        } else {
+                                                webviewView.webview.postMessage({ type: 'agentFeedbackStatus', eventId, message: 'Failed to send suggestion.' });
+                                        }
+                                } catch {
+                                        webviewView.webview.postMessage({ type: 'agentFeedbackStatus', eventId: Number(msg.eventId), message: 'Failed to send suggestion.' });
+                                }
+                                return;
                         }
                         if (msg.command === 'search') {
 				// サーバー起動チェック
@@ -1835,9 +2122,29 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
         <div class="owlignore-label">Workspace folders</div>
         <div id="owlIgnoreTree" class="dir-tree"></div>
       </details>
+      <details class="option-panel" id="agentPanel">
+        <summary>
+          <span>Agent</span>
+          <span class="option-summary">MCP setup</span>
+        </summary>
+        <div class="option-row">
+          <span>Codex / MCP</span>
+          <button id="agentSetupBtn" class="secondary-action" title="Register or copy agent setup">Agent Setup</button>
+        </div>
+      </details>
     </div>
     <div class="status" id="status"></div>
     <div id="translatedQuery" class="translated-query" style="display:none;"></div>
+    <div id="agentReviewPanel" class="agent-review-panel" style="display:none;">
+      <div class="agent-review-header">
+        <span>Agent Activity</span>
+        <div class="agent-review-header-actions">
+          <span id="agentReviewCount" class="agent-review-count">0 events</span>
+          <button id="agentActivityToggleBtn" class="secondary-action" type="button">Hide</button>
+        </div>
+      </div>
+      <div id="agentReviewList" class="agent-review-list"></div>
+    </div>
     <div class="results" id="results">
       <div class="empty-state" id="emptyState">
         <div class="empty-icon">
@@ -1920,7 +2227,7 @@ function setupDecorationListeners() {
 // 拡張機能設定の監視とPythonサーバーへの反映
 function updatePythonServerConfig() {
     const config = vscode.workspace.getConfiguration('owlspotlight');
-    const defaultModelName = 'Shuu12121/Owl-ph2-len2048';
+    const defaultModelName = 'Shuu12121/NightOwl-CodeEmbedding';
     const defaultBatchSize = 32;
     const defaultPythonVersion = '3.11';
     // すべての設定値で空欄やnull/undefinedの場合はデフォルトを使う
@@ -2186,6 +2493,12 @@ export function activate(context: vscode.ExtensionContext) {
 			const pos = new vscode.Position(line, 0);
 			targetEditor.selection = new vscode.Selection(pos, pos);
 			targetEditor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+		})
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('owlspotlight.generateAgentSetup', async () => {
+			await generateAgentSetup(context);
 		})
 	);
 

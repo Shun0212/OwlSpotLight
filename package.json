@@ -81,6 +81,10 @@
       {
         "command": "owlspotlight.removeVenv",
         "title": "OwlSpotlight: Remove Virtual Environment"
+      },
+      {
+        "command": "owlspotlight.generateAgentSetup",
+        "title": "OwlSpotlight: Generate Agent Setup"
       }
     ],
     "configuration": {
@@ -89,7 +93,7 @@
       "properties": {
         "owlspotlight.modelName": {
           "type": "string",
-          "default": "Shuu12121/Owl-ph2-len2048",
+          "default": "Shuu12121/NightOwl-CodeEmbedding",
           "description": "Hugging Face model name used for embeddings"
         },
         "owlspotlight.batchSize": {

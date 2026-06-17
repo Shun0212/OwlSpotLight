@@ -1068,6 +1068,115 @@ input[type=text]::placeholder {
   color: var(--vscode-foreground, #ccc);
 }
 
+/* ===== Agent review ===== */
+.agent-review-panel {
+  margin: 0.4em 0.8em 0;
+  border: 1px solid var(--vscode-sideBarSectionHeader-border, #333);
+  border-radius: 6px;
+  background: var(--vscode-editor-background, #1e1e1e);
+  overflow: hidden;
+}
+.agent-review-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.38em 0.55em;
+  background: var(--vscode-sideBarSectionHeader-background, #252526);
+  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #333);
+  font-weight: 600;
+  font-size: 0.86em;
+}
+.agent-review-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  min-width: 0;
+}
+.agent-review-header-actions button {
+  margin: 0;
+  padding: 0.18em 0.45em;
+  font-size: 0.78em;
+}
+.agent-review-count {
+  color: var(--vscode-descriptionForeground, #999);
+  font-size: 0.82em;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.agent-review-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25em;
+  padding: 0.35em;
+}
+.agent-review-panel.collapsed .agent-review-list {
+  display: none;
+}
+.agent-review-item {
+  border-bottom: 1px solid var(--vscode-editorWidget-border, #3c3c3c);
+  border-radius: 0;
+  padding: 0.35em 0.25em 0.45em;
+  background: rgba(128, 128, 128, 0.06);
+}
+.agent-review-item:last-child {
+  border-bottom: 0;
+}
+.agent-review-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25em;
+  margin-bottom: 0.25em;
+}
+.agent-review-meta span {
+  color: var(--vscode-descriptionForeground, #999);
+  background: var(--vscode-badge-background, #4d4d4d);
+  border-radius: 3px;
+  padding: 0.08em 0.4em;
+  font-size: 0.72em;
+}
+.agent-review-query {
+  color: var(--vscode-foreground, #ccc);
+  font-size: 0.82em;
+  line-height: 1.28;
+  overflow-wrap: anywhere;
+  margin-bottom: 0.25em;
+}
+.agent-reference-line {
+  color: var(--vscode-testing-iconPassed, #73c991);
+  font-size: 0.76em;
+  margin-bottom: 0.25em;
+}
+.agent-review-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35em;
+  flex-wrap: wrap;
+  margin-top: 0.25em;
+}
+.agent-review-actions button {
+  flex: 0 0 auto;
+  margin: 0;
+}
+.agent-feedback-input {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 3.2em;
+  margin-top: 0.45em;
+  border-radius: 4px;
+  border: 1px solid var(--vscode-input-border, transparent);
+  background: var(--vscode-input-background, #3c3c3c);
+  color: var(--vscode-input-foreground, #ccc);
+  padding: 0.45em 0.55em;
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: 0.82em;
+}
+.agent-feedback-status {
+  color: var(--vscode-descriptionForeground, #999);
+  font-size: 0.78em;
+}
+
 /* ===== Responsive ===== */
 @media (max-width: 600px) {
   .stats-class-header {

@@ -9,6 +9,8 @@ window.onload = function() {
     let currentResults = [];
     let owlIgnorePatterns = [];
     let owlIgnoreTree = null;
+    let agentSearchEvents = [];
+    let agentActivityHidden = false;
 
     // 状態保存/復元
     function collectState() {
@@ -44,7 +46,9 @@ window.onload = function() {
             currentSearchQuery,
             currentStatsData,
             currentFolderPath,
-            currentResults
+            currentResults,
+            agentSearchEvents,
+            agentActivityHidden
         };
     }
 
@@ -94,6 +98,9 @@ window.onload = function() {
                 const sel = document.getElementById('geminiModelSelect');
                 if (sel) sel.value = state.geminiModel;
             }
+            if (typeof state.agentActivityHidden === 'boolean') {
+                agentActivityHidden = state.agentActivityHidden;
+            }
             if (state.statsFilter && document.getElementById('statsFilter')) {
                 const sf = document.getElementById('statsFilter');
                 if (sf) sf.value = state.statsFilter;
@@ -119,6 +126,10 @@ window.onload = function() {
             if (state.currentStatsData) {
                 currentStatsData = state.currentStatsData;
                 applyStatsFilter();
+            }
+            if (Array.isArray(state.agentSearchEvents) && state.agentSearchEvents.length > 0) {
+                agentSearchEvents = state.agentSearchEvents;
+                renderAgentSearchEvents();
             }
             syncSegmentedControls();
         } catch (e) {
@@ -165,6 +176,9 @@ window.onload = function() {
                 const sel = document.getElementById('geminiModelSelect');
                 if (sel) sel.value = external.geminiModel;
             }
+            if (typeof external.agentActivityHidden === 'boolean') {
+                agentActivityHidden = external.agentActivityHidden;
+            }
             if (external.statsFilter && document.getElementById('statsFilter')) {
                 const sf = document.getElementById('statsFilter');
                 if (sf) sf.value = external.statsFilter;
@@ -189,6 +203,10 @@ window.onload = function() {
             if (external.currentStatsData) {
                 currentStatsData = external.currentStatsData;
                 applyStatsFilter();
+            }
+            if (Array.isArray(external.agentSearchEvents) && external.agentSearchEvents.length > 0) {
+                agentSearchEvents = external.agentSearchEvents;
+                renderAgentSearchEvents();
             }
             // 外部復元後ローカルへも保存
             syncSegmentedControls();
@@ -247,6 +265,18 @@ window.onload = function() {
           document.getElementById('stopServerBtn').onclick = () => {
             console.log('stopServerBtn clicked');
             vscode.postMessage({ command: 'stopServer' });
+          };
+        }
+        if (document.getElementById('agentSetupBtn')) {
+          document.getElementById('agentSetupBtn').onclick = () => {
+            vscode.postMessage({ command: 'generateAgentSetup' });
+          };
+        }
+        if (document.getElementById('agentActivityToggleBtn')) {
+          document.getElementById('agentActivityToggleBtn').onclick = () => {
+            agentActivityHidden = !agentActivityHidden;
+            renderAgentSearchEvents();
+            saveState();
           };
         }
         if (document.getElementById('searchOptionsBtn')) {
@@ -699,18 +729,148 @@ window.onload = function() {
         saveState();
     }
 
+    function escapeHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function formatAgentEventTime(event) {
+        const created = Number(event?.created_at || 0);
+        if (!created) return '';
+        try {
+            return new Date(created * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        } catch {
+            return '';
+        }
+    }
+
+    function applyAgentSearchEvent(event) {
+        if (!event) return;
+        if (event.kind === 'grep') {
+            const statusEl = document.getElementById('status');
+            if (statusEl) {
+                statusEl.textContent = `Agent grep: ${event.result_count || 0} matches for "${event.query || ''}"`;
+            }
+            return;
+        }
+        const query = event.original_query || event.query || '';
+        const searchInput = document.getElementById('searchInput');
+        if (searchInput && query) {
+            searchInput.value = query;
+        }
+        currentSearchQuery = query;
+        if (event.file_ext && document.getElementById('languageSelect')) {
+            document.getElementById('languageSelect').value = event.file_ext;
+        }
+        if (event.search_mode && document.getElementById('searchModeSelect')) {
+            document.getElementById('searchModeSelect').value = event.search_mode;
+        }
+        if (event.scope && document.getElementById('scopeSelect')) {
+            const normalizedScope = ['all', 'source', 'changed'].includes(event.scope) ? event.scope : 'all';
+            document.getElementById('scopeSelect').value = normalizedScope;
+        }
+        currentFolderPath = event.directory || currentFolderPath;
+        currentResults = Array.isArray(event.results) ? event.results : [];
+        syncSegmentedControls();
+        renderResults(currentResults, currentFolderPath || '');
+        const statusEl = document.getElementById('status');
+        if (statusEl) {
+            statusEl.textContent = `Agent search: ${currentResults.length} results`;
+        }
+        saveState();
+    }
+
+    function renderAgentSearchEvents() {
+        const panel = document.getElementById('agentReviewPanel');
+        const list = document.getElementById('agentReviewList');
+        const count = document.getElementById('agentReviewCount');
+        const toggle = document.getElementById('agentActivityToggleBtn');
+        if (!panel || !list) return;
+        if (!agentSearchEvents.length) {
+            panel.style.display = 'none';
+            return;
+        }
+        panel.style.display = 'block';
+        panel.classList.toggle('collapsed', agentActivityHidden);
+        list.style.display = agentActivityHidden ? 'none' : 'flex';
+        if (toggle) {
+            toggle.textContent = agentActivityHidden ? 'Show' : 'Hide';
+        }
+        if (count) {
+            count.textContent = agentSearchEvents.length + (agentSearchEvents.length === 1 ? ' event' : ' events');
+        }
+        list.innerHTML = '';
+        agentSearchEvents.slice(0, 6).forEach(event => {
+            const item = document.createElement('div');
+            item.className = 'agent-review-item';
+            item.setAttribute('data-event-id', event.id);
+            const query = event.original_query || event.query || '';
+            const resultCount = typeof event.result_count === 'number'
+                ? event.result_count
+                : Array.isArray(event.results) ? event.results.length : 0;
+            const kind = event.kind === 'grep' ? 'grep' : 'search';
+            const referencedRanks = Array.isArray(event.referenced_ranks) ? event.referenced_ranks : [];
+            const referencedLocations = Array.isArray(event.referenced_locations) ? event.referenced_locations : [];
+            const referencedText = referencedRanks.length
+                ? 'Referenced #' + referencedRanks.join(', #')
+                : referencedLocations.length
+                    ? 'Referenced ' + referencedLocations.slice(0, 2).join(', ')
+                    : '';
+            item.innerHTML =
+                '<div class="agent-review-meta">' +
+                    '<span>' + escapeHtml(kind) + '</span>' +
+                    '<span>' + escapeHtml(event.file_ext || '') + '</span>' +
+                    '<span>' + escapeHtml(event.search_mode || '') + '</span>' +
+                    '<span>' + resultCount + (kind === 'grep' ? ' matches' : ' results') + '</span>' +
+                    '<span>' + escapeHtml(formatAgentEventTime(event)) + '</span>' +
+                '</div>' +
+                '<div class="agent-review-query">' + escapeHtml(query) + '</div>' +
+                (referencedText ? '<div class="agent-reference-line">' + escapeHtml(referencedText) + '</div>' : '') +
+                '<div class="agent-review-actions">' +
+                    '<button type="button" class="secondary-action agent-use-query">Use</button>' +
+                    (kind === 'search' ? '<button type="button" class="secondary-action agent-show-results">Show</button>' : '') +
+                    '<span class="agent-feedback-status"></span>' +
+                '</div>';
+            item.querySelector('.agent-use-query').onclick = () => {
+                const input = document.getElementById('searchInput');
+                if (input) input.value = query;
+                currentSearchQuery = query;
+                saveState();
+            };
+            const showButton = item.querySelector('.agent-show-results');
+            if (showButton) {
+                showButton.onclick = () => {
+                    applyAgentSearchEvent(event);
+                };
+            }
+            list.appendChild(item);
+        });
+    }
+
+    function addAgentSearchEvents(events) {
+        if (!Array.isArray(events) || !events.length) return;
+        const byId = new Map(agentSearchEvents.map(event => [event.id, event]));
+        events.forEach(event => {
+            if (event && typeof event.id !== 'undefined') {
+                byId.set(event.id, event);
+            }
+        });
+        agentSearchEvents = Array.from(byId.values())
+            .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))
+            .slice(0, 20);
+        renderAgentSearchEvents();
+    }
+
     // 結果描画を関数化（復元時にも利用）
     function renderResults(results, folderPath) {
         const resultsContainer = document.getElementById('results');
         const statusEl = document.getElementById('status');
         const emptyEl = document.getElementById('emptyState');
         const resultTypeFilter = document.getElementById('resultTypeFilter')?.value || 'function_level';
-        const escapeHtml = (value) => String(value ?? '')
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
         const formatScore = (value) => {
             if (typeof value !== 'number' || !Number.isFinite(value)) return null;
             return String(Math.round(Math.max(0, Math.min(1, value)) * 100));
@@ -908,6 +1068,14 @@ window.onload = function() {
                 }
                 if (msg.type === 'serverStatus') {
                         setServerStatus(msg.online, msg.message || msg.port);
+                }
+                if (msg.type === 'agentSearchEvents') {
+                        addAgentSearchEvents(msg.events);
+                }
+                if (msg.type === 'agentFeedbackStatus') {
+                        const item = document.querySelector('.agent-review-item[data-event-id="' + msg.eventId + '"]');
+                        const status = item ? item.querySelector('.agent-feedback-status') : null;
+                        if (status) status.textContent = msg.message || '';
                 }
                 if (msg.type === 'owlIgnoreSettings') {
                         setOwlIgnoreSettings(msg);

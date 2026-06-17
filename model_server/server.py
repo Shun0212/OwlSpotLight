@@ -22,6 +22,7 @@ from collections import Counter
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 import shutil
+import subprocess
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
 
@@ -79,6 +80,31 @@ class SearchFunctionsSimpleRequest(BaseModel):
     include_files: Optional[List[str]] = None
     search_mode: str = "semantic"
     semantic_weight: float = 0.75
+    capture_agent_event: bool = False
+    agent_source: Optional[str] = None
+    original_query: Optional[str] = None
+    scope: Optional[str] = None
+
+class AgentSearchFeedbackRequest(BaseModel):
+    event_id: int
+    suggestion: str
+    query: Optional[str] = None
+
+class AgentSearchUsageRequest(BaseModel):
+    event_id: int
+    referenced_ranks: List[int] = []
+    referenced_locations: List[str] = []
+    useful: bool = True
+    note: Optional[str] = None
+
+class GrepRepoRequest(BaseModel):
+    directory: str
+    pattern: str
+    regex: bool = False
+    case_sensitive: bool = True
+    max_matches: int = 100
+    capture_agent_event: bool = False
+    agent_source: Optional[str] = None
 
 class FunctionRangeRequest(BaseModel):
     file: str
@@ -96,6 +122,57 @@ class ClassStatsRequest(BaseModel):
 
 # サーバー全体で1つのインデックスを保持
 index_lock = Lock()
+agent_event_lock = Lock()
+agent_search_events: list[dict] = []
+agent_search_feedback: list[dict] = []
+agent_search_usage: list[dict] = []
+MAX_AGENT_SEARCH_EVENTS = 100
+MAX_AGENT_SEARCH_FEEDBACK = 100
+MAX_AGENT_SEARCH_USAGE = 100
+
+def append_agent_search_event(event: dict) -> dict:
+    with agent_event_lock:
+        next_id = (agent_search_events[-1]["id"] + 1) if agent_search_events else 1
+        stored = {"id": next_id, "created_at": time.time(), **event}
+        agent_search_events.append(stored)
+        if len(agent_search_events) > MAX_AGENT_SEARCH_EVENTS:
+            del agent_search_events[:-MAX_AGENT_SEARCH_EVENTS]
+        return stored
+
+def append_agent_search_feedback(feedback: dict) -> dict:
+    with agent_event_lock:
+        next_id = (agent_search_feedback[-1]["id"] + 1) if agent_search_feedback else 1
+        stored = {"id": next_id, "created_at": time.time(), **feedback}
+        agent_search_feedback.append(stored)
+        if len(agent_search_feedback) > MAX_AGENT_SEARCH_FEEDBACK:
+            del agent_search_feedback[:-MAX_AGENT_SEARCH_FEEDBACK]
+        return stored
+
+def append_agent_search_usage(usage: dict) -> dict:
+    with agent_event_lock:
+        next_id = (agent_search_usage[-1]["id"] + 1) if agent_search_usage else 1
+        stored = {"id": next_id, "created_at": time.time(), **usage}
+        agent_search_usage.append(stored)
+        if len(agent_search_usage) > MAX_AGENT_SEARCH_USAGE:
+            del agent_search_usage[:-MAX_AGENT_SEARCH_USAGE]
+        for event in agent_search_events:
+            if event.get("id") == stored.get("event_id"):
+                reports = event.setdefault("usage_reports", [])
+                reports.append(stored)
+                event["referenced_ranks"] = sorted({
+                    int(rank)
+                    for report in reports
+                    for rank in report.get("referenced_ranks", [])
+                    if isinstance(rank, int) or str(rank).isdigit()
+                })
+                event["referenced_locations"] = sorted({
+                    str(location)
+                    for report in reports
+                    for location in report.get("referenced_locations", [])
+                    if location
+                })
+                break
+        return stored
 
 # インデックス情報を保持するクラス
 class GlobalIndexerState:
@@ -346,6 +423,81 @@ def is_ignored(path: str, spec: Optional[PathSpec], root_dir: str) -> bool:
     rel_path = os.path.relpath(path, root_dir)
     return spec.match_file(rel_path)
 
+def repo_visible_files(root_dir: str, spec: Optional[PathSpec]) -> list[str]:
+    root = Path(root_dir).resolve()
+    files: list[str] = []
+    try:
+        output = subprocess.check_output(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+            cwd=str(root),
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+        for line in output.splitlines():
+            rel_path = line.strip()
+            if not rel_path:
+                continue
+            path = (root / rel_path).resolve()
+            try:
+                path.relative_to(root)
+            except ValueError:
+                continue
+            if path.is_file() and not is_ignored(str(path), spec, str(root)):
+                files.append(str(path))
+        if files:
+            return files
+    except Exception:
+        pass
+
+    ignored_dirs = {".git", "node_modules", "dist", "build", "out", ".venv", ".owl_index", "__pycache__"}
+    for current_root, dirs, filenames in os.walk(root):
+        dirs[:] = [
+            dirname
+            for dirname in dirs
+            if dirname not in ignored_dirs and not is_ignored(os.path.join(current_root, dirname), spec, str(root))
+        ]
+        for filename in filenames:
+            path = os.path.join(current_root, filename)
+            if not is_ignored(path, spec, str(root)):
+                files.append(path)
+    return files
+
+def grep_repo_files(directory: str, pattern: str, regex: bool, case_sensitive: bool, max_matches: int) -> list[dict]:
+    if not pattern:
+        return []
+    flags = 0 if case_sensitive else re.IGNORECASE
+    compiled = re.compile(pattern if regex else re.escape(pattern), flags)
+    spec = load_gitignore_spec(directory)
+    root = Path(directory).resolve()
+    matches: list[dict] = []
+    for file_path in repo_visible_files(str(root), spec):
+        try:
+            raw = Path(file_path).read_bytes()
+        except Exception:
+            continue
+        if b"\0" in raw[:4096]:
+            continue
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            try:
+                text = raw.decode("utf-8", errors="replace")
+            except Exception:
+                continue
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            if not compiled.search(line):
+                continue
+            rel_path = os.path.relpath(file_path, root)
+            matches.append({
+                "file": file_path,
+                "path": rel_path,
+                "line": line_number,
+                "text": line[:500],
+            })
+            if len(matches) >= max_matches:
+                return matches
+    return matches
+
 # ファイルのハッシュ計算関数
 def file_hash(path):
     h = hashlib.sha256()
@@ -384,10 +536,15 @@ def bm25_search_scores(functions: list[dict], query: str) -> dict[int, float]:
     for func in functions:
         name = func.get("name", "")
         function_name = func.get("function_name", "")
+        file_path = func.get("file_path") or func.get("file", "")
         source_code = func.get("raw_code") or func.get("code", "")
         parts = [
             name,
             function_name if function_name != name else "",
+            func.get("class_name", ""),
+            func.get("symbol_kind", ""),
+            file_path,
+            os.path.basename(str(file_path)) if file_path else "",
             source_code,
             json.dumps(func.get("python_static", {}), ensure_ascii=False),
         ]
@@ -714,6 +871,27 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
     with index_lock:
         # build_indexを必ず呼び、差分埋め込みロジックを統一
         results, file_count, indexer = build_index(req.directory, req.file_ext, update_state=True)
+        def record_agent_event(found: list[dict], search_mode_value: str, semantic_weight_value: float, message: Optional[str] = None):
+            if not req.capture_agent_event:
+                return None
+            event = {
+                "source": req.agent_source or "agent",
+                "directory": os.path.abspath(req.directory),
+                "query": req.query,
+                "original_query": req.original_query or req.query,
+                "file_ext": req.file_ext,
+                "top_k": req.top_k,
+                "scope": req.scope or ("scoped" if req.include_files else "all"),
+                "search_mode": search_mode_value,
+                "semantic_weight": semantic_weight_value,
+                "include_files_count": len(req.include_files or []),
+                "result_count": len(found),
+                "results": found,
+            }
+            if message:
+                event["message"] = message
+            return append_agent_search_event(event)
+
         # build_index後のキャッシュ状態をprint
         print("indexer_exists:", global_index_state.indexer is not None)
         print("up_to_date:", global_index_state.is_up_to_date())
@@ -722,7 +900,8 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
         embeddings = global_index_state.embeddings
         faiss_index = global_index_state.faiss_index
         if not results or embeddings is None or faiss_index is None:
-            return {"results": [], "message": "No functions found."}
+            agent_event = record_agent_event([], req.search_mode, req.semantic_weight, "No functions found.")
+            return {"results": [], "message": "No functions found.", "agent_event_id": agent_event["id"] if agent_event else None}
         search_results = results
         search_embeddings = embeddings
         index_to_result_index = list(range(len(results)))
@@ -734,12 +913,14 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
                 if os.path.abspath(func.get("file", func.get("file_path", ""))) in include_files
             ]
             if not scoped_indices:
+                agent_event = record_agent_event([], req.search_mode, req.semantic_weight, "No functions found in the selected file scope.")
                 return {
                     "results": [],
                     "message": "No functions found in the selected file scope.",
                     "num_functions": len(results),
                     "num_files": file_count,
                     "scoped_files": len(include_files),
+                    "agent_event_id": agent_event["id"] if agent_event else None,
                 }
             search_results = [results[index] for index in scoped_indices]
             search_embeddings = embeddings[scoped_indices]
@@ -765,6 +946,7 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
                 item["keyword_match"] = True
                 item["matched_keywords"] = scoped_keyword_matches[scoped_index]
                 found.append(item)
+            agent_event = record_agent_event(found, search_mode, semantic_weight)
             return {
                 "results": found,
                 "num_functions": len(results),
@@ -772,6 +954,7 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
                 "scoped_files": len(req.include_files or []),
                 "search_mode": search_mode,
                 "semantic_weight": semantic_weight,
+                "agent_event_id": agent_event["id"] if agent_event else None,
             }
 
         semantic_scores: dict[int, float] = {}
@@ -835,6 +1018,7 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
             item["hybrid_score"] = hybrid_score
             item["search_mode"] = search_mode
             found.append(item)
+        agent_event = record_agent_event(found, search_mode, semantic_weight)
         return {
             "results": found,
             "num_functions": len(results),
@@ -842,8 +1026,91 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
             "scoped_files": len(req.include_files or []),
             "search_mode": search_mode,
             "semantic_weight": semantic_weight,
+            "agent_event_id": agent_event["id"] if agent_event else None,
         }
 
+
+@app.get("/agent_search_events")
+async def agent_search_events_api(since_id: int = 0, limit: int = 20):
+    with agent_event_lock:
+        events = [event for event in agent_search_events if event["id"] > since_id]
+        return {"events": events[-max(1, min(limit, 100)) :]}
+
+@app.post("/agent_search_feedback")
+async def agent_search_feedback_api(req: AgentSearchFeedbackRequest):
+    suggestion = req.suggestion.strip()
+    if not suggestion:
+        raise HTTPException(status_code=400, detail="suggestion is required")
+    stored = append_agent_search_feedback({
+        "event_id": req.event_id,
+        "query": req.query,
+        "suggestion": suggestion,
+    })
+    return {"ok": True, "feedback": stored}
+
+@app.post("/agent_search_usage")
+async def agent_search_usage_api(req: AgentSearchUsageRequest):
+    referenced_ranks = sorted({
+        rank
+        for rank in req.referenced_ranks
+        if isinstance(rank, int) and rank > 0
+    })
+    referenced_locations = [
+        location.strip()
+        for location in req.referenced_locations
+        if location and location.strip()
+    ]
+    if not referenced_ranks and not referenced_locations:
+        raise HTTPException(status_code=400, detail="referenced_ranks or referenced_locations is required")
+    stored = append_agent_search_usage({
+        "event_id": req.event_id,
+        "referenced_ranks": referenced_ranks,
+        "referenced_locations": referenced_locations,
+        "useful": req.useful,
+        "note": req.note,
+    })
+    return {"ok": True, "usage": stored}
+
+@app.get("/agent_search_feedback")
+async def agent_search_feedback_list_api(since_id: int = 0, limit: int = 20):
+    with agent_event_lock:
+        feedback = [item for item in agent_search_feedback if item["id"] > since_id]
+        return {"feedback": feedback[-max(1, min(limit, 100)) :]}
+
+@app.post("/grep_repo")
+async def grep_repo_api(req: GrepRepoRequest):
+    directory = os.path.abspath(req.directory)
+    if not os.path.isdir(directory):
+        raise HTTPException(status_code=400, detail=f"directory does not exist: {directory}")
+    max_matches = max(1, min(req.max_matches, 500))
+    try:
+        matches = grep_repo_files(directory, req.pattern, req.regex, req.case_sensitive, max_matches)
+    except re.error as exc:
+        raise HTTPException(status_code=400, detail=f"invalid regex: {exc}") from exc
+
+    agent_event = None
+    if req.capture_agent_event:
+        agent_event = append_agent_search_event({
+            "source": req.agent_source or "agent",
+            "kind": "grep",
+            "directory": directory,
+            "query": req.pattern,
+            "original_query": req.pattern,
+            "file_ext": "all",
+            "top_k": max_matches,
+            "scope": "repo",
+            "search_mode": "grep_regex" if req.regex else "grep_literal",
+            "semantic_weight": 0.0,
+            "include_files_count": 0,
+            "result_count": len(matches),
+            "results": matches,
+        })
+    return {
+        "matches": matches,
+        "result_count": len(matches),
+        "search_mode": "grep_regex" if req.regex else "grep_literal",
+        "agent_event_id": agent_event["id"] if agent_event else None,
+    }
 
 
 @app.post("/get_class_stats")
