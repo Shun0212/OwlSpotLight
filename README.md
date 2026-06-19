@@ -3,7 +3,7 @@
 <div align="center">
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.5.0-blue.svg)](https://github.com/Shun0212/owlspotlight)
+[![Version](https://img.shields.io/badge/version-0.5.1-blue.svg)](https://github.com/Shun0212/owlspotlight)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://www.python.org/)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.100+-blue.svg)](https://code.visualstudio.com/)
 [![Marketplace](https://img.shields.io/badge/VS%20Code-Marketplace-brightgreen.svg)](https://marketplace.visualstudio.com/items?itemName=Shun0212.owlspotlight)
@@ -256,45 +256,45 @@ For questions, bug reports, feedback, or collaboration, contact [owlspotlight@gm
 
 ### OwlSpotlight とは
 
-OwlSpotlight は、関数やクラスの名前を覚えていなくても「**そのコードが何をしているか**」を説明するだけでコードを探せる VS Code 拡張機能です。サイドバーから自然言語（日本語・英語）でクエリを入力すると、該当する関数・メソッド・クラス・トップレベルのコードブロック・FastAPI route・テストを見つけて、その場所へジャンプし、定義をハイライト表示します。エディタで選択したコードから類似コードを探したり、検索範囲を git の変更ファイルだけに絞ったり、Hybrid / Semantic / BM25 / 完全一致キーワードのモードを切り替えることもできます。
+OwlSpotlight は、関数やクラスの名前を覚えていなくても「**そのコードが何をするものか**」を説明するだけで目的のコードを探せる VS Code 拡張機能です。サイドバーから自然言語（日本語・英語）で入力すると、該当する関数・メソッド・クラス・トップレベルのコードブロック・FastAPI のルート・テストを見つけ出し、その場所へジャンプして定義をハイライト表示します。エディタで選択したコードに似たコードを探したり、検索範囲を Git の変更ファイルだけに絞り込んだり、Hybrid / Semantic / BM25 / 完全一致キーワードの各モードを切り替えたりすることもできます。
 
-検索・インデックスはすべて `127.0.0.1` のローカルサーバーで動くのでコードが外部に出ることはなく、ファイルを編集するとインデックスも自動で更新されます。さらに、組み込みの Codex MCP ブリッジを通じて AI エージェントから同じ検索を利用できます。
+検索もインデックス作成もすべて `127.0.0.1` のローカルサーバー上で動くため、コードが外部に送信されることはありません。ファイルを編集すればインデックスも自動で更新されます。さらに、組み込みの Codex MCP ブリッジを介して、AI エージェントからも同じ検索機能を利用できます。
 
-内部的には単なるチャンク検索ではありません。検索エンジンには、私自身が開発した独自のコード埋め込みモデル **NightOwl-CodeEmbedding**（約150Mパラメータ、ModernBERT アーキテクチャの Bi-Encoder。ゼロから学習させた自作 base model「NightOwl」をコード検索向けに fine-tune）を採用し、Python の構造・呼び出し・import・FastAPI route・pytest などの静的解析メタデータと、このモデルによる dense retrieval・BM25・完全一致キーワード検索を組み合わせて検索します。
+内部的には、単なるチャンク検索ではありません。検索エンジンには、私が独自に開発したコード埋め込みモデル **NightOwl-CodeEmbedding**（約 150M パラメータ、ModernBERT アーキテクチャの Bi-Encoder。ゼロから学習させた自作のベースモデル「NightOwl」をコード検索向けに fine-tune したもの）を採用しています。Python の構造・呼び出し・import・FastAPI のルート・pytest といった静的解析メタデータに、このモデルによる dense retrieval・BM25・完全一致キーワード検索を組み合わせて検索します。
 
-**Codex MCP 対応**: sidebar から OwlSpotlight を Codex に登録し、Codex 内で `owlspotlight.search_code` を直接使えます。Claude Code 対応は数日中に追加予定です。
+**Codex MCP 対応**: サイドバーから OwlSpotlight を Codex に登録すれば、Codex 内で `owlspotlight.search_code` を直接呼び出せます。Claude Code への対応も数日中に追加予定です。
 
 ### 主な機能
 
-- **検索モード**: `Hybrid`, `Semantic`, `BM25`, `Keyword` を切り替え可能。
-- **Python静的解析**: params、return annotation、decorator、import、call、代入名、docstring、call graph、import dependency を抽出。
-- **Python CodeBlock検索**: 関数/クラス外のトップレベル処理も検索対象。
-- **FastAPI / pytest ヒント**: route や test/fixture をメタデータとして保持。
-- **検索スコープ**: 全体、source系フォルダ、git変更済み/未追跡ファイルのみ。
-- **選択範囲から類似検索**: エディタでコードを選択して類似コードへジャンプ。
-- **自動差分インデックス**: 対応ファイル変更時にサーバー側の差分インデックスを更新。
-- **Codex MCP対応**: sidebar から Codex へ直接登録し、`owlspotlight.search_code` / `owlspotlight.grep_repo` と compact Agent Activity を利用可能。
+- **検索モード**: `Hybrid` / `Semantic` / `BM25` / `Keyword` を切り替え可能。
+- **Python の静的解析**: params、return annotation、decorator、import、call、代入名、docstring、call graph、import dependency を抽出。
+- **Python の CodeBlock 検索**: 関数やクラスの外にあるトップレベルの処理も検索対象に含めます。
+- **FastAPI / pytest のヒント**: ルートや test / fixture をメタデータとして保持。
+- **検索スコープ**: 全体、source 系フォルダ、Git の変更済み・未追跡ファイルのみ、から選択可能。
+- **選択範囲からの類似検索**: エディタでコードを選択すると、似たコードへジャンプできます。
+- **自動の差分インデックス**: 対応ファイルが変更されると、サーバー側の差分インデックスを更新します。
+- **Codex MCP 対応**: サイドバーから Codex へ直接登録し、`owlspotlight.search_code` / `owlspotlight.grep_repo` とコンパクトな Agent Activity を利用できます。
 - **Claude Code**: 数日中に対応予定。
-- **ローカルファースト**: 検索・インデックスは `127.0.0.1` のローカルサーバーで実行。
-- **日本語クエリ対応**: Gemini API を設定すると日本語クエリを英語へ翻訳して検索。
+- **ローカルファースト**: 検索もインデックスも `127.0.0.1` のローカルサーバーで実行します。
+- **日本語クエリ対応**: Gemini API を設定すると、日本語のクエリを英語へ翻訳して検索します。
 
 ### クイックスタート
 
-前提: [`uv`](https://docs.astral.sh/uv/getting-started/installation/) をインストールしてください。Python 3.11 は `uv` に管理させることもできます。
+前提: [`uv`](https://docs.astral.sh/uv/getting-started/installation/) をインストールしておいてください。Python 3.11 のインストールも `uv` に任せられます。
 
-1. [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=Shun0212.owlspotlight) からインストール。
-2. OwlSpotlight サイドバーを開く。
-3. **Setup / Start** をクリック。
-4. 自然言語で検索。
+1. [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=Shun0212.owlspotlight) からインストールします。
+2. OwlSpotlight のサイドバーを開きます。
+3. **Setup / Start** をクリックします。
+4. 自然言語で検索します。
 
-手動で行う場合:
+手動で行う場合は、コマンドパレットから次を実行します:
 
 ```text
 OwlSpotlight: Setup Python Environment
 OwlSpotlight: Start Server
 ```
 
-ログは **表示 -> 出力 -> OwlSpotlight** に出ます。VS Code のターミナルは占有しません。
+ログは **表示 -> 出力 -> OwlSpotlight** に表示されます。バックグラウンドで動作するため、VS Code のターミナルを占有することはありません。
 
 ### 検索オプション
 
@@ -307,19 +307,19 @@ OwlSpotlight: Start Server
 | Mode | `Hybrid`, `Semantic`, `BM25`, `Keyword` |
 | Type | `All`, `Functions`, `Methods`, `CodeBlocks` |
 
-`Source` は `src`, `app`, `lib`, `packages`, `client`, `server`, `backend`, `frontend` などを自動検知します。
+`Source` は `src`, `app`, `lib`, `packages`, `client`, `server`, `backend`, `frontend` などのフォルダを自動的に検出します。
 
-`Changed` は git の変更済み・未追跡ファイルのみを検索します。
+`Changed` は Git の変更済み・未追跡ファイルのみを検索します。
 
-### MCP Server Mode
+### MCP サーバーモード
 
-先に VS Code 側の OwlSpotlight server を起動してから、MCP stdio bridge を起動します。
+先に VS Code 側の OwlSpotlight サーバーを起動してから、MCP の stdio ブリッジを起動します。
 
 ```bash
 python model_server/mcp_server.py
 ```
 
-Cursor などの MCP client 向け `.mcp.json` 例:
+Cursor などの MCP クライアント向けの `.mcp.json` の例:
 
 ```json
 {
@@ -337,13 +337,13 @@ Cursor などの MCP client 向け `.mcp.json` 例:
 }
 ```
 
-MCP tool は `owlspotlight.search_code` です。`OWLSPOTLIGHT_WORKSPACE` が設定されていれば `query` だけで呼べます。任意で `directory`, `file_ext` (`auto` がデフォルトで `.owlignore` と git ignore/exclude ルールを尊重), `top_k` (デフォルト `30`), `scope`, `search_mode` (デフォルト `semantic`), `server_url` も受け取ります。
-エージェント経由の検索は OwlSpotlight サイドバーに compact activity として反映されます。意味的な発見には `owlspotlight.search_code`、リポジトリ全体の厳密な参照確認には `owlspotlight.grep_repo`、実行中の indexing/embedding 停止には `owlspotlight.cancel_embedding`、実際に根拠として使った rank や grep location の記録には `owlspotlight.mark_results_used` を使います。人間の feedback は任意です。サイドバーで明示的に改善案を入力した場合だけ、追加 MCP tool `owlspotlight.get_human_feedback` からエージェントが取得できます。
-エージェントの available tools に `owlspotlight.search_code` が見えていない場合は、`.mcp.json` 更新後に MCP client を reload/restart してください。MCP tool が読み込まれていれば、エージェントが `mcp_server.py` を読んだり HTTP API を逆引きしたりする必要はありません。
+MCP ツールは `owlspotlight.search_code` です。`OWLSPOTLIGHT_WORKSPACE` を設定していれば、`query` だけで呼び出せます。このほか、任意の引数として `directory`、`file_ext`（デフォルトは `auto` で、`.owlignore` と Git の ignore / exclude ルールに従います）、`top_k`（デフォルト `30`）、`scope`、`search_mode`（デフォルト `semantic`）、`server_url` も受け取ります。
+エージェント経由の検索は、OwlSpotlight サイドバーにコンパクトなアクティビティとして表示されます。意味的な検索には `owlspotlight.search_code`、リポジトリ全体での厳密な参照確認には `owlspotlight.grep_repo`、実行中のインデックス作成・埋め込み処理の停止には `owlspotlight.cancel_embedding`、実際に根拠として使った順位や grep の該当箇所の記録には `owlspotlight.mark_results_used` を使います。人間からのフィードバックは任意です。サイドバーで改善案を明示的に入力した場合にのみ、追加の MCP ツール `owlspotlight.get_human_feedback` を通じてエージェントが取得できます。
+エージェントの利用可能なツール一覧に `owlspotlight.search_code` が表示されない場合は、`.mcp.json` を更新したあとに MCP クライアントを再読み込み（リロード）または再起動してください。MCP ツールさえ読み込まれていれば、エージェントが `mcp_server.py` を読んだり HTTP API を解析したりする必要はありません。
 
-パスを手で書き換えたくない場合は、コマンドパレットの **OwlSpotlight: Generate Agent Setup** またはサイドバーの **Agent Setup** を使ってください。Codex CLI へ直接登録したり、現在の server URL と絶対パス入りで workspace `.mcp.json` を作成/更新したり、エージェント向け指示をコピーできます。
+パスを手作業で書き換えたくない場合は、コマンドパレットの **OwlSpotlight: Generate Agent Setup**、またはサイドバーの **Agent Setup** を使ってください。Codex CLI への直接登録、現在のサーバー URL と絶対パスを埋め込んだワークスペースの `.mcp.json` の作成・更新、エージェント向け指示のコピーが行えます。
 
-- Codex CLI: `codex mcp add` で MCP server を登録してから Codex を再起動してください:
+- Codex CLI: `codex mcp add` で MCP サーバーを登録してから、Codex を再起動してください:
 
 ```bash
 codex mcp add owlspotlight \
@@ -352,7 +352,7 @@ codex mcp add owlspotlight \
   -- /absolute/path/to/owlspotlight/model_server/.venv/bin/python /absolute/path/to/owlspotlight/model_server/mcp_server.py
 ```
 
-あとで Codex 登録を消す場合は、Agent Setup の remove option を使うか、次を実行します:
+あとで Codex への登録を解除する場合は、Agent Setup の削除オプションを使うか、次を実行します:
 
 ```bash
 codex mcp remove owlspotlight
@@ -360,7 +360,7 @@ codex mcp remove owlspotlight
 
 ### 連絡先
 
-質問、不具合報告、フィードバック、共同開発などは [owlspotlight@gmail.com](mailto:owlspotlight@gmail.com) まで連絡してください。
+質問・不具合報告・フィードバック・共同開発などは、[owlspotlight@gmail.com](mailto:owlspotlight@gmail.com) までご連絡ください。
 
 ### 開発
 
