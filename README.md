@@ -146,8 +146,8 @@ Example `.mcp.json` for Cursor and other MCP clients:
 }
 ```
 
-The MCP tool is `owlspotlight.search_code`. It can be called with only `query` when `OWLSPOTLIGHT_WORKSPACE` is set. It also accepts optional `directory`, `file_ext` (`auto` by default, respecting `.owlignore` plus git ignore/exclude rules), `top_k`, `scope`, `search_mode`, and `server_url`.
-Agent searches are mirrored into the OwlSpotlight sidebar as compact activity. Use `owlspotlight.search_code` for semantic discovery, `owlspotlight.grep_repo` for repository-wide exact reference checks, and `owlspotlight.mark_results_used` to record only the ranks or grep locations the agent actually used as evidence. Human feedback is optional; the companion MCP tool `owlspotlight.get_human_feedback` is only needed when you explicitly enter query-improvement suggestions in the sidebar.
+The MCP tool is `owlspotlight.search_code`. It can be called with only `query` when `OWLSPOTLIGHT_WORKSPACE` is set. It also accepts optional `directory`, `file_ext` (`auto` by default, respecting `.owlignore` plus git ignore/exclude rules), `top_k` (`30` by default), `scope`, `search_mode` (`semantic` by default), and `server_url`.
+Agent searches are mirrored into the OwlSpotlight sidebar as compact activity. Use `owlspotlight.search_code` for semantic discovery, `owlspotlight.grep_repo` for repository-wide exact reference checks, `owlspotlight.cancel_embedding` to stop a running indexing/embedding job, and `owlspotlight.mark_results_used` to record only the ranks or grep locations the agent actually used as evidence. Human feedback is optional; the companion MCP tool `owlspotlight.get_human_feedback` is only needed when you explicitly enter query-improvement suggestions in the sidebar.
 If an agent cannot see `owlspotlight.search_code` in its available tools, reload or restart the MCP client after updating `.mcp.json`; the agent should not need to inspect `mcp_server.py` or reverse-engineer the HTTP API when the MCP tool is loaded.
 
 To avoid hand-editing paths, run **OwlSpotlight: Generate Agent Setup** from the Command Palette or click **Agent Setup** in the sidebar. It can register OwlSpotlight directly with Codex CLI, create/update the workspace `.mcp.json`, or copy agent instructions with the current server URL.
@@ -218,7 +218,7 @@ FastAPI background server
 | Setting | Default | Description |
 |---|---:|---|
 | `owlspotlight.modelName` | `Shuu12121/NightOwl-CodeEmbedding` | Hugging Face embedding model |
-| `owlspotlight.batchSize` | `32` | Embedding batch size |
+| `owlspotlight.batchSize` | `2` | Embedding batch size |
 | `owlspotlight.autoStartServer` | `false` | Start server when VS Code opens |
 | `owlspotlight.autoIndexOnFileChange` | `true` | Refresh incremental index when supported files change |
 | `owlspotlight.enableJapaneseTranslation` | `false` | Enable Japanese to English query translation |
@@ -234,8 +234,12 @@ FastAPI background server
 | `uv` not found | Install uv from the official uv docs or with Homebrew/WinGet/pipx |
 | No results | Check server status, language option, scope option, and whether files exist for that extension |
 | Changed scope returns nothing | Ensure the workspace is a git repository and files are modified or untracked |
-| Memory issues | Lower `owlspotlight.batchSize` to `8` or `4` |
+| Memory issues | Lower `owlspotlight.batchSize` to `1` |
 | Python file has syntax errors | OwlSpotlight falls back to Tree-sitter and keeps function/method search available |
+
+### Contact
+
+For questions, bug reports, feedback, or collaboration, contact [owlspotlight@gmail.com](mailto:owlspotlight@gmail.com).
 
 ### Roadmap
 
@@ -333,8 +337,8 @@ Cursor などの MCP client 向け `.mcp.json` 例:
 }
 ```
 
-MCP tool は `owlspotlight.search_code` です。`OWLSPOTLIGHT_WORKSPACE` が設定されていれば `query` だけで呼べます。任意で `directory`, `file_ext` (`auto` がデフォルトで `.owlignore` と git ignore/exclude ルールを尊重), `top_k`, `scope`, `search_mode`, `server_url` も受け取ります。
-エージェント経由の検索は OwlSpotlight サイドバーに compact activity として反映されます。意味的な発見には `owlspotlight.search_code`、リポジトリ全体の厳密な参照確認には `owlspotlight.grep_repo`、実際に根拠として使った rank や grep location の記録には `owlspotlight.mark_results_used` を使います。人間の feedback は任意です。サイドバーで明示的に改善案を入力した場合だけ、追加 MCP tool `owlspotlight.get_human_feedback` からエージェントが取得できます。
+MCP tool は `owlspotlight.search_code` です。`OWLSPOTLIGHT_WORKSPACE` が設定されていれば `query` だけで呼べます。任意で `directory`, `file_ext` (`auto` がデフォルトで `.owlignore` と git ignore/exclude ルールを尊重), `top_k` (デフォルト `30`), `scope`, `search_mode` (デフォルト `semantic`), `server_url` も受け取ります。
+エージェント経由の検索は OwlSpotlight サイドバーに compact activity として反映されます。意味的な発見には `owlspotlight.search_code`、リポジトリ全体の厳密な参照確認には `owlspotlight.grep_repo`、実行中の indexing/embedding 停止には `owlspotlight.cancel_embedding`、実際に根拠として使った rank や grep location の記録には `owlspotlight.mark_results_used` を使います。人間の feedback は任意です。サイドバーで明示的に改善案を入力した場合だけ、追加 MCP tool `owlspotlight.get_human_feedback` からエージェントが取得できます。
 エージェントの available tools に `owlspotlight.search_code` が見えていない場合は、`.mcp.json` 更新後に MCP client を reload/restart してください。MCP tool が読み込まれていれば、エージェントが `mcp_server.py` を読んだり HTTP API を逆引きしたりする必要はありません。
 
 パスを手で書き換えたくない場合は、コマンドパレットの **OwlSpotlight: Generate Agent Setup** またはサイドバーの **Agent Setup** を使ってください。Codex CLI へ直接登録したり、現在の server URL と絶対パス入りで workspace `.mcp.json` を作成/更新したり、エージェント向け指示をコピーできます。
@@ -353,6 +357,10 @@ codex mcp add owlspotlight \
 ```bash
 codex mcp remove owlspotlight
 ```
+
+### 連絡先
+
+質問、不具合報告、フィードバック、共同開発などは [owlspotlight@gmail.com](mailto:owlspotlight@gmail.com) まで連絡してください。
 
 ### 開発
 

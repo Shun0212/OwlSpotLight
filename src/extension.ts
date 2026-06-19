@@ -12,11 +12,33 @@ const DEFAULT_SERVER_PORT = 8000;
 
 // SIGTERM で落ちない uvicorn が孤児化(PPID=1)してポートを占有し続けるのを防ぐため、
 // 一定時間後に SIGKILL へエスカレーションする。
-function terminateServerProcess(proc: cp.ChildProcess): void {
-	proc.kill();
+function isChildProcessRunning(proc: cp.ChildProcess): boolean {
+	return proc.exitCode === null && proc.signalCode === null;
+}
+
+function terminateServerProcess(
+	proc: cp.ChildProcess,
+	onEscalate?: () => void,
+	onFailure?: () => void
+): void {
+	const signalled = proc.kill();
+	if (!signalled && isChildProcessRunning(proc)) {
+		onFailure?.();
+		return;
+	}
 	setTimeout(() => {
-		if (!proc.killed && proc.exitCode === null) {
-			proc.kill('SIGKILL');
+		if (isChildProcessRunning(proc)) {
+			onEscalate?.();
+			const killed = proc.kill('SIGKILL');
+			if (!killed && isChildProcessRunning(proc)) {
+				onFailure?.();
+				return;
+			}
+			setTimeout(() => {
+				if (isChildProcessRunning(proc)) {
+					onFailure?.();
+				}
+			}, 3000);
 		}
 	}, 3000);
 }
@@ -1173,8 +1195,9 @@ function buildAgentSetupPayload(
 		'- Restart Codex after adding the MCP server. /mcp should show owlspotlight; project .mcp.json alone is not enough for Codex CLI.',
 		'- Claude Code support is planned in the next few days.',
 		'Available MCP tools:',
-		'- owlspotlight.search_code: semantic/BM25/hybrid/keyword search over this workspace. You can call it with only query; directory defaults to this workspace and file_ext defaults to auto.',
-		'- owlspotlight.grep_repo: repository-wide grep for exact identifiers, call sites, tests, and docs after semantic discovery. Use it for OR patterns like "ClassA|ClassB|torch.multinomial"; patterns containing | are treated as regex alternation when regex is omitted.',
+		'- owlspotlight.search_code: semantic/BM25/hybrid/keyword search over this workspace. You can call it with only query; directory defaults to this workspace, file_ext defaults to auto, search_mode defaults to semantic, and top_k defaults to 30. Use include_globs/exclude_globs to scope noisy repos, for example {"include_globs":["src/**/*.ts"],"exclude_globs":["tests/**"]}.',
+		'- owlspotlight.grep_repo: repository-wide grep for exact identifiers, call sites, tests, and docs after semantic discovery. Use it for OR patterns like "ClassA|ClassB|torch.multinomial"; patterns containing | are treated as regex alternation when regex is omitted. Pass the same include_globs/exclude_globs when you want the same scope as search_code.',
+		'- owlspotlight.cancel_embedding: request cancellation of the currently running indexing/embedding operation.',
 		'- owlspotlight.mark_results_used: optional; record only the search results or grep locations you actually used as evidence when that is easy to do.',
 		'- owlspotlight.get_human_feedback: optional; read suggestions only when the user explicitly says they reviewed the sidebar.',
 		'Tool-use rule:',
@@ -1185,8 +1208,8 @@ function buildAgentSetupPayload(
 		'Search workflow:',
 		'1. Start with owlspotlight.search_code for behavior/intent/name-uncertain discovery.',
 		'2. Read the top candidate files around the returned line numbers before concluding.',
-		'3. Once likely identifiers are known, use owlspotlight.grep_repo for exhaustive references across the repository.',
-		'4. Optionally call owlspotlight.mark_results_used for only the ranks or grep locations you actually referenced; skip it if it would slow down the task.',
+		'3. Once likely identifiers are known, use owlspotlight.grep_repo for exhaustive references across the repository; OwlSpotlight links the grep event to the previous search. Keep the same include_globs/exclude_globs when scope matters.',
+		'4. Call owlspotlight.mark_results_used for the ranks or grep locations you actually referenced so OwlSpotlight preserves the evidence trail.',
 		'5. Do not wait for human fallback. Use the mirrored sidebar only as observability unless the user explicitly asks for review.'
 	].join('\n');
 	return { mcpConfig, instructions, codexCommand, mcpPythonCommand, mcpServerPath };
@@ -1472,6 +1495,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = 'owlspotlight.sidebar';
 	private _view?: vscode.WebviewView;
 	private _agentSearchPoll?: NodeJS.Timeout;
+	private _indexProgressPoll?: NodeJS.Timeout;
 	private _lastAgentSearchEventId = 0;
 
 	constructor(
@@ -1479,7 +1503,10 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 		private readonly _outputChannel?: vscode.OutputChannel
 	) {
 		this._context.subscriptions.push({
-			dispose: () => this.stopAgentSearchPolling()
+			dispose: () => {
+				this.stopAgentSearchPolling();
+				this.stopIndexProgressPolling();
+			}
 		});
 	}
 
@@ -1495,6 +1522,13 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 		if (this._agentSearchPoll) {
 			clearInterval(this._agentSearchPoll);
 			this._agentSearchPoll = undefined;
+		}
+	}
+
+	private stopIndexProgressPolling() {
+		if (this._indexProgressPoll) {
+			clearInterval(this._indexProgressPoll);
+			this._indexProgressPoll = undefined;
 		}
 	}
 
@@ -1528,13 +1562,19 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 		void poll();
 	}
 
-	private pollIndexProgress(webviewView: vscode.WebviewView, serverPort: number): () => void {
-		let stopped = false;
+	private startIndexProgressPolling(webviewView: vscode.WebviewView) {
+		this.stopIndexProgressPolling();
 		const tick = async () => {
-			if (stopped) { return; }
+			if (!webviewView.visible) {
+				return;
+			}
+			const serverPort = await resolveActiveServerPort();
+			if (serverPort === undefined) {
+				return;
+			}
 			try {
 				const res = await fetch(getServerUrl('/index_progress', serverPort));
-				if (res.ok && !stopped) {
+				if (res.ok) {
 					const data: any = await res.json();
 					webviewView.webview.postMessage({ type: 'indexProgress', progress: data });
 				}
@@ -1542,13 +1582,8 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				// Progress polling is best-effort; ignore transient failures.
 			}
 		};
-		const timer = setInterval(tick, 400);
+		this._indexProgressPoll = setInterval(tick, 500);
 		void tick();
-		return () => {
-			stopped = true;
-			clearInterval(timer);
-			webviewView.webview.postMessage({ type: 'indexProgress', progress: { active: false } });
-		};
 	}
 
 	private async setupAndStartServer(webviewView: vscode.WebviewView): Promise<boolean> {
@@ -1607,6 +1642,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                const langs = await detectLanguages();
                webviewView.webview.html = this.getHtmlForWebview(webviewView.webview, langs);
                this.startAgentSearchPolling(webviewView);
+               this.startIndexProgressPolling(webviewView);
 
                 const config = vscode.workspace.getConfiguration('owlspotlight');
                 // フラットな設定取得に対応
@@ -1816,7 +1852,6 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					webviewView.webview.postMessage({ type: 'error', message: 'Failed to search. Make sure the server is running.' });
 					return;
 				}
-				const stopProgress = this.pollIndexProgress(webviewView, serverPort);
 				try {
 					const res = await fetch(getServerUrl('/search_functions_simple', serverPort), {
 						method: 'POST',
@@ -1824,13 +1859,18 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 						body: JSON.stringify({ directory: folderPath, query, top_k: 30, file_ext: fileExt, include_files: includeFiles, search_mode: searchMode })
 					});
 					const data: any = await res.json();
+					if (data?.cancelled) {
+						webviewView.webview.postMessage({ type: 'status', message: data.message || 'Indexing / embedding cancelled.' });
+						webviewView.webview.postMessage({ type: 'results', results: [], folderPath });
+						return;
+					}
 					if (data && data.results && Array.isArray(data.results) && data.results.length > 0) {
 						webviewView.webview.postMessage({ type: 'results', results: data.results, folderPath });
 					} else {
 						webviewView.webview.postMessage({ type: 'results', results: [], folderPath });
 					}
-				} finally {
-					stopProgress();
+				} catch {
+					webviewView.webview.postMessage({ type: 'error', message: 'Failed to search. Make sure the server is running.' });
 				}
 			}
 			if (msg.command === 'getClassStats') {
@@ -2029,6 +2069,25 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				console.log('[OwlSpotlight] stopServer command received from Webview');
 				void vscode.commands.executeCommand('owlspotlight.stopServer');
 			}
+			if (msg.command === 'cancelEmbedding') {
+				console.log('[OwlSpotlight] cancelEmbedding command received from Webview');
+				webviewView.webview.postMessage({ type: 'status', message: 'Cancelling indexing / embedding...' });
+				const serverPort = await resolveActiveServerPort();
+				if (serverPort === undefined) {
+					webviewView.webview.postMessage({ type: 'error', message: 'Failed to cancel. Make sure the server is running.' });
+					return;
+				}
+				try {
+					const res = await fetch(getServerUrl('/cancel_embedding', serverPort), { method: 'POST' });
+					if (res.ok) {
+						webviewView.webview.postMessage({ type: 'status', message: 'Cancellation requested.' });
+					} else {
+						webviewView.webview.postMessage({ type: 'error', message: `Failed to cancel: HTTP ${res.status}` });
+					}
+				} catch (error) {
+					webviewView.webview.postMessage({ type: 'error', message: 'Failed to cancel. Make sure the server is running.' });
+				}
+			}
 			if (msg.command === 'checkServerStatus') {
 				const serverPort = await resolveActiveServerPort();
 				webviewView.webview.postMessage({ type: 'serverStatus', online: serverPort !== undefined, port: serverPort });
@@ -2048,17 +2107,16 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 						webviewView.webview.postMessage({ type: 'error', message: 'Failed to clear cache. Make sure the server is running.' });
 						return;
 					}
-					const stopProgress = this.pollIndexProgress(webviewView, serverPort);
 					let data: any;
-					try {
-						const res = await fetch(getServerUrl('/force_rebuild_index', serverPort), {
-							method: 'POST',
-							headers: { 'Content-Type': 'application/json' },
-							body: JSON.stringify({ directory: folderPath, file_ext: fileExt })
-						});
-						data = await res.json();
-					} finally {
-						stopProgress();
+					const res = await fetch(getServerUrl('/force_rebuild_index', serverPort), {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ directory: folderPath, file_ext: fileExt })
+					});
+					data = await res.json();
+					if (data?.cancelled) {
+						webviewView.webview.postMessage({ type: 'status', message: data.message || 'Index rebuild cancelled.' });
+						return;
 					}
 					const msg = typeof data === 'object' && data && 'message' in data ? (data as any).message : undefined;
 					webviewView.webview.postMessage({ type: 'status', message: msg || 'Cache cleared and index rebuilt.' });
@@ -2356,13 +2414,15 @@ function setupDecorationListeners() {
 function updatePythonServerConfig() {
     const config = vscode.workspace.getConfiguration('owlspotlight');
     const defaultModelName = 'Shuu12121/NightOwl-CodeEmbedding';
-    const defaultBatchSize = 32;
+    const defaultBatchSize = 2;
     const defaultPythonVersion = '3.11';
     // すべての設定値で空欄やnull/undefinedの場合はデフォルトを使う
-    let batchSize = config.get<number>('batchSize', defaultBatchSize);
-    if (!batchSize || typeof batchSize !== 'number' || isNaN(batchSize)) {
+    const rawBatchSize = config.get<number>('batchSize', defaultBatchSize);
+    let batchSize = Number(rawBatchSize);
+    if (!Number.isFinite(batchSize) || batchSize < 1) {
         batchSize = defaultBatchSize;
     }
+    batchSize = Math.max(1, Math.floor(batchSize));
     let cacheSettings = config.get<any>('cacheSettings', {});
     if (!cacheSettings || typeof cacheSettings !== 'object') {
         cacheSettings = {};
@@ -2452,7 +2512,8 @@ export function activate(context: vscode.ExtensionContext) {
 	const owlOutputChannel = vscode.window.createOutputChannel('OwlSpotlight');
 	const indexStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 90);
 	indexStatusBarItem.text = '$(sync~spin) OwlSpotlight indexing';
-	indexStatusBarItem.tooltip = 'OwlSpotlight is refreshing the semantic index';
+	indexStatusBarItem.tooltip = 'OwlSpotlight is refreshing the semantic index. Click to cancel indexing / embedding.';
+	indexStatusBarItem.command = 'owlspotlight.cancelEmbedding';
 	context.subscriptions.push(indexStatusBarItem);
 
 	const pendingIndexTimers = new Map<string, NodeJS.Timeout>();
@@ -2634,6 +2695,26 @@ export function activate(context: vscode.ExtensionContext) {
 		})
 	);
 
+	context.subscriptions.push(
+		vscode.commands.registerCommand('owlspotlight.cancelEmbedding', async () => {
+			const serverPort = await resolveActiveServerPort();
+			if (serverPort === undefined) {
+				vscode.window.showWarningMessage('OwlSpotlight server is not running.');
+				return;
+			}
+			try {
+				const res = await fetch(getServerUrl('/cancel_embedding', serverPort), { method: 'POST' });
+				if (res.ok) {
+					vscode.window.showInformationMessage('OwlSpotlight indexing / embedding cancellation requested.');
+				} else {
+					vscode.window.showWarningMessage(`Failed to cancel OwlSpotlight indexing / embedding: HTTP ${res.status}`);
+				}
+			} catch (error) {
+				vscode.window.showWarningMessage(`Failed to cancel OwlSpotlight indexing / embedding: ${error}`);
+			}
+		})
+	);
+
 	// サーバー起動コマンド（child_processで直接起動 - ターミナル干渉を完全回避）
 	let serverProcess: cp.ChildProcess | undefined;
 	let isServerStarting = false;
@@ -2735,7 +2816,14 @@ export function activate(context: vscode.ExtensionContext) {
 			if (serverProcess && !serverProcess.killed) {
 				isServerStopping = true;
 				clearServerStartupPoll();
-				terminateServerProcess(serverProcess);
+				terminateServerProcess(
+					serverProcess,
+					() => serverOutputChannel.appendLine('\n[OwlSpotlight] Server did not exit after SIGTERM; sending SIGKILL.'),
+					() => {
+						serverOutputChannel.appendLine('\n[OwlSpotlight] Warning: server process did not exit after SIGKILL.');
+						void vscode.window.showWarningMessage('OwlSpotlight server did not exit after SIGKILL. It may need to be killed manually.');
+					}
+				);
 				serverProcess = undefined;
 			}
 
@@ -2855,7 +2943,14 @@ export function activate(context: vscode.ExtensionContext) {
 			clearServerStartupPoll();
 			isServerStopping = true;
 			isServerStarting = false;
-			terminateServerProcess(serverProcess);
+			terminateServerProcess(
+				serverProcess,
+				() => serverOutputChannel.appendLine('\n[OwlSpotlight] Server did not exit after SIGTERM; sending SIGKILL.'),
+				() => {
+					serverOutputChannel.appendLine('\n[OwlSpotlight] Warning: server process did not exit after SIGKILL.');
+					void vscode.window.showWarningMessage('OwlSpotlight server did not exit after SIGKILL. It may need to be killed manually.');
+				}
+			);
 			sidebarProvider.notifyServerStatus(false);
 			vscode.window.showInformationMessage('OwlSpotlight server stopping...');
 		} else {
@@ -2876,7 +2971,11 @@ export function activate(context: vscode.ExtensionContext) {
 			clearServerStartupPoll();
 			if (serverProcess && !serverProcess.killed) {
 				isServerStopping = true;
-				terminateServerProcess(serverProcess);
+				terminateServerProcess(
+					serverProcess,
+					() => serverOutputChannel.appendLine('\n[OwlSpotlight] Server did not exit after SIGTERM during disposal; sending SIGKILL.'),
+					() => serverOutputChannel.appendLine('\n[OwlSpotlight] Warning: server process did not exit after SIGKILL during disposal.')
+				);
 			}
 		}
 	});

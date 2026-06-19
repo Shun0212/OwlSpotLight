@@ -104,7 +104,30 @@ def get_model():
         load_model_with_device_fallback()
     return model
 
-def encode_code(codes: list[str], batch_size: int = 8, max_retries: int = 3, show_progress: bool = True) -> np.ndarray:
+def _encode_inputs(current_model, inputs: list[str], batch_size: int, input_type: str) -> np.ndarray:
+    if input_type == "query" and hasattr(current_model, "encode_query"):
+        encode_fn = current_model.encode_query
+    elif input_type == "document" and hasattr(current_model, "encode_document"):
+        encode_fn = current_model.encode_document
+    else:
+        encode_fn = current_model.encode
+
+    return encode_fn(
+        inputs,
+        batch_size=batch_size,
+        normalize_embeddings=True,
+        show_progress_bar=False,
+        convert_to_numpy=True
+    )
+
+
+def encode_code(
+    codes: list[str],
+    batch_size: int = 2,
+    max_retries: int = 3,
+    show_progress: bool = True,
+    input_type: str = "document",
+) -> np.ndarray:
     """コードをエンコードし、メモリエラー時は自動的にバッチサイズを調整。
 
     バッチごとに進捗を progress モジュールへ報告するため、内部のtqdmバーは無効化し、
@@ -113,25 +136,27 @@ def encode_code(codes: list[str], batch_size: int = 8, max_retries: int = 3, sho
 
     current_model = get_model()
     total = len(codes)
+    batch_size = max(1, int(batch_size or 2))
+    input_type = input_type if input_type in {"document", "query", "generic"} else "document"
 
     # 進捗を報告するか（環境変数で抑制可能）
     report = show_progress and progress_env not in ("0", "false") and total > 0
 
     for attempt in range(max_retries):
         try:
+            progress.raise_if_cancelled()
+            if total == 0:
+                emb_dim = current_model.get_sentence_embedding_dimension()
+                return np.zeros((0, emb_dim), dtype=np.float32)
             if report:
                 progress.start("Embedding", total)
             chunks = []
             t0 = time.time()
             for start_idx in range(0, total, batch_size):
+                progress.raise_if_cancelled()
                 batch = codes[start_idx:start_idx + batch_size]
-                emb = current_model.encode(
-                    batch,
-                    batch_size=batch_size,
-                    normalize_embeddings=True,
-                    show_progress_bar=False,
-                    convert_to_numpy=True
-                )
+                emb = _encode_inputs(current_model, batch, batch_size, input_type)
+                progress.raise_if_cancelled()
                 chunks.append(emb)
                 done = min(start_idx + batch_size, total)
                 if report:
@@ -144,7 +169,8 @@ def encode_code(codes: list[str], batch_size: int = 8, max_retries: int = 3, sho
                 _builtins.print(f"[embed] {total} items in {time.time() - t0:.1f}s", flush=True)
             if chunks:
                 return np.vstack(chunks)
-            return current_model.encode([], normalize_embeddings=True, convert_to_numpy=True)
+            emb_dim = current_model.get_sentence_embedding_dimension()
+            return np.zeros((0, emb_dim), dtype=np.float32)
 
         except (RuntimeError, torch.cuda.OutOfMemoryError) as e:
             error_msg = str(e).lower()

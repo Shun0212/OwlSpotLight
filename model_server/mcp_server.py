@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import json
+import fnmatch
 import os
 import subprocess
 import sys
+import threading
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -19,6 +21,9 @@ from pathspec.patterns import GitWildMatchPattern
 PROTOCOL_VERSION = "2025-06-18"
 DEFAULT_SERVER_URL = os.environ.get("OWLSPOTLIGHT_SERVER_URL", "http://127.0.0.1:8000")
 DEFAULT_WORKSPACE = os.environ.get("OWLSPOTLIGHT_WORKSPACE", "")
+DEFAULT_SEARCH_MODE = "semantic"
+DEFAULT_TOP_K = 30
+DEFAULT_SEARCH_TIMEOUT = float(os.environ.get("OWLSPOTLIGHT_SEARCH_TIMEOUT", "1800"))
 SUPPORTED_FILE_EXTENSIONS = (".py", ".java", ".ts", ".tsx", ".js", ".jsx")
 IGNORED_DIR_NAMES = {
     ".git",
@@ -44,6 +49,30 @@ SOURCE_DIR_NAMES = {
     "backend",
     "frontend",
 }
+_write_lock = threading.Lock()
+_client_info: dict[str, Any] = {}
+_last_search_event_id_by_directory: dict[str, int] = {}
+
+
+def agent_model_name() -> str | None:
+    for name in ("OWLSPOTLIGHT_AGENT_MODEL", "CODEX_MODEL", "OPENAI_MODEL", "OPENAI_API_MODEL"):
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return None
+
+
+def agent_client_name() -> str:
+    name = str(_client_info.get("name") or "mcp").strip()
+    version = str(_client_info.get("version") or "").strip()
+    return f"{name}/{version}" if version else name
+
+
+def agent_metadata() -> dict[str, Any]:
+    return {
+        "agent_client": agent_client_name(),
+        "agent_model": agent_model_name(),
+    }
 
 
 def resolve_directory(value: Any) -> str:
@@ -197,8 +226,9 @@ def build_query_variants(query: str) -> list[str]:
 
 
 def write_message(message: dict[str, Any]) -> None:
-    sys.stdout.write(json.dumps(message, ensure_ascii=False, separators=(",", ":")) + "\n")
-    sys.stdout.flush()
+    with _write_lock:
+        sys.stdout.write(json.dumps(message, ensure_ascii=False, separators=(",", ":")) + "\n")
+        sys.stdout.flush()
 
 
 def response(request_id: str | int, result: dict[str, Any]) -> dict[str, Any]:
@@ -277,6 +307,56 @@ def source_files(directory: str, file_ext: str) -> list[str]:
     return files
 
 
+def normalize_glob_patterns(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    patterns: list[str] = []
+    for item in value:
+        clean = str(item).strip().replace("\\", "/")
+        if clean.startswith("./"):
+            clean = clean[2:]
+        if clean:
+            patterns.append(clean)
+    return patterns
+
+
+def path_matches_glob(rel_path: str, patterns: list[str]) -> bool:
+    rel = rel_path.replace("\\", "/").lstrip("./")
+    name = rel.rsplit("/", 1)[-1]
+    for pattern in patterns:
+        if pattern.endswith("/**"):
+            prefix = pattern[:-3].rstrip("/")
+            if rel == prefix or rel.startswith(prefix + "/"):
+                return True
+        if pattern.endswith("/"):
+            prefix = pattern.rstrip("/")
+            if rel == prefix or rel.startswith(prefix + "/"):
+                return True
+        if fnmatch.fnmatchcase(rel, pattern):
+            return True
+        if "/" not in pattern and fnmatch.fnmatchcase(name, pattern):
+            return True
+    return False
+
+
+def glob_filtered_files(directory: str, file_ext: str, include_globs: list[str], exclude_globs: list[str]) -> list[str]:
+    root = Path(directory).resolve()
+    files: list[str] = []
+    for path in candidate_source_files(directory):
+        if path.suffix.lower() != file_ext:
+            continue
+        try:
+            rel_path = path.resolve().relative_to(root).as_posix()
+        except ValueError:
+            continue
+        if include_globs and not path_matches_glob(rel_path, include_globs):
+            continue
+        if exclude_globs and path_matches_glob(rel_path, exclude_globs):
+            continue
+        files.append(str(path))
+    return files
+
+
 def tool_definitions() -> list[dict[str, Any]]:
     return [
         {
@@ -300,18 +380,28 @@ def tool_definitions() -> list[dict[str, Any]]:
                         "enum": ["auto", ".py", ".java", ".ts", ".tsx", ".js", ".jsx"],
                         "default": "auto",
                     },
-                    "top_k": {"type": "integer", "minimum": 1, "maximum": 50, "default": 10},
+                    "top_k": {"type": "integer", "minimum": 1, "maximum": 50, "default": DEFAULT_TOP_K},
                     "scope": {
                         "type": "string",
                         "description": "Optional search scope.",
                         "enum": ["all", "source", "changed"],
                         "default": "all",
                     },
+                    "include_globs": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional repository-relative glob patterns to include, for example [\"pylate/**/*.py\"].",
+                    },
+                    "exclude_globs": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional repository-relative glob patterns to exclude, for example [\"examples/**\", \"tests/**\"].",
+                    },
                     "search_mode": {
                         "type": "string",
                         "description": "Search ranking mode.",
                         "enum": ["semantic", "bm25", "hybrid", "keyword"],
-                        "default": "hybrid",
+                        "default": DEFAULT_SEARCH_MODE,
                     },
                     "server_url": {
                         "type": "string",
@@ -319,6 +409,21 @@ def tool_definitions() -> list[dict[str, Any]]:
                     },
                 },
                 "required": ["query"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "owlspotlight.cancel_embedding",
+            "title": "Cancel OwlSpotlight indexing / embedding",
+            "description": "Request cancellation of the currently running OwlSpotlight indexing or embedding operation on the local HTTP server.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "server_url": {
+                        "type": "string",
+                        "description": "OwlSpotlight HTTP server URL. Defaults to OWLSPOTLIGHT_SERVER_URL or http://127.0.0.1:8000.",
+                    },
+                },
                 "additionalProperties": False,
             },
         },
@@ -388,6 +493,21 @@ def tool_definitions() -> list[dict[str, Any]]:
                     "regex": {"type": "boolean", "description": "Treat pattern as a regular expression. If omitted, OwlSpotlight treats patterns containing | as regex alternation."},
                     "case_sensitive": {"type": "boolean", "default": True},
                     "max_matches": {"type": "integer", "minimum": 1, "maximum": 500, "default": 100},
+                    "include_globs": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional repository-relative glob patterns to include, for example [\"pylate/**/*.py\"].",
+                    },
+                    "exclude_globs": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional repository-relative glob patterns to exclude, for example [\"examples/**\", \"tests/**\"].",
+                    },
+                    "parent_event_id": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Optional OwlSpotlight search event id that this grep follows. Defaults to the last search_code event for the same directory in this MCP session.",
+                    },
                     "server_url": {
                         "type": "string",
                         "description": "OwlSpotlight HTTP server URL. Defaults to OWLSPOTLIGHT_SERVER_URL or http://127.0.0.1:8000.",
@@ -446,10 +566,16 @@ def format_search_response_for_agent(arguments: dict[str, Any], result: dict[str
     results = result.get("results", [])
     resolved_file_ext = result.get("file_ext") or arguments.get("file_ext", "auto")
     meta_bits = [
-        f"mode={result.get('search_mode') or arguments.get('search_mode', 'hybrid')}",
+        f"mode={result.get('search_mode') or arguments.get('search_mode', DEFAULT_SEARCH_MODE)}",
         f"file_ext={resolved_file_ext}",
         f"scope={arguments.get('scope', 'all')}",
     ]
+    include_globs = normalize_glob_patterns(arguments.get("include_globs"))
+    exclude_globs = normalize_glob_patterns(arguments.get("exclude_globs"))
+    if include_globs:
+        meta_bits.append(f"include={','.join(include_globs)}")
+    if exclude_globs:
+        meta_bits.append(f"exclude={','.join(exclude_globs)}")
     if result.get("auto_file_ext_counts"):
         detected = ", ".join(
             f"{ext}:{count}"
@@ -474,8 +600,9 @@ def format_search_response_for_agent(arguments: dict[str, Any], result: dict[str
     footer = [
         "Next steps:",
         "- Read the top candidate files around the listed lines.",
+        "- Once likely identifiers or file names are known, call owlspotlight.grep_repo to verify exact references; it will be linked to this search in OwlSpotlight.",
+        f"- Record the evidence you actually used with owlspotlight.mark_results_used event_id={result.get('agent_event_id')} and referenced_ranks=[...].",
         "- If the best result is weak, run another OwlSpotlight query with different wording or identifiers.",
-        f"- If you actually use any returned result as evidence, call owlspotlight.mark_results_used with event_id={result.get('agent_event_id')} and referenced_ranks=[...].",
         "Suggested follow-up queries:",
         *[f"- {variant}" for variant in variants[1:]],
         "- Human sidebar feedback is optional; do not wait for it unless the user explicitly asks for review.",
@@ -490,6 +617,15 @@ def format_grep_response_for_agent(arguments: dict[str, Any], result: dict[str, 
         f"OwlSpotlight grep: `{pattern}`",
         f"Returned {len(matches)} match(es). Use this for exact references and verification.",
     ]
+    include_globs = normalize_glob_patterns(arguments.get("include_globs"))
+    exclude_globs = normalize_glob_patterns(arguments.get("exclude_globs"))
+    scope_bits = []
+    if include_globs:
+        scope_bits.append(f"include={','.join(include_globs)}")
+    if exclude_globs:
+        scope_bits.append(f"exclude={','.join(exclude_globs)}")
+    if scope_bits:
+        header.append("Meta: " + ", ".join(scope_bits))
     lines = []
     for index, match in enumerate(matches[:40], start=1):
         location = f"{match.get('path') or match.get('file')}:{match.get('line')}"
@@ -504,11 +640,13 @@ def call_search(arguments: dict[str, Any]) -> dict[str, Any]:
     directory = resolve_directory(arguments.get("directory"))
     query = str(arguments.get("query", "")).strip()
     requested_file_ext = str(arguments.get("file_ext", "auto")).strip() or "auto"
-    top_k = int(arguments.get("top_k", 10))
+    top_k = int(arguments.get("top_k", DEFAULT_TOP_K))
     scope = str(arguments.get("scope", "all")).strip()
     if scope not in {"all", "source", "changed"}:
         scope = "all"
-    search_mode = str(arguments.get("search_mode", "hybrid")).strip()
+    search_mode = str(arguments.get("search_mode", DEFAULT_SEARCH_MODE)).strip()
+    include_globs = normalize_glob_patterns(arguments.get("include_globs"))
+    exclude_globs = normalize_glob_patterns(arguments.get("exclude_globs"))
     server_url = str(arguments.get("server_url", DEFAULT_SERVER_URL)).rstrip("/")
 
     if not query:
@@ -525,6 +663,13 @@ def call_search(arguments: dict[str, Any]) -> dict[str, Any]:
         include_files = changed_files(directory, file_ext)
     elif scope == "source":
         include_files = source_files(directory, file_ext) or None
+    if include_globs or exclude_globs:
+        glob_files = glob_filtered_files(directory, file_ext, include_globs, exclude_globs)
+        if include_files is None:
+            include_files = glob_files
+        else:
+            scoped = {str(Path(path).resolve()) for path in include_files}
+            include_files = [path for path in glob_files if str(Path(path).resolve()) in scoped]
 
     payload = {
         "directory": directory,
@@ -532,13 +677,16 @@ def call_search(arguments: dict[str, Any]) -> dict[str, Any]:
         "file_ext": file_ext,
         "top_k": max(1, min(top_k, 50)),
         "include_files": include_files,
-        "search_mode": search_mode if search_mode in {"semantic", "bm25", "hybrid", "keyword"} else "hybrid",
+        "include_globs": include_globs,
+        "exclude_globs": exclude_globs,
+        "search_mode": search_mode if search_mode in {"semantic", "bm25", "hybrid", "keyword"} else DEFAULT_SEARCH_MODE,
         "scope": scope,
         "capture_agent_event": True,
         "agent_source": "mcp",
+        **agent_metadata(),
     }
     try:
-        result = post_json(f"{server_url}/search_functions_simple", payload)
+        result = post_json(f"{server_url}/search_functions_simple", payload, timeout=DEFAULT_SEARCH_TIMEOUT)
     except urllib.error.URLError as exc:
         return {
             "content": [{"type": "text", "text": f"Failed to reach OwlSpotlight server at {server_url}: {exc}"}],
@@ -546,10 +694,20 @@ def call_search(arguments: dict[str, Any]) -> dict[str, Any]:
         }
 
     results = result.get("results", [])
+    event_id = result.get("agent_event_id")
+    if isinstance(event_id, int):
+        _last_search_event_id_by_directory[str(Path(directory).resolve())] = event_id
     result["file_ext"] = file_ext
     if auto_file_ext_counts:
         result["auto_file_ext_counts"] = auto_file_ext_counts
-    response_arguments = {**arguments, "directory": directory, "file_ext": file_ext, "scope": scope}
+    response_arguments = {
+        **arguments,
+        "directory": directory,
+        "file_ext": file_ext,
+        "scope": scope,
+        "include_globs": include_globs,
+        "exclude_globs": exclude_globs,
+    }
     text = format_search_response_for_agent(response_arguments, result)
     return {
         "content": [{"type": "text", "text": text}],
@@ -562,6 +720,22 @@ def call_search(arguments: dict[str, Any]) -> dict[str, Any]:
             },
             "resolved_arguments": response_arguments,
         },
+        "isError": False,
+    }
+
+
+def call_cancel_embedding(arguments: dict[str, Any]) -> dict[str, Any]:
+    server_url = str(arguments.get("server_url", DEFAULT_SERVER_URL)).rstrip("/")
+    try:
+        result = post_json(f"{server_url}/cancel_embedding", {}, timeout=10.0)
+    except urllib.error.URLError as exc:
+        return {
+            "content": [{"type": "text", "text": f"Failed to reach OwlSpotlight server at {server_url}: {exc}"}],
+            "isError": True,
+        }
+    return {
+        "content": [{"type": "text", "text": result.get("message", "Cancellation requested.")}],
+        "structuredContent": result,
         "isError": False,
     }
 
@@ -609,6 +783,7 @@ def call_mark_results_used(arguments: dict[str, Any]) -> dict[str, Any]:
         "referenced_locations": arguments.get("referenced_locations") or [],
         "useful": bool(arguments.get("useful", True)),
         "note": arguments.get("note"),
+        **agent_metadata(),
     }
     try:
         result = post_json(f"{server_url}/agent_search_usage", payload)
@@ -624,9 +799,18 @@ def call_mark_results_used(arguments: dict[str, Any]) -> dict[str, Any]:
             "isError": True,
         }
     usage = result.get("usage", {})
+    written = result.get("training_examples_written", 0)
+    training_file = result.get("training_examples_file")
+    message = f"Recorded OwlSpotlight referenced results and wrote {written} training example(s)."
+    if training_file:
+        message += f" Training log: {training_file}"
     return {
-        "content": [{"type": "text", "text": "Recorded OwlSpotlight referenced results."}],
-        "structuredContent": {"usage": usage},
+        "content": [{"type": "text", "text": message}],
+        "structuredContent": {
+            "usage": usage,
+            "training_examples_written": written,
+            "training_examples_file": training_file,
+        },
         "isError": False,
     }
 
@@ -641,14 +825,20 @@ def call_grep_repo(arguments: dict[str, Any]) -> dict[str, Any]:
         return {"content": [{"type": "text", "text": f"Workspace directory does not exist: {directory}"}], "isError": True}
     regex_arg = arguments.get("regex")
     use_regex = bool(regex_arg) if regex_arg is not None else "|" in pattern
+    include_globs = normalize_glob_patterns(arguments.get("include_globs"))
+    exclude_globs = normalize_glob_patterns(arguments.get("exclude_globs"))
     payload = {
         "directory": directory,
         "pattern": pattern,
         "regex": use_regex,
         "case_sensitive": bool(arguments.get("case_sensitive", True)),
         "max_matches": max(1, min(int(arguments.get("max_matches", 100)), 500)),
+        "include_globs": include_globs,
+        "exclude_globs": exclude_globs,
         "capture_agent_event": True,
         "agent_source": "mcp",
+        "parent_event_id": arguments.get("parent_event_id") or _last_search_event_id_by_directory.get(str(Path(directory).resolve())),
+        **agent_metadata(),
     }
     try:
         result = post_json(f"{server_url}/grep_repo", payload)
@@ -663,7 +853,12 @@ def call_grep_repo(arguments: dict[str, Any]) -> dict[str, Any]:
             "content": [{"type": "text", "text": f"Failed to reach OwlSpotlight server at {server_url}: {exc}"}],
             "isError": True,
         }
-    response_arguments = {**arguments, "directory": directory}
+    response_arguments = {
+        **arguments,
+        "directory": directory,
+        "include_globs": include_globs,
+        "exclude_globs": exclude_globs,
+    }
     text = format_grep_response_for_agent(response_arguments, result)
     return {
         "content": [{"type": "text", "text": text}],
@@ -676,21 +871,51 @@ def call_grep_repo(arguments: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    if name == "owlspotlight.search_code":
+        return call_search(arguments)
+    if name == "owlspotlight.cancel_embedding":
+        return call_cancel_embedding(arguments)
+    if name == "owlspotlight.get_human_feedback":
+        return call_get_human_feedback(arguments)
+    if name == "owlspotlight.mark_results_used":
+        return call_mark_results_used(arguments)
+    if name == "owlspotlight.grep_repo":
+        return call_grep_repo(arguments)
+    raise ValueError(f"Unknown tool: {name}")
+
+
+def run_tool_call(request_id: str | int, name: str, arguments: dict[str, Any]) -> None:
+    try:
+        write_message(response(request_id, call_tool(name, arguments)))
+    except ValueError as exc:
+        write_message(error_response(request_id, -32602, str(exc)))
+    except Exception as exc:
+        write_message(error_response(request_id, -32603, f"Internal error: {exc}"))
+
+
 def handle_request(message: dict[str, Any]) -> dict[str, Any] | None:
     method = message.get("method")
+    if method == "notifications/cancelled":
+        call_cancel_embedding({})
+        return None
     request_id = message.get("id")
     if request_id is None:
         return None
 
     if method == "initialize":
-        requested = message.get("params", {}).get("protocolVersion")
+        global _client_info
+        params = message.get("params", {})
+        requested = params.get("protocolVersion")
+        client_info = params.get("clientInfo")
+        _client_info = client_info if isinstance(client_info, dict) else {}
         return response(
             request_id,
             {
                 "protocolVersion": requested or PROTOCOL_VERSION,
                 "capabilities": {"tools": {"listChanged": False}},
                 "serverInfo": {"name": "owlspotlight-mcp", "title": "OwlSpotlight MCP", "version": "0.1.0"},
-                "instructions": "Use owlspotlight.search_code directly for semantic discovery when locating local code by behavior, route, handler, function, method, storage, auth, or session logic. If this tool is available, do not run command -v owlspotlight, inspect .mcp.json, read mcp_server.py, or reverse-engineer the HTTP API before using it. The tool can be called with only a query when OWLSPOTLIGHT_WORKSPACE or the MCP working directory is the repository; file_ext defaults to auto. After likely identifiers are found, use owlspotlight.grep_repo for exhaustive exact-reference checks across the repository; OR patterns such as ClassA|ClassB are treated as regex alternation when regex is omitted. Optionally call owlspotlight.mark_results_used for returned ranks or grep locations actually used as evidence; skip it if that would slow down the task. The OwlSpotlight sidebar mirrors compact agent activity for observability; human feedback is optional and should not block autonomous search.",
+                "instructions": "Use owlspotlight.search_code directly for semantic discovery when locating local code by behavior, route, handler, function, method, storage, auth, or session logic. If this tool is available, do not run command -v owlspotlight, inspect .mcp.json, read mcp_server.py, or reverse-engineer the HTTP API before using it. The tool can be called with only a query when OWLSPOTLIGHT_WORKSPACE or the MCP working directory is the repository; file_ext defaults to auto and search_mode defaults to semantic. Use include_globs/exclude_globs to scope searches, for example include_globs=[\"pylate/**/*.py\"] and exclude_globs=[\"examples/**\",\"tests/**\"]. After likely identifiers are found, use owlspotlight.grep_repo for exhaustive exact-reference checks across the repository; pass the same include_globs/exclude_globs when you want the same scope. OR patterns such as ClassA|ClassB are treated as regex alternation when regex is omitted. Optionally call owlspotlight.mark_results_used for returned ranks or grep locations actually used as evidence; skip it if that would slow down the task. The OwlSpotlight sidebar mirrors compact agent activity for observability; human feedback is optional and should not block autonomous search.",
             },
         )
     if method == "ping":
@@ -701,15 +926,8 @@ def handle_request(message: dict[str, Any]) -> dict[str, Any] | None:
         params = message.get("params", {})
         name = params.get("name")
         arguments = params.get("arguments") or {}
-        if name == "owlspotlight.search_code":
-            return response(request_id, call_search(arguments))
-        if name == "owlspotlight.get_human_feedback":
-            return response(request_id, call_get_human_feedback(arguments))
-        if name == "owlspotlight.mark_results_used":
-            return response(request_id, call_mark_results_used(arguments))
-        if name == "owlspotlight.grep_repo":
-            return response(request_id, call_grep_repo(arguments))
-        return error_response(request_id, -32602, f"Unknown tool: {name}")
+        threading.Thread(target=run_tool_call, args=(request_id, name, arguments)).start()
+        return None
     return error_response(request_id, -32601, f"Method not found: {method}")
 
 

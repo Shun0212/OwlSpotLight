@@ -19,6 +19,7 @@ import json
 import hashlib
 import math
 import re
+import fnmatch
 from collections import Counter
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
@@ -28,6 +29,14 @@ import subprocess
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
 
 OWL_INDEX_DIR = ".owl_index"
+OWL_TRAINING_LOG_DIR = os.environ.get(
+    "OWL_TRAINING_LOG_DIR",
+    os.path.join(os.path.dirname(__file__), OWL_INDEX_DIR, "training"),
+)
+OWL_TRAINING_EXAMPLES_FILE = os.environ.get(
+    "OWL_TRAINING_EXAMPLES_FILE",
+    os.path.join(OWL_TRAINING_LOG_DIR, "agent_training_examples.jsonl"),
+)
 
 from extractors import extract_functions
 from indexer import CodeIndexer
@@ -47,12 +56,28 @@ def print(*args, **kwargs):  # noqa: A001 - 冗長ログを抑制するためモ
 
 # グローバル変数
 model_name = os.environ.get("OWL_MODEL_NAME", DEFAULT_MODEL)
+DEFAULT_BATCH_SIZE = 2
 
-def encode_with_memory_management(codes: list[str], batch_size: int = None, max_retries: int = 3, show_progress: bool = True):
+
+def normalize_batch_size(value) -> int:
+    try:
+        size = int(float(value))
+    except (TypeError, ValueError):
+        return DEFAULT_BATCH_SIZE
+    return max(1, size)
+
+def encode_with_memory_management(
+    codes: list[str],
+    batch_size: int = None,
+    max_retries: int = 3,
+    show_progress: bool = True,
+    input_type: str = "document",
+):
     """後方互換性のためのラッパー関数"""
     if batch_size is None:
-        batch_size = 8
-    return encode_code(codes, batch_size, max_retries, show_progress)
+        batch_size = DEFAULT_BATCH_SIZE
+    batch_size = normalize_batch_size(batch_size)
+    return encode_code(codes, batch_size, max_retries, show_progress, input_type=input_type)
 
 # 互換性のため、model変数を追加
 model = get_model()
@@ -62,12 +87,13 @@ app = FastAPI()
 
 # === 設定: バッチサイズなど ===
 class OwlSettings(BaseSettings):
-    batch_size: int = 8
+    batch_size: int | str = DEFAULT_BATCH_SIZE
     
     class Config:
         env_prefix = "OWL_"  # 環境変数はOWL_BATCH_SIZEで設定可能
 
 settings = OwlSettings()
+settings.batch_size = normalize_batch_size(settings.batch_size)
 
 # リクエスト用の Pydantic モデル
 class EmbedRequest(BaseModel):
@@ -89,10 +115,14 @@ class SearchFunctionsSimpleRequest(BaseModel):
     top_k: int = 5
     file_ext: str = ".py"
     include_files: Optional[List[str]] = None
+    include_globs: Optional[List[str]] = None
+    exclude_globs: Optional[List[str]] = None
     search_mode: str = "semantic"
     semantic_weight: float = 0.75
     capture_agent_event: bool = False
     agent_source: Optional[str] = None
+    agent_client: Optional[str] = None
+    agent_model: Optional[str] = None
     original_query: Optional[str] = None
     scope: Optional[str] = None
 
@@ -107,6 +137,8 @@ class AgentSearchUsageRequest(BaseModel):
     referenced_locations: List[str] = []
     useful: bool = True
     note: Optional[str] = None
+    agent_client: Optional[str] = None
+    agent_model: Optional[str] = None
 
 class GrepRepoRequest(BaseModel):
     directory: str
@@ -114,8 +146,13 @@ class GrepRepoRequest(BaseModel):
     regex: bool = False
     case_sensitive: bool = True
     max_matches: int = 100
+    include_globs: Optional[List[str]] = None
+    exclude_globs: Optional[List[str]] = None
     capture_agent_event: bool = False
     agent_source: Optional[str] = None
+    agent_client: Optional[str] = None
+    agent_model: Optional[str] = None
+    parent_event_id: Optional[int] = None
 
 class FunctionRangeRequest(BaseModel):
     file: str
@@ -141,11 +178,231 @@ MAX_AGENT_SEARCH_EVENTS = 100
 MAX_AGENT_SEARCH_FEEDBACK = 100
 MAX_AGENT_SEARCH_USAGE = 100
 
+
+def result_identity(result: dict) -> str:
+    file_path = result.get("file") or result.get("file_path") or result.get("path") or ""
+    line = result.get("lineno") or result.get("line_number") or result.get("line") or ""
+    end_line = result.get("end_lineno") or result.get("end_line") or ""
+    name = result.get("function_name") or result.get("name") or ""
+    return f"{file_path}:{line}:{end_line}:{name}"
+
+
+def training_result_payload(result: dict) -> dict:
+    code = str(result.get("raw_code") or result.get("code") or result.get("text") or "")
+    file_path = result.get("file") or result.get("file_path") or result.get("path")
+    return {
+        "rank": result.get("rank"),
+        "file": file_path,
+        "lineno": result.get("lineno") or result.get("line_number") or result.get("line"),
+        "end_lineno": result.get("end_lineno") or result.get("end_line"),
+        "name": result.get("function_name") or result.get("name"),
+        "class_name": result.get("class_name"),
+        "symbol_kind": result.get("symbol_kind"),
+        "score": result.get("score"),
+        "similarity": result.get("similarity"),
+        "semantic_similarity": result.get("semantic_similarity"),
+        "bm25_score": result.get("bm25_score"),
+        "hybrid_score": result.get("hybrid_score"),
+        "distance": result.get("distance"),
+        "code_sha256": hashlib.sha256(code.encode("utf-8")).hexdigest() if code else None,
+        "code": code,
+    }
+
+
+def normalize_glob_patterns(patterns: Optional[List[str]]) -> list[str]:
+    normalized = []
+    for pattern in patterns or []:
+        clean = str(pattern).strip().replace("\\", "/")
+        if clean.startswith("./"):
+            clean = clean[2:]
+        if clean:
+            normalized.append(clean)
+    return normalized
+
+
+def path_matches_glob(rel_path: str, patterns: Optional[List[str]]) -> bool:
+    rel = rel_path.replace("\\", "/").lstrip("./")
+    name = rel.rsplit("/", 1)[-1]
+    for pattern in normalize_glob_patterns(patterns):
+        if pattern.endswith("/**"):
+            prefix = pattern[:-3].rstrip("/")
+            if rel == prefix or rel.startswith(prefix + "/"):
+                return True
+        if pattern.endswith("/"):
+            prefix = pattern.rstrip("/")
+            if rel == prefix or rel.startswith(prefix + "/"):
+                return True
+        if fnmatch.fnmatchcase(rel, pattern):
+            return True
+        if "/" not in pattern and fnmatch.fnmatchcase(name, pattern):
+            return True
+    return False
+
+
+def path_allowed_by_globs(file_path: str, directory: str, include_globs: Optional[List[str]], exclude_globs: Optional[List[str]]) -> bool:
+    if not file_path:
+        return False
+    root = Path(directory).resolve()
+    try:
+        rel_path = Path(file_path).resolve().relative_to(root).as_posix()
+    except Exception:
+        rel_path = str(file_path).replace("\\", "/")
+    includes = normalize_glob_patterns(include_globs)
+    excludes = normalize_glob_patterns(exclude_globs)
+    if includes and not path_matches_glob(rel_path, includes):
+        return False
+    if excludes and path_matches_glob(rel_path, excludes):
+        return False
+    return True
+
+
+def parse_reference_location(location: str) -> tuple[str, Optional[int]]:
+    match = re.match(r"^(?P<path>.+?):(?P<line>\d+)(?:-\d+)?$", location.strip())
+    if not match:
+        return location.strip(), None
+    return match.group("path").strip(), int(match.group("line"))
+
+
+def location_matches_result(location: str, result: dict, directory: Optional[str]) -> bool:
+    location_path, location_line = parse_reference_location(location)
+    if not location_path:
+        return False
+    normalized_location = location_path.replace("\\", "/").lstrip("./")
+    file_path = str(result.get("file") or result.get("file_path") or "")
+    result_path = str(result.get("path") or "")
+    candidates = {result_path.replace("\\", "/").lstrip("./")} if result_path else set()
+    if file_path:
+        candidates.add(file_path.replace("\\", "/"))
+        if directory:
+            try:
+                candidates.add(Path(file_path).resolve().relative_to(Path(directory).resolve()).as_posix())
+            except Exception:
+                pass
+    if normalized_location not in candidates:
+        return False
+    if location_line is None:
+        return True
+    start_line = result.get("lineno") or result.get("line_number") or result.get("line")
+    if start_line is None:
+        return True
+    end_line = result.get("end_lineno") or result.get("end_line") or start_line
+    try:
+        return int(start_line) <= location_line <= int(end_line)
+    except (TypeError, ValueError):
+        return True
+
+
+def append_training_examples_for_usage(event: dict, usage: dict) -> int:
+    query = event.get("original_query") or event.get("query") or ""
+    if not query:
+        return 0
+    referenced_ranks = {
+        int(rank)
+        for rank in usage.get("referenced_ranks", [])
+        if isinstance(rank, int) or str(rank).isdigit()
+    }
+    referenced_locations = {
+        str(location).strip()
+        for location in usage.get("referenced_locations", [])
+        if str(location).strip()
+    }
+    results = event.get("results") if isinstance(event.get("results"), list) else []
+    referenced_identities = set()
+    examples = []
+
+    base = {
+        "schema_version": 1,
+        "created_at": time.time(),
+        "event_id": event.get("id"),
+        "usage_id": usage.get("id"),
+        "parent_event_id": event.get("parent_event_id"),
+        "source": event.get("source"),
+        "kind": event.get("kind", "search"),
+        "directory": event.get("directory"),
+        "query": query,
+        "file_ext": event.get("file_ext"),
+        "search_mode": event.get("search_mode"),
+        "semantic_weight": event.get("semantic_weight"),
+        "embedding_model": event.get("embedding_model"),
+        "embedding_api": event.get("embedding_api"),
+        "agent_client": usage.get("agent_client") or event.get("agent_client"),
+        "agent_model": usage.get("agent_model") or event.get("agent_model"),
+        "note": usage.get("note"),
+        "useful": usage.get("useful", True),
+    }
+
+    for result in results:
+        rank = result.get("rank")
+        if isinstance(rank, int) and rank in referenced_ranks:
+            referenced_identities.add(result_identity(result))
+            examples.append({
+                **base,
+                "label": "positive",
+                "label_source": "referenced_rank",
+                "target": training_result_payload(result),
+            })
+
+    for location in referenced_locations:
+        matched_result = None
+        for result in results:
+            if location_matches_result(location, result, event.get("directory")):
+                matched_result = result
+                break
+        if not matched_result:
+            continue
+        identity = result_identity(matched_result)
+        referenced_identities.add(identity)
+        if any(example.get("target") and result_identity(example["target"]) == identity for example in examples):
+            continue
+        examples.append({
+            **base,
+            "label": "positive",
+            "label_source": "referenced_location",
+            "location": location,
+            "target": training_result_payload(matched_result),
+        })
+
+    for result in results:
+        rank = result.get("rank")
+        identity = result_identity(result)
+        if identity in referenced_identities:
+            continue
+        examples.append({
+            **base,
+            "label": "weak_negative",
+            "label_source": "returned_not_referenced",
+            "target": training_result_payload(result),
+            "rank_above_referenced": isinstance(rank, int) and any(rank < referenced for referenced in referenced_ranks),
+        })
+
+    if not examples:
+        return 0
+    os.makedirs(os.path.dirname(OWL_TRAINING_EXAMPLES_FILE), exist_ok=True)
+    with open(OWL_TRAINING_EXAMPLES_FILE, "a", encoding="utf-8") as f:
+        for example in examples:
+            f.write(json.dumps(example, ensure_ascii=False) + "\n")
+    return len(examples)
+
+
+def find_agent_search_event(event_id: int) -> Optional[dict]:
+    for event in agent_search_events:
+        if event.get("id") == event_id:
+            return event
+    return None
+
 def append_agent_search_event(event: dict) -> dict:
     with agent_event_lock:
         next_id = (agent_search_events[-1]["id"] + 1) if agent_search_events else 1
         stored = {"id": next_id, "created_at": time.time(), **event}
         agent_search_events.append(stored)
+        parent_id = stored.get("parent_event_id")
+        if isinstance(parent_id, int):
+            for parent in agent_search_events:
+                if parent.get("id") == parent_id:
+                    children = parent.setdefault("child_event_ids", [])
+                    if stored["id"] not in children:
+                        children.append(stored["id"])
+                    break
         if len(agent_search_events) > MAX_AGENT_SEARCH_EVENTS:
             del agent_search_events[:-MAX_AGENT_SEARCH_EVENTS]
         return stored
@@ -203,6 +460,7 @@ class GlobalIndexerState:
         # Add new config keys here as needed for extensibility
         return {
             "model_name": model_name,
+            "embedding_api": "sentence-transformers-ir-v1",
             # e.g. add more: "embedding_dim": ..., "other_param": ...
         }
 
@@ -473,7 +731,15 @@ def repo_visible_files(root_dir: str, spec: Optional[PathSpec]) -> list[str]:
                 files.append(path)
     return files
 
-def grep_repo_files(directory: str, pattern: str, regex: bool, case_sensitive: bool, max_matches: int) -> list[dict]:
+def grep_repo_files(
+    directory: str,
+    pattern: str,
+    regex: bool,
+    case_sensitive: bool,
+    max_matches: int,
+    include_globs: Optional[List[str]] = None,
+    exclude_globs: Optional[List[str]] = None,
+) -> list[dict]:
     if not pattern:
         return []
     flags = 0 if case_sensitive else re.IGNORECASE
@@ -482,6 +748,8 @@ def grep_repo_files(directory: str, pattern: str, regex: bool, case_sensitive: b
     root = Path(directory).resolve()
     matches: list[dict] = []
     for file_path in repo_visible_files(str(root), spec):
+        if not path_allowed_by_globs(file_path, str(root), include_globs, exclude_globs):
+            continue
         try:
             raw = Path(file_path).read_bytes()
         except Exception:
@@ -632,6 +900,7 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
         key = f"{func.get('file','')}|{func.get('name','')}|{func.get('lineno','')}|{func.get('end_lineno','')}"
         return hashlib.sha256(key.encode()).hexdigest()
 
+    progress.raise_if_cancelled()
     directory = os.path.abspath(directory)
     current_model_config = global_index_state.get_current_model_config()
 
@@ -698,8 +967,10 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
     spec = load_gitignore_spec(directory)
     file_paths = []
     for root, dirs, files in os.walk(directory):
+        progress.raise_if_cancelled()
         dirs[:] = [d for d in dirs if not is_ignored(os.path.join(root, d), spec, directory)]
         for fname in files:
+            progress.raise_if_cancelled()
             if not fname.endswith(file_ext):
                 continue
             fpath = os.path.join(root, fname)
@@ -726,6 +997,7 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
 
     # 追加・変更ファイルのみ再抽出
     def process_file(fpath):
+        progress.raise_if_cancelled()
         try:
             funcs = extract_functions(fpath)
             for func in funcs:
@@ -753,6 +1025,7 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
         scanned = 0
         if scan_total < 16:
             for fpath in tqdm(added_or_modified, desc="Indexing (serial, diff)", disable=not OWL_DEBUG, file=sys.stdout):
+                progress.raise_if_cancelled()
                 funcs = process_file(fpath)
                 added_modified_funcs.extend(funcs)
                 file_to_funcs[fpath] = funcs
@@ -767,6 +1040,7 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
                     tqdm(executor.map(process_file, added_or_modified), total=scan_total, desc="Indexing (parallel, diff)", disable=not OWL_DEBUG, file=sys.stdout),
                     added_or_modified
                 ):
+                    progress.raise_if_cancelled()
                     added_modified_funcs.extend(res)
                     file_to_funcs[fpath] = res
                     for func in res:
@@ -790,6 +1064,7 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
             kept_embeddings = prev_embeddings[keep_indices] if keep_indices else np.zeros((0, prev_embeddings.shape[1]), dtype=prev_embeddings.dtype)
             # 新規分のみ埋め込み
             if new_func_indices:
+                progress.raise_if_cancelled()
                 new_codes = [results[i]["code"] for i in new_func_indices]
                 print(f"Generating embeddings for {len(new_codes)} new/modified functions...")
                 new_embeddings = encode_code(new_codes, settings.batch_size, show_progress=True)
@@ -815,6 +1090,7 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
             # 全関数分再計算
             codes = [func["code"] for func in results]
             if codes:
+                progress.raise_if_cancelled()
                 print(f"Generating embeddings for {len(codes)} functions (full rebuild)...")
                 embeddings = encode_code(codes, settings.batch_size, show_progress=True)
                 faiss_index = faiss.IndexFlatL2(embeddings.shape[1])
@@ -842,15 +1118,33 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
 @app.post("/embed")
 async def embed(req: EmbedRequest):
     print("/embed called")
-    embeddings = encode_with_memory_management(req.texts, settings.batch_size)
-    return {"embeddings": embeddings.tolist()}
+    progress.clear_cancel()
+    try:
+        embeddings = encode_with_memory_management(req.texts, settings.batch_size)
+        return {"embeddings": embeddings.tolist()}
+    except progress.OperationCancelled:
+        return {"embeddings": [], "cancelled": True, "message": "Embedding cancelled."}
+    finally:
+        progress.finish()
+
+@app.post("/cancel_embedding")
+async def cancel_embedding():
+    progress.request_cancel()
+    return {"message": "Cancellation requested for the current indexing/embedding operation.", "cancel_requested": True}
+
+@app.post("/cancel_indexing")
+async def cancel_indexing():
+    return await cancel_embedding()
 
 @app.post("/build_index")
 async def build_index_api(req: BuildIndexRequest):
     print(f"/build_index called for directory: {req.directory}")
     with index_lock:
+        progress.clear_cancel()
         try:
             results, file_count, _ = await asyncio.to_thread(build_index, req.directory, req.file_ext, update_state=True)
+        except progress.OperationCancelled:
+            return {"num_functions": 0, "num_files": 0, "cancelled": True, "message": "Indexing cancelled."}
         finally:
             progress.finish()
     return {"num_functions": len(results), "num_files": file_count}
@@ -860,9 +1154,12 @@ async def force_rebuild_index_api(req: BuildIndexRequest):
     """キャッシュをクリアして強制的にインデックスを再構築"""
     print(f"/force_rebuild_index called for directory: {req.directory}")
     with index_lock:
+        progress.clear_cancel()
         global_index_state.clear_cache()
         try:
             results, file_count, _ = await asyncio.to_thread(build_index, req.directory, req.file_ext, update_state=True)
+        except progress.OperationCancelled:
+            return {"num_functions": 0, "num_files": 0, "cancelled": True, "message": "Index rebuild cancelled."}
         finally:
             progress.finish()
     return {"num_functions": len(results), "num_files": file_count, "message": "Index forcefully rebuilt"}
@@ -902,12 +1199,17 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
     # キーワード/BM25 は埋め込み(FAISS インデックス)が不要。意味検索/ハイブリッドのみ埋め込みを構築する。
     needs_embeddings = search_mode in {"semantic", "hybrid"}
     with index_lock:
+        effective_include_files = list(req.include_files) if req.include_files is not None else None
+        effective_scope = req.scope or ("scoped" if effective_include_files is not None else "all")
+        progress.clear_cancel()
         # 意味検索/ハイブリッド: 埋め込みを構築 (update_state=True)
         # キーワード/BM25: 関数リストのみ取得し埋め込み計算をスキップ (update_state=False)
         try:
             results, file_count, indexer = await asyncio.to_thread(
                 build_index, req.directory, req.file_ext, 8, needs_embeddings
             )
+        except progress.OperationCancelled:
+            return {"results": [], "cancelled": True, "message": "Search indexing cancelled."}
         finally:
             progress.finish()
         def record_agent_event(found: list[dict], search_mode_value: str, semantic_weight_value: float, message: Optional[str] = None):
@@ -915,15 +1217,21 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
                 return None
             event = {
                 "source": req.agent_source or "agent",
+                "agent_client": req.agent_client,
+                "agent_model": req.agent_model,
                 "directory": os.path.abspath(req.directory),
                 "query": req.query,
                 "original_query": req.original_query or req.query,
                 "file_ext": req.file_ext,
                 "top_k": req.top_k,
-                "scope": req.scope or ("scoped" if req.include_files else "all"),
+                "scope": effective_scope,
+                "include_globs": normalize_glob_patterns(req.include_globs),
+                "exclude_globs": normalize_glob_patterns(req.exclude_globs),
                 "search_mode": search_mode_value,
                 "semantic_weight": semantic_weight_value,
-                "include_files_count": len(req.include_files or []),
+                "embedding_model": model_name,
+                "embedding_api": global_index_state.get_current_model_config().get("embedding_api"),
+                "include_files_count": len(effective_include_files or []),
                 "result_count": len(found),
                 "results": found,
             }
@@ -942,21 +1250,33 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
         if not results or (needs_embeddings and (embeddings is None or faiss_index is None)):
             agent_event = record_agent_event([], search_mode, semantic_weight, "No functions found.")
             return {"results": [], "message": "No functions found.", "agent_event_id": agent_event["id"] if agent_event else None}
+        if req.include_globs or req.exclude_globs:
+            glob_scoped_files = []
+            for func in results:
+                file_path = func.get("file") or func.get("file_path", "")
+                if path_allowed_by_globs(file_path, req.directory, req.include_globs, req.exclude_globs):
+                    glob_scoped_files.append(os.path.abspath(file_path))
+            if effective_include_files is not None:
+                existing_scope = {os.path.abspath(path) for path in effective_include_files}
+                effective_include_files = [path for path in glob_scoped_files if path in existing_scope]
+            else:
+                effective_include_files = glob_scoped_files
+            effective_scope = req.scope or "glob"
         search_results = results
         search_embeddings = embeddings
         index_to_result_index = list(range(len(results)))
-        if req.include_files:
-            include_files = {os.path.abspath(path) for path in req.include_files}
+        if effective_include_files is not None:
+            include_files = {os.path.abspath(path) for path in effective_include_files}
             scoped_indices = [
                 index
                 for index, func in enumerate(results)
                 if os.path.abspath(func.get("file", func.get("file_path", ""))) in include_files
             ]
             if not scoped_indices:
-                agent_event = record_agent_event([], search_mode, semantic_weight, "No functions found in the selected file scope.")
+                agent_event = record_agent_event([], search_mode, semantic_weight, "No functions found in the selected file/glob scope.")
                 return {
                     "results": [],
-                    "message": "No functions found in the selected file scope.",
+                    "message": "No functions found in the selected file/glob scope.",
                     "num_functions": len(results),
                     "num_files": file_count,
                     "scoped_files": len(include_files),
@@ -991,7 +1311,7 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
                 "results": found,
                 "num_functions": len(results),
                 "num_files": file_count,
-                "scoped_files": len(req.include_files or []),
+                "scoped_files": len(effective_include_files or []),
                 "search_mode": search_mode,
                 "semantic_weight": semantic_weight,
                 "agent_event_id": agent_event["id"] if agent_event else None,
@@ -1000,7 +1320,11 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
         semantic_scores: dict[int, float] = {}
         semantic_distances: dict[int, float] = {}
         if search_mode in {"semantic", "hybrid"}:
-            query_emb = encode_code([req.query], batch_size=1, show_progress=False)  # クエリは1つなので進捗報告は不要
+            try:
+                progress.raise_if_cancelled()
+                query_emb = encode_code([req.query], batch_size=1, show_progress=False, input_type="query")  # クエリは1つなので進捗報告は不要
+            except progress.OperationCancelled:
+                return {"results": [], "cancelled": True, "message": "Search embedding cancelled."}
             semantic_k = len(search_results) if search_mode == "hybrid" else min(req.top_k, len(search_results))
             D, I = faiss_index.search(query_emb, semantic_k)
             valid_distances = [
@@ -1063,7 +1387,7 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
             "results": found,
             "num_functions": len(results),
             "num_files": file_count,
-            "scoped_files": len(req.include_files or []),
+            "scoped_files": len(effective_include_files or []),
             "search_mode": search_mode,
             "semantic_weight": semantic_weight,
             "agent_event_id": agent_event["id"] if agent_event else None,
@@ -1104,18 +1428,43 @@ async def agent_search_usage_api(req: AgentSearchUsageRequest):
         raise HTTPException(status_code=400, detail="referenced_ranks or referenced_locations is required")
     stored = append_agent_search_usage({
         "event_id": req.event_id,
+        "agent_client": req.agent_client,
+        "agent_model": req.agent_model,
         "referenced_ranks": referenced_ranks,
         "referenced_locations": referenced_locations,
         "useful": req.useful,
         "note": req.note,
     })
-    return {"ok": True, "usage": stored}
+    event = find_agent_search_event(req.event_id)
+    training_examples_written = append_training_examples_for_usage(event, stored) if event else 0
+    return {
+        "ok": True,
+        "usage": stored,
+        "training_examples_written": training_examples_written,
+        "training_examples_file": OWL_TRAINING_EXAMPLES_FILE,
+    }
 
 @app.get("/agent_search_feedback")
 async def agent_search_feedback_list_api(since_id: int = 0, limit: int = 20):
     with agent_event_lock:
         feedback = [item for item in agent_search_feedback if item["id"] > since_id]
         return {"feedback": feedback[-max(1, min(limit, 100)) :]}
+
+@app.get("/agent_training_examples")
+async def agent_training_examples_api(limit: int = 20):
+    path = OWL_TRAINING_EXAMPLES_FILE
+    if not os.path.exists(path):
+        return {"path": path, "count": 0, "examples": []}
+    max_lines = max(1, min(limit, 200))
+    with open(path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+    examples = []
+    for line in lines[-max_lines:]:
+        try:
+            examples.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return {"path": path, "count": len(lines), "examples": examples}
 
 @app.post("/grep_repo")
 async def grep_repo_api(req: GrepRepoRequest):
@@ -1124,7 +1473,15 @@ async def grep_repo_api(req: GrepRepoRequest):
         raise HTTPException(status_code=400, detail=f"directory does not exist: {directory}")
     max_matches = max(1, min(req.max_matches, 500))
     try:
-        matches = grep_repo_files(directory, req.pattern, req.regex, req.case_sensitive, max_matches)
+        matches = grep_repo_files(
+            directory,
+            req.pattern,
+            req.regex,
+            req.case_sensitive,
+            max_matches,
+            req.include_globs,
+            req.exclude_globs,
+        )
     except re.error as exc:
         raise HTTPException(status_code=400, detail=f"invalid regex: {exc}") from exc
 
@@ -1132,13 +1489,18 @@ async def grep_repo_api(req: GrepRepoRequest):
     if req.capture_agent_event:
         agent_event = append_agent_search_event({
             "source": req.agent_source or "agent",
+            "agent_client": req.agent_client,
+            "agent_model": req.agent_model,
+            "parent_event_id": req.parent_event_id,
             "kind": "grep",
             "directory": directory,
             "query": req.pattern,
             "original_query": req.pattern,
             "file_ext": "all",
             "top_k": max_matches,
-            "scope": "repo",
+            "scope": "glob" if req.include_globs or req.exclude_globs else "repo",
+            "include_globs": normalize_glob_patterns(req.include_globs),
+            "exclude_globs": normalize_glob_patterns(req.exclude_globs),
             "search_mode": "grep_regex" if req.regex else "grep_literal",
             "semantic_weight": 0.0,
             "include_files_count": 0,
@@ -1149,6 +1511,8 @@ async def grep_repo_api(req: GrepRepoRequest):
         "matches": matches,
         "result_count": len(matches),
         "search_mode": "grep_regex" if req.regex else "grep_literal",
+        "include_globs": normalize_glob_patterns(req.include_globs),
+        "exclude_globs": normalize_glob_patterns(req.exclude_globs),
         "agent_event_id": agent_event["id"] if agent_event else None,
     }
 
@@ -1349,7 +1713,7 @@ class UpdateSettingsRequest(BaseModel):
 async def update_settings(req: UpdateSettingsRequest):
     """設定値を動的に更新するAPI"""
     if req.batch_size is not None:
-        settings.batch_size = req.batch_size
+        settings.batch_size = normalize_batch_size(req.batch_size)
     return {
         "message": "Settings updated",
         "batch_size": settings.batch_size

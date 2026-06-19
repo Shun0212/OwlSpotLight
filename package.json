@@ -64,6 +64,10 @@
         "title": "OwlSpotlight: Stop Server"
       },
       {
+        "command": "owlspotlight.cancelEmbedding",
+        "title": "OwlSpotlight: Cancel Indexing / Embedding"
+      },
+      {
         "command": "owlspotlight.searchCode",
         "title": "OwlSpotlight: Code Search"
       },
@@ -99,7 +103,7 @@
         },
         "owlspotlight.batchSize": {
           "type": "number",
-          "default": 32,
+          "default": 2,
           "minimum": 1,
           "description": "Batch size for code embedding (Python server). Larger values may speed up indexing but use more memory."
         },

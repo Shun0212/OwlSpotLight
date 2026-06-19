@@ -24,6 +24,7 @@ suite('Extension Test Suite', () => {
         const expected = [
             'owlspotlight.startServer',
             'owlspotlight.stopServer',
+            'owlspotlight.cancelEmbedding',
             'owlspotlight.searchCode',
             'owlspotlight.findSimilarSelection',
             'owlspotlight.setupEnv',

@@ -7,6 +7,13 @@ import threading
 import time
 
 _lock = threading.Lock()
+_cancel_event = threading.Event()
+
+
+class OperationCancelled(Exception):
+    """Raised when the current indexing/embedding operation is cancelled."""
+
+
 _state = {
     "active": False,
     "phase": "",
@@ -14,6 +21,7 @@ _state = {
     "total": 0,
     "started_at": 0.0,
     "updated_at": 0.0,
+    "cancel_requested": False,
 }
 
 
@@ -25,6 +33,7 @@ def start(phase: str, total: int) -> None:
         _state["total"] = max(0, int(total))
         _state["started_at"] = time.time()
         _state["updated_at"] = _state["started_at"]
+        _state["cancel_requested"] = _cancel_event.is_set()
 
 
 def update(current: int, total: int = None, phase: str = None) -> None:
@@ -38,6 +47,7 @@ def update(current: int, total: int = None, phase: str = None) -> None:
         if phase is not None:
             _state["phase"] = phase
         _state["updated_at"] = time.time()
+        _state["cancel_requested"] = _cancel_event.is_set()
 
 
 def finish() -> None:
@@ -45,6 +55,31 @@ def finish() -> None:
         _state["active"] = False
         _state["current"] = _state["total"]
         _state["updated_at"] = time.time()
+        _state["cancel_requested"] = _cancel_event.is_set()
+
+
+def request_cancel() -> None:
+    _cancel_event.set()
+    with _lock:
+        _state["cancel_requested"] = True
+        _state["updated_at"] = time.time()
+        if _state.get("active") and not str(_state.get("phase", "")).startswith("Cancelling"):
+            _state["phase"] = f"Cancelling {_state.get('phase') or 'operation'}"
+
+
+def clear_cancel() -> None:
+    _cancel_event.clear()
+    with _lock:
+        _state["cancel_requested"] = False
+
+
+def is_cancelled() -> bool:
+    return _cancel_event.is_set()
+
+
+def raise_if_cancelled() -> None:
+    if _cancel_event.is_set():
+        raise OperationCancelled("Operation cancelled")
 
 
 def snapshot() -> dict:

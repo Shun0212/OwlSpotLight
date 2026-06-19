@@ -11,6 +11,8 @@ window.onload = function() {
     let owlIgnoreTree = null;
     let agentSearchEvents = [];
     let agentActivityHidden = false;
+    let indexProgressWasActive = false;
+    let statusBeforeIndexProgress = '';
 
     // 状態保存/復元
     function collectState() {
@@ -535,7 +537,18 @@ window.onload = function() {
             // 実際の進捗データが無いときはバーを出さない（不確定アニメーションは廃止）
             if (!p || !p.active || !p.total) {
                 if (progressWrap) progressWrap.remove();
+                if (indexProgressWasActive) {
+                    indexProgressWasActive = false;
+                    const restoreText = statusBeforeIndexProgress
+                        || (currentResults.length ? currentResults.length + ' results' : 'Server is ready. Enter a query to search.');
+                    statusEl.textContent = restoreText;
+                    statusBeforeIndexProgress = '';
+                }
                 return;
+            }
+            if (!indexProgressWasActive) {
+                indexProgressWasActive = true;
+                statusBeforeIndexProgress = statusEl.textContent || '';
             }
             // ローディングの土台（スピナー＋メッセージ）が無ければ作る
             let msg = statusEl.querySelector('.loading-msg');
@@ -895,6 +908,14 @@ window.onload = function() {
                 : referencedLocations.length
                     ? 'Referenced ' + referencedLocations.slice(0, 2).join(', ')
                     : '';
+            const modelBits = [];
+            if (event.agent_model) modelBits.push('Agent ' + event.agent_model);
+            if (event.embedding_model) modelBits.push('Embedding ' + event.embedding_model.split('/').pop());
+            if (event.parent_event_id) modelBits.push('From #' + event.parent_event_id);
+            if (Array.isArray(event.child_event_ids) && event.child_event_ids.length) {
+                modelBits.push('Follow-ups #' + event.child_event_ids.join(', #'));
+            }
+            const modelText = modelBits.join(' · ');
             item.innerHTML =
                 '<div class="agent-review-meta">' +
                     '<span>' + escapeHtml(kind) + '</span>' +
@@ -904,6 +925,7 @@ window.onload = function() {
                     '<span>' + escapeHtml(formatAgentEventTime(event)) + '</span>' +
                 '</div>' +
                 '<div class="agent-review-query">' + escapeHtml(query) + '</div>' +
+                (modelText ? '<div class="agent-reference-line">' + escapeHtml(modelText) + '</div>' : '') +
                 (referencedText ? '<div class="agent-reference-line">' + escapeHtml(referencedText) + '</div>' : '') +
                 '<div class="agent-review-actions">' +
                     '<button type="button" class="secondary-action agent-use-query">Use</button>' +
