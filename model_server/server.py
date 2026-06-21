@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 import torch
-from threading import Lock
+from threading import Event, Lock, Thread
 import os
 from typing import List, Dict, Optional
 import fnmatch
@@ -34,6 +34,73 @@ def get_memory_usage_mb() -> float:
     """現在のプロセスのRSSメモリ使用量をMB単位で返す"""
     process = psutil.Process(os.getpid())
     return process.memory_info().rss / 1024 / 1024
+
+
+def _round_memory_mb(value: float) -> float:
+    rounded = round(value, 1)
+    return 0.0 if rounded == -0.0 else rounded
+
+
+class MemoryUsageTracker:
+    """Track process RSS before, after, and sampled peak memory for one operation."""
+
+    def __init__(self, sample_interval_sec: float = 0.02):
+        self.sample_interval_sec = sample_interval_sec
+        self.process = psutil.Process(os.getpid())
+        self.before_mb = 0.0
+        self.after_mb = 0.0
+        self.peak_mb = 0.0
+        self._stop_event = Event()
+        self._thread: Optional[Thread] = None
+        self._peak_lock = Lock()
+
+    def __enter__(self):
+        self.before_mb = self._sample_mb()
+        self.after_mb = self.before_mb
+        self.peak_mb = self.before_mb
+        self._stop_event.clear()
+        self._thread = Thread(target=self._sample_loop, daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=max(self.sample_interval_sec * 2, 0.1))
+        self.after_mb = self._sample_mb()
+        self._record_peak(self.after_mb)
+        return False
+
+    def _sample_mb(self) -> float:
+        return self.process.memory_info().rss / 1024 / 1024
+
+    def _record_peak(self, sample_mb: float):
+        with self._peak_lock:
+            if sample_mb > self.peak_mb:
+                self.peak_mb = sample_mb
+
+    def _sample_loop(self):
+        while not self._stop_event.wait(self.sample_interval_sec):
+            self._record_peak(self._sample_mb())
+
+    def metrics(self) -> dict:
+        peak_mb = max(self.before_mb, self.after_mb, self.peak_mb)
+        return {
+            "memory_before_mb": _round_memory_mb(self.before_mb),
+            "memory_after_mb": _round_memory_mb(self.after_mb),
+            "memory_peak_mb": _round_memory_mb(peak_mb),
+            "memory_delta_mb": _round_memory_mb(self.after_mb - self.before_mb),
+            "memory_peak_delta_mb": _round_memory_mb(peak_mb - self.before_mb),
+            "memory_sample_interval_ms": round(self.sample_interval_sec * 1000, 1),
+        }
+
+
+def add_memory_metrics(payload: dict, tracker: MemoryUsageTracker) -> dict:
+    metrics = tracker.metrics()
+    payload.update(metrics)
+    # Backward compatibility: existing UI and callers read memory_usage_mb.
+    payload["memory_usage_mb"] = metrics["memory_after_mb"]
+    return payload
 
 from extractors import extract_functions
 from indexer import CodeIndexer
@@ -1078,31 +1145,44 @@ def build_index(
 async def build_index_api(req: BuildIndexRequest):
     print(f"/build_index called for directory: {req.directory}")
     with index_lock:
-        results, file_count, _, embedding_time_ms = build_index(
-            req.directory,
-            req.file_ext,
-            update_state=True,
-            include_paths=req.include_paths,
-            exclude_paths=req.exclude_paths,
-            strip_comments_for_embeddings=req.strip_comments_for_embeddings
-        )
-    return {"num_functions": len(results), "num_files": file_count, "embedding_time_ms": round(embedding_time_ms, 1), "memory_usage_mb": round(get_memory_usage_mb(), 1)}
+        with MemoryUsageTracker() as memory_tracker:
+            results, file_count, _, embedding_time_ms = build_index(
+                req.directory,
+                req.file_ext,
+                update_state=True,
+                include_paths=req.include_paths,
+                exclude_paths=req.exclude_paths,
+                strip_comments_for_embeddings=req.strip_comments_for_embeddings
+            )
+    return add_memory_metrics(
+        {"num_functions": len(results), "num_files": file_count, "embedding_time_ms": round(embedding_time_ms, 1)},
+        memory_tracker
+    )
 
 @app.post("/force_rebuild_index")
 async def force_rebuild_index_api(req: BuildIndexRequest):
     """キャッシュをクリアして強制的にインデックスを再構築"""
     print(f"/force_rebuild_index called for directory: {req.directory}")
     with index_lock:
-        global_index_state.clear_cache(clear_disk=True)
-        results, file_count, _, embedding_time_ms = build_index(
-            req.directory,
-            req.file_ext,
-            update_state=True,
-            include_paths=req.include_paths,
-            exclude_paths=req.exclude_paths,
-            strip_comments_for_embeddings=req.strip_comments_for_embeddings
-        )
-    return {"num_functions": len(results), "num_files": file_count, "embedding_time_ms": round(embedding_time_ms, 1), "memory_usage_mb": round(get_memory_usage_mb(), 1), "message": "Index forcefully rebuilt"}
+        with MemoryUsageTracker() as memory_tracker:
+            global_index_state.clear_cache(clear_disk=True)
+            results, file_count, _, embedding_time_ms = build_index(
+                req.directory,
+                req.file_ext,
+                update_state=True,
+                include_paths=req.include_paths,
+                exclude_paths=req.exclude_paths,
+                strip_comments_for_embeddings=req.strip_comments_for_embeddings
+            )
+    return add_memory_metrics(
+        {
+            "num_functions": len(results),
+            "num_files": file_count,
+            "embedding_time_ms": round(embedding_time_ms, 1),
+            "message": "Index forcefully rebuilt"
+        },
+        memory_tracker
+    )
 
 @app.get("/index_status")
 async def index_status():
@@ -1319,31 +1399,35 @@ def build_index_and_search(
 @app.post("/search_functions_simple")
 async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
     with index_lock:
-        return build_index_and_search(
-            directory=req.directory,
-            query=req.query,
-            file_ext=req.file_ext,
-            top_k=req.top_k,
-            include_paths=req.include_paths,
-            exclude_paths=req.exclude_paths,
-            strip_comments_for_embeddings=req.strip_comments_for_embeddings,
-            search_mode=req.search_mode
-        )
+        with MemoryUsageTracker() as memory_tracker:
+            response = build_index_and_search(
+                directory=req.directory,
+                query=req.query,
+                file_ext=req.file_ext,
+                top_k=req.top_k,
+                include_paths=req.include_paths,
+                exclude_paths=req.exclude_paths,
+                strip_comments_for_embeddings=req.strip_comments_for_embeddings,
+                search_mode=req.search_mode
+            )
+    return add_memory_metrics(response, memory_tracker)
 
 
 @app.post("/search_functions_batch")
 async def search_functions_batch_api(req: BatchSearchFunctionsRequest):
     with index_lock:
-        return search_functions_for_queries(
-            directory=req.directory,
-            queries=req.queries,
-            file_ext=req.file_ext,
-            top_k=req.top_k,
-            include_paths=req.include_paths,
-            exclude_paths=req.exclude_paths,
-            strip_comments_for_embeddings=req.strip_comments_for_embeddings,
-            search_mode=req.search_mode
-        )
+        with MemoryUsageTracker() as memory_tracker:
+            response = search_functions_for_queries(
+                directory=req.directory,
+                queries=req.queries,
+                file_ext=req.file_ext,
+                top_k=req.top_k,
+                include_paths=req.include_paths,
+                exclude_paths=req.exclude_paths,
+                strip_comments_for_embeddings=req.strip_comments_for_embeddings,
+                search_mode=req.search_mode
+            )
+    return add_memory_metrics(response, memory_tracker)
 
 
 

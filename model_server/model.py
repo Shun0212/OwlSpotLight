@@ -44,13 +44,13 @@ def load_model_with_device_fallback():
         return model
     
     print(f"🦉 Loading model: {model_name}")
+    device = get_device()
     
     try:
         # まずはモデルを読み込み
         model = SentenceTransformer(model_name)
         
         # デバイスを決定して移動
-        device = get_device()
         print(f"🔧 Attempting to use device: {device}")
         
         # MPSデバイスの場合、torch.compileを無効化してwarningを防ぐ
@@ -100,6 +100,8 @@ def encode_code(codes: list[str], batch_size: int = 8, max_retries: int = 3, sho
     """コードをエンコードし、メモリエラー時は自動的にバッチサイズを調整。
     Returns (embeddings, elapsed_ms) のタプル。
     """
+    global model_device
+
     from tqdm import tqdm
     import sys
 

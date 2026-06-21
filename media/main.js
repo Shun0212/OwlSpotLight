@@ -75,6 +75,61 @@ window.onload = function() {
         return parts.join(' | ');
     }
 
+    function isFiniteNumber(value) {
+        return typeof value === 'number' && Number.isFinite(value);
+    }
+
+    function formatSignedMb(value) {
+        if (!isFiniteNumber(value)) {
+            return '';
+        }
+        const normalized = Object.is(value, -0) ? 0 : value;
+        const sign = normalized > 0 ? '+' : '';
+        return `${sign}${normalized.toFixed(1)}MB`;
+    }
+
+    function formatMemoryMetrics(meta) {
+        if (!meta) {
+            return '';
+        }
+        const after = isFiniteNumber(meta.memory_after_mb)
+            ? meta.memory_after_mb
+            : (isFiniteNumber(meta.memory_usage_mb) ? meta.memory_usage_mb : null);
+        if (!isFiniteNumber(after)) {
+            return '';
+        }
+        const before = isFiniteNumber(meta.memory_before_mb) ? meta.memory_before_mb : null;
+        const peak = isFiniteNumber(meta.memory_peak_mb) ? meta.memory_peak_mb : null;
+        const delta = isFiniteNumber(meta.memory_delta_mb) ? meta.memory_delta_mb : null;
+        if (isFiniteNumber(before) && isFiniteNumber(peak) && isFiniteNumber(delta)) {
+            return `RSS ${before.toFixed(1)}MB -> ${after.toFixed(1)}MB, peak ${peak.toFixed(1)}MB, delta ${formatSignedMb(delta)}`;
+        }
+        return `RSS ${after.toFixed(1)}MB`;
+    }
+
+    function pickRunMetrics(source) {
+        const metricKeys = [
+            'embedding_time_ms',
+            'index_embedding_time_ms',
+            'query_embedding_time_ms',
+            'memory_usage_mb',
+            'memory_before_mb',
+            'memory_after_mb',
+            'memory_peak_mb',
+            'memory_delta_mb',
+            'memory_peak_delta_mb',
+            'memory_sample_interval_ms',
+            'num_files',
+            'num_functions'
+        ];
+        return metricKeys.reduce((picked, key) => {
+            if (isFiniteNumber(source?.[key])) {
+                picked[key] = source[key];
+            }
+            return picked;
+        }, {});
+    }
+
     function normalizePattern(pattern) {
         if (!pattern || typeof pattern !== 'string') {
             return '';
@@ -339,8 +394,9 @@ window.onload = function() {
                 const detail = parts.length ? ` (${parts.join(', ')})` : '';
                 statusText += ` ⏱️ ${meta.embedding_time_ms.toFixed(1)}ms${detail}`;
             }
-            if (meta && typeof meta.memory_usage_mb === 'number') {
-                statusText += ` | RSS ${meta.memory_usage_mb.toFixed(1)}MB`;
+            const memoryText = formatMemoryMetrics(meta);
+            if (memoryText) {
+                statusText += ` | ${memoryText}`;
             }
             statusEl.textContent = statusText;
         }
@@ -452,7 +508,8 @@ window.onload = function() {
             const includeText = Array.isArray(run.includePaths) && run.includePaths.length ? run.includePaths.join(', ') : '-';
             const excludeText = Array.isArray(run.excludePaths) && run.excludePaths.length ? run.excludePaths.join(', ') : '-';
             const stripText = run.stripCommentsFromEmbeddings ? 'ON' : 'OFF';
-            scope.textContent = `Mode: ${modeText} / Include: ${includeText} / Exclude: ${excludeText} / No-comment embed: ${stripText}`;
+            const memoryText = formatMemoryMetrics(run);
+            scope.textContent = `Mode: ${modeText} / Include: ${includeText} / Exclude: ${excludeText} / No-comment embed: ${stripText}${memoryText ? ` / ${memoryText}` : ''}`;
             item.appendChild(scope);
 
             const openBtn = document.createElement('button');
@@ -463,7 +520,8 @@ window.onload = function() {
                 renderBatchRunInto(byId('exp-results'), run, currentFolderPath || '');
                 const expStatus = byId('exp-status');
                 if (expStatus) {
-                    expStatus.textContent = `Loaded run: ${when}`;
+                    const loadedMemoryText = formatMemoryMetrics(run);
+                    expStatus.textContent = `Loaded run: ${when}${loadedMemoryText ? ` | ${loadedMemoryText}` : ''}`;
                 }
                 setExperimentalMode('run');
                 saveState();
@@ -1194,7 +1252,13 @@ window.onload = function() {
                 embedding_time_ms: msg.embedding_time_ms,
                 index_embedding_time_ms: msg.index_embedding_time_ms,
                 query_embedding_time_ms: msg.query_embedding_time_ms,
-                memory_usage_mb: msg.memory_usage_mb
+                memory_usage_mb: msg.memory_usage_mb,
+                memory_before_mb: msg.memory_before_mb,
+                memory_after_mb: msg.memory_after_mb,
+                memory_peak_mb: msg.memory_peak_mb,
+                memory_delta_mb: msg.memory_delta_mb,
+                memory_peak_delta_mb: msg.memory_peak_delta_mb,
+                memory_sample_interval_ms: msg.memory_sample_interval_ms
             });
             return;
         }
@@ -1212,6 +1276,7 @@ window.onload = function() {
                 excludePaths: scope.excludePaths,
                 stripCommentsFromEmbeddings: !!scope.stripCommentsFromEmbeddings,
                 folderPath: currentFolderPath || '',
+                ...pickRunMetrics(currentBatchResult),
                 items: Array.isArray(currentBatchResult.items) ? currentBatchResult.items : []
             };
             batchSearchHistory = [runRecord, ...batchSearchHistory].slice(0, 50);
@@ -1225,8 +1290,9 @@ window.onload = function() {
                 if (typeof currentBatchResult.embedding_time_ms === 'number') {
                     statusText += ` ⏱️ ${currentBatchResult.embedding_time_ms.toFixed(1)}ms`;
                 }
-                if (typeof currentBatchResult.memory_usage_mb === 'number') {
-                    statusText += ` | RSS ${currentBatchResult.memory_usage_mb.toFixed(1)}MB`;
+                const memoryText = formatMemoryMetrics(currentBatchResult);
+                if (memoryText) {
+                    statusText += ` | ${memoryText}`;
                 }
                 expStatus.textContent = statusText;
             }

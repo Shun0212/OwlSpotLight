@@ -21,6 +21,16 @@ type BatchHistoryRun = {
         excludePaths?: string[];
         stripCommentsFromEmbeddings?: boolean;
         folderPath?: string;
+        embedding_time_ms?: number;
+        index_embedding_time_ms?: number;
+        query_embedding_time_ms?: number;
+        memory_usage_mb?: number;
+        memory_before_mb?: number;
+        memory_after_mb?: number;
+        memory_peak_mb?: number;
+        memory_delta_mb?: number;
+        memory_peak_delta_mb?: number;
+        memory_sample_interval_ms?: number;
         items?: BatchHistoryItem[];
 };
 
@@ -52,6 +62,16 @@ function historyToCsv(
                 'strip_comments_from_embeddings',
                 'owlignore_patterns',
                 'embedding_model_name',
+                'embedding_time_ms',
+                'index_embedding_time_ms',
+                'query_embedding_time_ms',
+                'memory_usage_mb',
+                'memory_before_mb',
+                'memory_after_mb',
+                'memory_peak_mb',
+                'memory_delta_mb',
+                'memory_peak_delta_mb',
+                'memory_sample_interval_ms',
                 'query_index',
                 'original_query',
                 'translated_query',
@@ -88,6 +108,16 @@ function historyToCsv(
                         safeCsvValue(stripComments),
                         safeCsvValue(owlIgnoreText),
                         safeCsvValue(embeddingModelName),
+                        safeCsvValue(run.embedding_time_ms ?? ''),
+                        safeCsvValue(run.index_embedding_time_ms ?? ''),
+                        safeCsvValue(run.query_embedding_time_ms ?? ''),
+                        safeCsvValue(run.memory_usage_mb ?? ''),
+                        safeCsvValue(run.memory_before_mb ?? ''),
+                        safeCsvValue(run.memory_after_mb ?? ''),
+                        safeCsvValue(run.memory_peak_mb ?? ''),
+                        safeCsvValue(run.memory_delta_mb ?? ''),
+                        safeCsvValue(run.memory_peak_delta_mb ?? ''),
+                        safeCsvValue(run.memory_sample_interval_ms ?? ''),
                         safeCsvValue(queryIndex),
                         safeCsvValue(query),
                         safeCsvValue(translated),
@@ -909,7 +939,13 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                         file_ext: fileExt,
                                         include_paths: includePaths,
                                         exclude_paths: excludePaths,
-                                        memory_usage_mb: data?.memory_usage_mb ?? null
+                                        memory_usage_mb: data?.memory_usage_mb ?? null,
+                                        memory_before_mb: data?.memory_before_mb ?? null,
+                                        memory_after_mb: data?.memory_after_mb ?? null,
+                                        memory_peak_mb: data?.memory_peak_mb ?? null,
+                                        memory_delta_mb: data?.memory_delta_mb ?? null,
+                                        memory_peak_delta_mb: data?.memory_peak_delta_mb ?? null,
+                                        memory_sample_interval_ms: data?.memory_sample_interval_ms ?? null
                                 };
 				if (visibleResults.length > 0) {
 					webviewView.webview.postMessage({ type: 'results', results: visibleResults, folderPath, ...searchMeta });
