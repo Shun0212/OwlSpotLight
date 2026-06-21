@@ -88,23 +88,68 @@ window.onload = function() {
         return `${sign}${normalized.toFixed(1)}MB`;
     }
 
+    function formatMemoryRange(label, before, after, peak, delta) {
+        if (!isFiniteNumber(after)) {
+            return '';
+        }
+        if (isFiniteNumber(before) && isFiniteNumber(peak) && isFiniteNumber(delta)) {
+            return `${label} ${before.toFixed(1)}MB -> ${after.toFixed(1)}MB, peak ${peak.toFixed(1)}MB, delta ${formatSignedMb(delta)}`;
+        }
+        return `${label} ${after.toFixed(1)}MB`;
+    }
+
     function formatMemoryMetrics(meta) {
         if (!meta) {
             return '';
         }
+        const parts = [];
         const after = isFiniteNumber(meta.memory_after_mb)
             ? meta.memory_after_mb
             : (isFiniteNumber(meta.memory_usage_mb) ? meta.memory_usage_mb : null);
-        if (!isFiniteNumber(after)) {
-            return '';
-        }
         const before = isFiniteNumber(meta.memory_before_mb) ? meta.memory_before_mb : null;
         const peak = isFiniteNumber(meta.memory_peak_mb) ? meta.memory_peak_mb : null;
         const delta = isFiniteNumber(meta.memory_delta_mb) ? meta.memory_delta_mb : null;
-        if (isFiniteNumber(before) && isFiniteNumber(peak) && isFiniteNumber(delta)) {
-            return `RSS ${before.toFixed(1)}MB -> ${after.toFixed(1)}MB, peak ${peak.toFixed(1)}MB, delta ${formatSignedMb(delta)}`;
+        const rssText = formatMemoryRange('RSS', before, after, peak, delta);
+        if (rssText) {
+            parts.push(rssText);
         }
-        return `RSS ${after.toFixed(1)}MB`;
+
+        const mpsCurrentAfter = isFiniteNumber(meta.mps_current_allocated_after_mb)
+            ? meta.mps_current_allocated_after_mb
+            : (isFiniteNumber(meta.mps_current_allocated_mb) ? meta.mps_current_allocated_mb : null);
+        const mpsCurrentText = formatMemoryRange(
+            'MPS current',
+            isFiniteNumber(meta.mps_current_allocated_before_mb) ? meta.mps_current_allocated_before_mb : null,
+            mpsCurrentAfter,
+            isFiniteNumber(meta.mps_current_allocated_peak_mb) ? meta.mps_current_allocated_peak_mb : null,
+            isFiniteNumber(meta.mps_current_allocated_delta_mb) ? meta.mps_current_allocated_delta_mb : null
+        );
+        if (mpsCurrentText) {
+            parts.push(mpsCurrentText);
+        }
+
+        const mpsDriverAfter = isFiniteNumber(meta.mps_driver_allocated_after_mb)
+            ? meta.mps_driver_allocated_after_mb
+            : (isFiniteNumber(meta.mps_driver_allocated_mb) ? meta.mps_driver_allocated_mb : null);
+        const mpsDriverText = formatMemoryRange(
+            'MPS driver',
+            isFiniteNumber(meta.mps_driver_allocated_before_mb) ? meta.mps_driver_allocated_before_mb : null,
+            mpsDriverAfter,
+            isFiniteNumber(meta.mps_driver_allocated_peak_mb) ? meta.mps_driver_allocated_peak_mb : null,
+            isFiniteNumber(meta.mps_driver_allocated_delta_mb) ? meta.mps_driver_allocated_delta_mb : null
+        );
+        if (mpsDriverText) {
+            parts.push(mpsDriverText);
+        }
+
+        if (isFiniteNumber(meta.model_tensor_memory_mb)) {
+            const deviceText = typeof meta.model_device === 'string' && meta.model_device
+                ? ` (${meta.model_device})`
+                : '';
+            parts.push(`model tensors ${meta.model_tensor_memory_mb.toFixed(1)}MB${deviceText}`);
+        }
+
+        return parts.join(' | ');
     }
 
     function pickRunMetrics(source) {
@@ -119,15 +164,34 @@ window.onload = function() {
             'memory_delta_mb',
             'memory_peak_delta_mb',
             'memory_sample_interval_ms',
+            'mps_current_allocated_mb',
+            'mps_current_allocated_before_mb',
+            'mps_current_allocated_after_mb',
+            'mps_current_allocated_peak_mb',
+            'mps_current_allocated_delta_mb',
+            'mps_current_allocated_peak_delta_mb',
+            'mps_driver_allocated_mb',
+            'mps_driver_allocated_before_mb',
+            'mps_driver_allocated_after_mb',
+            'mps_driver_allocated_peak_mb',
+            'mps_driver_allocated_delta_mb',
+            'mps_driver_allocated_peak_delta_mb',
+            'model_parameter_memory_mb',
+            'model_buffer_memory_mb',
+            'model_tensor_memory_mb',
             'num_files',
             'num_functions'
         ];
-        return metricKeys.reduce((picked, key) => {
+        const picked = metricKeys.reduce((result, key) => {
             if (isFiniteNumber(source?.[key])) {
-                picked[key] = source[key];
+                result[key] = source[key];
             }
-            return picked;
+            return result;
         }, {});
+        if (typeof source?.model_device === 'string') {
+            picked.model_device = source.model_device;
+        }
+        return picked;
     }
 
     function normalizePattern(pattern) {
@@ -1258,7 +1322,23 @@ window.onload = function() {
                 memory_peak_mb: msg.memory_peak_mb,
                 memory_delta_mb: msg.memory_delta_mb,
                 memory_peak_delta_mb: msg.memory_peak_delta_mb,
-                memory_sample_interval_ms: msg.memory_sample_interval_ms
+                memory_sample_interval_ms: msg.memory_sample_interval_ms,
+                mps_current_allocated_mb: msg.mps_current_allocated_mb,
+                mps_current_allocated_before_mb: msg.mps_current_allocated_before_mb,
+                mps_current_allocated_after_mb: msg.mps_current_allocated_after_mb,
+                mps_current_allocated_peak_mb: msg.mps_current_allocated_peak_mb,
+                mps_current_allocated_delta_mb: msg.mps_current_allocated_delta_mb,
+                mps_current_allocated_peak_delta_mb: msg.mps_current_allocated_peak_delta_mb,
+                mps_driver_allocated_mb: msg.mps_driver_allocated_mb,
+                mps_driver_allocated_before_mb: msg.mps_driver_allocated_before_mb,
+                mps_driver_allocated_after_mb: msg.mps_driver_allocated_after_mb,
+                mps_driver_allocated_peak_mb: msg.mps_driver_allocated_peak_mb,
+                mps_driver_allocated_delta_mb: msg.mps_driver_allocated_delta_mb,
+                mps_driver_allocated_peak_delta_mb: msg.mps_driver_allocated_peak_delta_mb,
+                model_device: msg.model_device,
+                model_parameter_memory_mb: msg.model_parameter_memory_mb,
+                model_buffer_memory_mb: msg.model_buffer_memory_mb,
+                model_tensor_memory_mb: msg.model_tensor_memory_mb
             });
             return;
         }

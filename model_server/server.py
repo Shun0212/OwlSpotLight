@@ -41,8 +41,38 @@ def _round_memory_mb(value: float) -> float:
     return 0.0 if rounded == -0.0 else rounded
 
 
+def _round_optional_memory_mb(value: Optional[float]) -> Optional[float]:
+    return None if value is None else _round_memory_mb(value)
+
+
+def _get_mps_memory_usage_mb() -> Optional[dict]:
+    if not (
+        hasattr(torch, "mps")
+        and hasattr(torch.backends, "mps")
+        and hasattr(torch.mps, "current_allocated_memory")
+        and hasattr(torch.mps, "driver_allocated_memory")
+        and torch.backends.mps.is_available()
+    ):
+        return None
+    try:
+        return {
+            "current_allocated_mb": torch.mps.current_allocated_memory() / 1024 / 1024,
+            "driver_allocated_mb": torch.mps.driver_allocated_memory() / 1024 / 1024,
+        }
+    except Exception:
+        return None
+
+
+def _max_optional_memory_mb(left: Optional[float], right: Optional[float]) -> Optional[float]:
+    if left is None:
+        return right
+    if right is None:
+        return left
+    return max(left, right)
+
+
 class MemoryUsageTracker:
-    """Track process RSS before, after, and sampled peak memory for one operation."""
+    """Track process RSS and MPS memory before, after, and sampled peak for one operation."""
 
     def __init__(self, sample_interval_sec: float = 0.02):
         self.sample_interval_sec = sample_interval_sec
@@ -50,14 +80,22 @@ class MemoryUsageTracker:
         self.before_mb = 0.0
         self.after_mb = 0.0
         self.peak_mb = 0.0
+        self.mps_current_before_mb: Optional[float] = None
+        self.mps_current_after_mb: Optional[float] = None
+        self.mps_current_peak_mb: Optional[float] = None
+        self.mps_driver_before_mb: Optional[float] = None
+        self.mps_driver_after_mb: Optional[float] = None
+        self.mps_driver_peak_mb: Optional[float] = None
         self._stop_event = Event()
         self._thread: Optional[Thread] = None
         self._peak_lock = Lock()
 
     def __enter__(self):
-        self.before_mb = self._sample_mb()
+        rss_mb, mps_memory = self._sample_memory()
+        self.before_mb = rss_mb
         self.after_mb = self.before_mb
         self.peak_mb = self.before_mb
+        self._set_mps_before(mps_memory)
         self._stop_event.clear()
         self._thread = Thread(target=self._sample_loop, daemon=True)
         self._thread.start()
@@ -67,25 +105,48 @@ class MemoryUsageTracker:
         self._stop_event.set()
         if self._thread is not None:
             self._thread.join(timeout=max(self.sample_interval_sec * 2, 0.1))
-        self.after_mb = self._sample_mb()
-        self._record_peak(self.after_mb)
+        rss_mb, mps_memory = self._sample_memory()
+        self.after_mb = rss_mb
+        self.mps_current_after_mb = None if mps_memory is None else mps_memory["current_allocated_mb"]
+        self.mps_driver_after_mb = None if mps_memory is None else mps_memory["driver_allocated_mb"]
+        self._record_peak(self.after_mb, mps_memory)
         return False
 
-    def _sample_mb(self) -> float:
-        return self.process.memory_info().rss / 1024 / 1024
+    def _sample_memory(self) -> tuple[float, Optional[dict]]:
+        return self.process.memory_info().rss / 1024 / 1024, _get_mps_memory_usage_mb()
 
-    def _record_peak(self, sample_mb: float):
+    def _set_mps_before(self, mps_memory: Optional[dict]):
+        if mps_memory is None:
+            return
+        self.mps_current_before_mb = mps_memory["current_allocated_mb"]
+        self.mps_current_after_mb = self.mps_current_before_mb
+        self.mps_current_peak_mb = self.mps_current_before_mb
+        self.mps_driver_before_mb = mps_memory["driver_allocated_mb"]
+        self.mps_driver_after_mb = self.mps_driver_before_mb
+        self.mps_driver_peak_mb = self.mps_driver_before_mb
+
+    def _record_peak(self, sample_mb: float, mps_memory: Optional[dict]):
         with self._peak_lock:
             if sample_mb > self.peak_mb:
                 self.peak_mb = sample_mb
+            if mps_memory is not None:
+                self.mps_current_peak_mb = _max_optional_memory_mb(
+                    self.mps_current_peak_mb,
+                    mps_memory["current_allocated_mb"]
+                )
+                self.mps_driver_peak_mb = _max_optional_memory_mb(
+                    self.mps_driver_peak_mb,
+                    mps_memory["driver_allocated_mb"]
+                )
 
     def _sample_loop(self):
         while not self._stop_event.wait(self.sample_interval_sec):
-            self._record_peak(self._sample_mb())
+            rss_mb, mps_memory = self._sample_memory()
+            self._record_peak(rss_mb, mps_memory)
 
     def metrics(self) -> dict:
         peak_mb = max(self.before_mb, self.after_mb, self.peak_mb)
-        return {
+        metrics = {
             "memory_before_mb": _round_memory_mb(self.before_mb),
             "memory_after_mb": _round_memory_mb(self.after_mb),
             "memory_peak_mb": _round_memory_mb(peak_mb),
@@ -93,11 +154,48 @@ class MemoryUsageTracker:
             "memory_peak_delta_mb": _round_memory_mb(peak_mb - self.before_mb),
             "memory_sample_interval_ms": round(self.sample_interval_sec * 1000, 1),
         }
+        if self.mps_current_after_mb is not None or self.mps_driver_after_mb is not None:
+            mps_current_peak = _max_optional_memory_mb(
+                self.mps_current_peak_mb,
+                self.mps_current_after_mb
+            )
+            mps_driver_peak = _max_optional_memory_mb(
+                self.mps_driver_peak_mb,
+                self.mps_driver_after_mb
+            )
+            metrics.update({
+                "mps_current_allocated_mb": _round_optional_memory_mb(self.mps_current_after_mb),
+                "mps_current_allocated_before_mb": _round_optional_memory_mb(self.mps_current_before_mb),
+                "mps_current_allocated_after_mb": _round_optional_memory_mb(self.mps_current_after_mb),
+                "mps_current_allocated_peak_mb": _round_optional_memory_mb(mps_current_peak),
+                "mps_current_allocated_delta_mb": _round_optional_memory_mb(
+                    None if self.mps_current_after_mb is None or self.mps_current_before_mb is None
+                    else self.mps_current_after_mb - self.mps_current_before_mb
+                ),
+                "mps_current_allocated_peak_delta_mb": _round_optional_memory_mb(
+                    None if mps_current_peak is None or self.mps_current_before_mb is None
+                    else mps_current_peak - self.mps_current_before_mb
+                ),
+                "mps_driver_allocated_mb": _round_optional_memory_mb(self.mps_driver_after_mb),
+                "mps_driver_allocated_before_mb": _round_optional_memory_mb(self.mps_driver_before_mb),
+                "mps_driver_allocated_after_mb": _round_optional_memory_mb(self.mps_driver_after_mb),
+                "mps_driver_allocated_peak_mb": _round_optional_memory_mb(mps_driver_peak),
+                "mps_driver_allocated_delta_mb": _round_optional_memory_mb(
+                    None if self.mps_driver_after_mb is None or self.mps_driver_before_mb is None
+                    else self.mps_driver_after_mb - self.mps_driver_before_mb
+                ),
+                "mps_driver_allocated_peak_delta_mb": _round_optional_memory_mb(
+                    None if mps_driver_peak is None or self.mps_driver_before_mb is None
+                    else mps_driver_peak - self.mps_driver_before_mb
+                ),
+            })
+        return metrics
 
 
 def add_memory_metrics(payload: dict, tracker: MemoryUsageTracker) -> dict:
     metrics = tracker.metrics()
     payload.update(metrics)
+    payload.update(get_loaded_model_memory_metrics())
     # Backward compatibility: existing UI and callers read memory_usage_mb.
     payload["memory_usage_mb"] = metrics["memory_after_mb"]
     return payload
@@ -106,7 +204,7 @@ from extractors import extract_functions
 from indexer import CodeIndexer
 
 # モデル管理を model.py から import
-from model import get_model, get_current_device, cleanup_memory, encode_code, DEFAULT_MODEL, get_device
+from model import get_model, get_current_device, cleanup_memory, encode_code, DEFAULT_MODEL, get_device, get_loaded_model_memory_metrics
 
 # グローバル変数
 model_name = os.environ.get("OWL_MODEL_NAME", DEFAULT_MODEL)
@@ -130,6 +228,13 @@ class IndexStatus(BaseModel):
     current_model_name: str
     indexed_model_name: str
     strip_comments_for_embeddings: bool
+    memory_usage_mb: Optional[float] = None
+    mps_current_allocated_mb: Optional[float] = None
+    mps_driver_allocated_mb: Optional[float] = None
+    model_device: Optional[str] = None
+    model_parameter_memory_mb: Optional[float] = None
+    model_buffer_memory_mb: Optional[float] = None
+    model_tensor_memory_mb: Optional[float] = None
 
 class BuildIndexRequest(BaseModel):
     directory: str
@@ -1197,15 +1302,24 @@ async def index_status():
             exclude_paths=global_index_state.exclude_paths,
             strip_comments_for_embeddings=global_index_state.strip_comments_for_embeddings
         )
-    return IndexStatus(
-        directory=global_index_state.directory or "",
-        indexed_files=list(global_index_state.file_info.keys()),
-        last_indexed=global_index_state.last_indexed,
-        up_to_date=up_to_date,
-        current_model_name=model_name,
-        indexed_model_name=global_index_state.model_name or model_name,
-        strip_comments_for_embeddings=bool(global_index_state.strip_comments_for_embeddings)
-    )
+    payload = {
+        "directory": global_index_state.directory or "",
+        "indexed_files": list(global_index_state.file_info.keys()),
+        "last_indexed": global_index_state.last_indexed,
+        "up_to_date": up_to_date,
+        "current_model_name": model_name,
+        "indexed_model_name": global_index_state.model_name or model_name,
+        "strip_comments_for_embeddings": bool(global_index_state.strip_comments_for_embeddings),
+        "memory_usage_mb": round(get_memory_usage_mb(), 1),
+    }
+    mps_memory = _get_mps_memory_usage_mb()
+    if mps_memory is not None:
+        payload.update({
+            "mps_current_allocated_mb": _round_memory_mb(mps_memory["current_allocated_mb"]),
+            "mps_driver_allocated_mb": _round_memory_mb(mps_memory["driver_allocated_mb"]),
+        })
+    payload.update(get_loaded_model_memory_metrics())
+    return IndexStatus(**payload)
 
 
 @app.post("/owlignore_manager_data")

@@ -161,3 +161,26 @@ def get_model_embedding_dim() -> int:
 def get_current_device() -> str:
     """現在使用中のデバイスを取得"""
     return model_device if model_device else "not_loaded"
+
+def get_loaded_model_memory_metrics() -> dict:
+    """Return parameter/buffer memory for the already-loaded model without loading it."""
+    if model is None:
+        return {
+            "model_device": get_current_device()
+        }
+
+    try:
+        parameter_bytes = sum(p.numel() * p.element_size() for p in model.parameters())
+        buffer_bytes = sum(b.numel() * b.element_size() for b in model.buffers())
+    except Exception:
+        return {
+            "model_device": get_current_device()
+        }
+
+    tensor_bytes = parameter_bytes + buffer_bytes
+    return {
+        "model_device": get_current_device(),
+        "model_parameter_memory_mb": round(parameter_bytes / 1024 / 1024, 1),
+        "model_buffer_memory_mb": round(buffer_bytes / 1024 / 1024, 1),
+        "model_tensor_memory_mb": round(tensor_bytes / 1024 / 1024, 1),
+    }

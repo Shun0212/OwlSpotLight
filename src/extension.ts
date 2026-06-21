@@ -31,6 +31,22 @@ type BatchHistoryRun = {
         memory_delta_mb?: number;
         memory_peak_delta_mb?: number;
         memory_sample_interval_ms?: number;
+        mps_current_allocated_mb?: number;
+        mps_current_allocated_before_mb?: number;
+        mps_current_allocated_after_mb?: number;
+        mps_current_allocated_peak_mb?: number;
+        mps_current_allocated_delta_mb?: number;
+        mps_current_allocated_peak_delta_mb?: number;
+        mps_driver_allocated_mb?: number;
+        mps_driver_allocated_before_mb?: number;
+        mps_driver_allocated_after_mb?: number;
+        mps_driver_allocated_peak_mb?: number;
+        mps_driver_allocated_delta_mb?: number;
+        mps_driver_allocated_peak_delta_mb?: number;
+        model_device?: string;
+        model_parameter_memory_mb?: number;
+        model_buffer_memory_mb?: number;
+        model_tensor_memory_mb?: number;
         items?: BatchHistoryItem[];
 };
 
@@ -72,6 +88,22 @@ function historyToCsv(
                 'memory_delta_mb',
                 'memory_peak_delta_mb',
                 'memory_sample_interval_ms',
+                'mps_current_allocated_mb',
+                'mps_current_allocated_before_mb',
+                'mps_current_allocated_after_mb',
+                'mps_current_allocated_peak_mb',
+                'mps_current_allocated_delta_mb',
+                'mps_current_allocated_peak_delta_mb',
+                'mps_driver_allocated_mb',
+                'mps_driver_allocated_before_mb',
+                'mps_driver_allocated_after_mb',
+                'mps_driver_allocated_peak_mb',
+                'mps_driver_allocated_delta_mb',
+                'mps_driver_allocated_peak_delta_mb',
+                'model_device',
+                'model_parameter_memory_mb',
+                'model_buffer_memory_mb',
+                'model_tensor_memory_mb',
                 'query_index',
                 'original_query',
                 'translated_query',
@@ -118,6 +150,22 @@ function historyToCsv(
                         safeCsvValue(run.memory_delta_mb ?? ''),
                         safeCsvValue(run.memory_peak_delta_mb ?? ''),
                         safeCsvValue(run.memory_sample_interval_ms ?? ''),
+                        safeCsvValue(run.mps_current_allocated_mb ?? ''),
+                        safeCsvValue(run.mps_current_allocated_before_mb ?? ''),
+                        safeCsvValue(run.mps_current_allocated_after_mb ?? ''),
+                        safeCsvValue(run.mps_current_allocated_peak_mb ?? ''),
+                        safeCsvValue(run.mps_current_allocated_delta_mb ?? ''),
+                        safeCsvValue(run.mps_current_allocated_peak_delta_mb ?? ''),
+                        safeCsvValue(run.mps_driver_allocated_mb ?? ''),
+                        safeCsvValue(run.mps_driver_allocated_before_mb ?? ''),
+                        safeCsvValue(run.mps_driver_allocated_after_mb ?? ''),
+                        safeCsvValue(run.mps_driver_allocated_peak_mb ?? ''),
+                        safeCsvValue(run.mps_driver_allocated_delta_mb ?? ''),
+                        safeCsvValue(run.mps_driver_allocated_peak_delta_mb ?? ''),
+                        safeCsvValue(run.model_device ?? ''),
+                        safeCsvValue(run.model_parameter_memory_mb ?? ''),
+                        safeCsvValue(run.model_buffer_memory_mb ?? ''),
+                        safeCsvValue(run.model_tensor_memory_mb ?? ''),
                         safeCsvValue(queryIndex),
                         safeCsvValue(query),
                         safeCsvValue(translated),
@@ -945,7 +993,23 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                         memory_peak_mb: data?.memory_peak_mb ?? null,
                                         memory_delta_mb: data?.memory_delta_mb ?? null,
                                         memory_peak_delta_mb: data?.memory_peak_delta_mb ?? null,
-                                        memory_sample_interval_ms: data?.memory_sample_interval_ms ?? null
+                                        memory_sample_interval_ms: data?.memory_sample_interval_ms ?? null,
+                                        mps_current_allocated_mb: data?.mps_current_allocated_mb ?? null,
+                                        mps_current_allocated_before_mb: data?.mps_current_allocated_before_mb ?? null,
+                                        mps_current_allocated_after_mb: data?.mps_current_allocated_after_mb ?? null,
+                                        mps_current_allocated_peak_mb: data?.mps_current_allocated_peak_mb ?? null,
+                                        mps_current_allocated_delta_mb: data?.mps_current_allocated_delta_mb ?? null,
+                                        mps_current_allocated_peak_delta_mb: data?.mps_current_allocated_peak_delta_mb ?? null,
+                                        mps_driver_allocated_mb: data?.mps_driver_allocated_mb ?? null,
+                                        mps_driver_allocated_before_mb: data?.mps_driver_allocated_before_mb ?? null,
+                                        mps_driver_allocated_after_mb: data?.mps_driver_allocated_after_mb ?? null,
+                                        mps_driver_allocated_peak_mb: data?.mps_driver_allocated_peak_mb ?? null,
+                                        mps_driver_allocated_delta_mb: data?.mps_driver_allocated_delta_mb ?? null,
+                                        mps_driver_allocated_peak_delta_mb: data?.mps_driver_allocated_peak_delta_mb ?? null,
+                                        model_device: data?.model_device ?? null,
+                                        model_parameter_memory_mb: data?.model_parameter_memory_mb ?? null,
+                                        model_buffer_memory_mb: data?.model_buffer_memory_mb ?? null,
+                                        model_tensor_memory_mb: data?.model_tensor_memory_mb ?? null
                                 };
 				if (visibleResults.length > 0) {
 					webviewView.webview.postMessage({ type: 'results', results: visibleResults, folderPath, ...searchMeta });
