@@ -1218,7 +1218,7 @@ function buildAgentSetupPayload(
 		'- owlspotlight.search_code: semantic/BM25/hybrid/keyword search over this workspace. You can call it with only query; directory defaults to this workspace, file_ext defaults to auto, search_mode defaults to semantic, and top_k defaults to 30. Use include_globs/exclude_globs to scope noisy repos, for example {"include_globs":["src/**/*.ts"],"exclude_globs":["tests/**"]}.',
 		'- owlspotlight.grep_repo: repository-wide grep for exact identifiers, call sites, tests, and docs after semantic discovery. Use it for OR patterns like "ClassA|ClassB|torch.multinomial"; patterns containing | are treated as regex alternation when regex is omitted. Pass the same include_globs/exclude_globs when you want the same scope as search_code.',
 		'- owlspotlight.cancel_embedding: request cancellation of the currently running indexing/embedding operation.',
-		'- owlspotlight.mark_results_used: optional; record only the search results or grep locations you actually used as evidence when that is easy to do.',
+		'- owlspotlight.mark_results_used: record only the search results or grep locations you actually used as evidence. Treat this as the default evidence-tracking step; skip only if it would materially slow or block the task.',
 		'- owlspotlight.get_human_feedback: optional; read suggestions only when the user explicitly says they reviewed the sidebar.',
 		'Tool-use rule:',
 		'- If owlspotlight.search_code is available in your tool list, call it directly. Do not run command -v owlspotlight, inspect .mcp.json, read mcp_server.py, or reverse-engineer the HTTP API first.',
