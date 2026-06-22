@@ -1283,15 +1283,19 @@ window.onload = function() {
             headRef: typeof headRef === 'string' ? headRef : (document.getElementById('diffHeadRefInput')?.value || '')
         });
     }
-    // 作業ツリーの実ファイルを開いて、その行へ飛ぶ（現在地へジャンプ）。
-    function postJump(file, line) {
-        if (!file) return;
-        vscode.postMessage({
-            command: 'jump',
-            file: file,
-            line: line,
-            startLine: line
-        });
+    // コミットをリモート（GitHub 等）のページで開く。
+    function postOpenCommitRemote(hash) {
+        if (!hash) return;
+        vscode.postMessage({ command: 'openCommitRemote', hash: hash });
+    }
+    // diff 結果のデフォルト表示は「前の状態」（親コミット↔このコミット）。
+    // コミットが無い（作業ツリー差分）場合は選択中の Base/Head 範囲で開く。
+    function openDiffPreviousState(r, file, line) {
+        if (r && r.commit_hash) {
+            postOpenDiff(file, line, r.commit_hash + '^', r.commit_hash);
+        } else {
+            postOpenDiff(file, line);
+        }
     }
 
     // ロード済みコミットグラフから ref（ハッシュ/短縮ハッシュ）に対応する subject を引く。
@@ -1503,9 +1507,14 @@ window.onload = function() {
             const fileAttr = r.file_path || r.file;
             const lineAttr = r.lineno || r.line_number || 1;
             if (isDiffResult) {
-                // Unified diff の結果は最初からネイティブ diff エディタで開く。
+                // クリックで「前の状態」（親コミットとの差分）を開きつつ、
+                // このカードだけ Open アクションをニュッと表示する。
                 resultDiv.onclick = function() {
-                    postOpenDiff(fileAttr, lineAttr);
+                    openDiffPreviousState(r, fileAttr, lineAttr);
+                    document.querySelectorAll('#results .result-item.show-actions').forEach(function(el) {
+                        if (el !== resultDiv) el.classList.remove('show-actions');
+                    });
+                    resultDiv.classList.add('show-actions');
                 };
                 // コミット内の全 hunk を展開して見られるようにする。
                 const commitHunks = Array.isArray(r.commit_hunks) ? r.commit_hunks : [];
@@ -1524,10 +1533,10 @@ window.onload = function() {
                         row.type = 'button';
                         row.className = 'diff-commit-hunk-head' + (h.is_representative ? ' representative' : '');
                         row.innerHTML = '<span class="dch-path">' + escapeHtml(String(h.path || hFile)) + '</span>';
-                        row.title = 'Open diff at ' + hFile + ':' + hLine;
+                        row.title = 'Show previous state at ' + hFile + ':' + hLine;
                         row.onclick = function(e) {
                             e.stopPropagation();
-                            postOpenDiff(hFile, hLine);
+                            openDiffPreviousState(r, hFile, hLine);
                         };
                         list.appendChild(row);
                     });
@@ -1547,32 +1556,22 @@ window.onload = function() {
                     resultDiv.appendChild(list);
                 }
 
-                // アクション: 前の状態（親コミット↔このコミット）と現在地へジャンプ。
-                const actions = document.createElement('div');
-                actions.className = 'diff-result-actions';
+                // アクション: コミットをリモート（GitHub 等）で開く。
                 if (r.commit_hash) {
-                    const beforeBtn = document.createElement('button');
-                    beforeBtn.type = 'button';
-                    beforeBtn.className = 'secondary-action diff-action-btn';
-                    beforeBtn.textContent = 'Show previous state';
-                    beforeBtn.title = 'Compare this commit against its parent';
-                    beforeBtn.onclick = function(e) {
+                    const actions = document.createElement('div');
+                    actions.className = 'diff-result-actions';
+                    const ghBtn = document.createElement('button');
+                    ghBtn.type = 'button';
+                    ghBtn.className = 'secondary-action diff-action-btn';
+                    ghBtn.textContent = 'Open commit on GitHub';
+                    ghBtn.title = 'Open this commit on the remote (GitHub, etc.)';
+                    ghBtn.onclick = function(e) {
                         e.stopPropagation();
-                        postOpenDiff(fileAttr, lineAttr, r.commit_hash + '^', r.commit_hash);
+                        postOpenCommitRemote(r.commit_hash);
                     };
-                    actions.appendChild(beforeBtn);
+                    actions.appendChild(ghBtn);
+                    resultDiv.appendChild(actions);
                 }
-                const jumpBtn = document.createElement('button');
-                jumpBtn.type = 'button';
-                jumpBtn.className = 'secondary-action diff-action-btn';
-                jumpBtn.textContent = 'Jump to current';
-                jumpBtn.title = 'Open the current file location in the working tree';
-                jumpBtn.onclick = function(e) {
-                    e.stopPropagation();
-                    postJump(fileAttr, lineAttr);
-                };
-                actions.appendChild(jumpBtn);
-                resultDiv.appendChild(actions);
             } else {
                 resultDiv.onclick = function() {
                     vscode.postMessage({

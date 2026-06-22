@@ -1473,14 +1473,14 @@ input[type=text]::placeholder {
 .diff-hunks-toggle {
   display: block;
   width: 100%;
-  margin-top: 0.55em;
+  margin-top: 0.5em;
   background: var(--vscode-button-secondaryBackground, #3a3d41);
   border: 1px solid var(--vscode-button-border, transparent);
   border-radius: 5px;
-  padding: 0.5em 0.7em;
+  padding: 0.35em 0.6em;
   color: var(--vscode-button-secondaryForeground, #ffffff);
-  font-size: 0.92em;
-  font-weight: 600;
+  font-size: 0.8em;
+  font-weight: 500;
   cursor: pointer;
   text-align: left;
 }
@@ -1540,12 +1540,27 @@ input[type=text]::placeholder {
 .diff-result-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4em;
-  margin-top: 0.5em;
+  gap: 0.5em;
+  max-height: 0;
+  margin-top: 0;
+  opacity: 0;
+  overflow: hidden;
+  transform: scaleY(0.7);
+  transform-origin: top;
+  transition: max-height 0.2s ease, opacity 0.2s ease, margin-top 0.2s ease, transform 0.2s ease;
+}
+.result-item.show-actions .diff-result-actions {
+  max-height: 4em;
+  margin-top: 0.55em;
+  opacity: 1;
+  transform: scaleY(1);
 }
 .diff-action-btn {
-  font-size: 0.72em;
-  padding: 0.25em 0.6em;
+  flex: 1 1 auto;
+  font-size: 0.88em;
+  font-weight: 500;
+  padding: 0.55em 0.9em;
+  text-align: center;
 }
 
 /* ===== Responsive ===== */

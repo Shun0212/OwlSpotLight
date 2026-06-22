@@ -1126,6 +1126,35 @@ function buildGitShowUri(repo: string, ref: string, relPath: string): vscode.Uri
 	return vscode.Uri.parse(`${OWL_DIFF_SCHEME}:/${relPath}?${query}`);
 }
 
+// Turn a git remote URL + commit hash into a web URL for the commit. Handles
+// scp-style (git@host:owner/repo) and ssh/https/git URLs for the common hosts.
+function buildCommitUrl(remoteUrl: string, hash: string): string | undefined {
+	let remote = (remoteUrl || '').trim();
+	if (!remote) { return undefined; }
+	remote = remote.replace(/\.git$/, '');
+	let host = '';
+	let repoPath = '';
+	const scp = remote.match(/^[^@]+@([^:]+):(.+)$/);
+	if (scp) {
+		host = scp[1];
+		repoPath = scp[2];
+	} else {
+		const m = remote.match(/^(?:ssh|https?|git):\/\/(?:[^@/]+@)?([^/]+)\/(.+)$/);
+		if (m) {
+			host = m[1];
+			repoPath = m[2];
+		}
+	}
+	if (!host || !repoPath) { return undefined; }
+	host = host.replace(/:\d+$/, '');
+	repoPath = repoPath.replace(/^\/+/, '');
+	if (host.toLowerCase().includes('gitlab')) {
+		return `https://${host}/${repoPath}/-/commit/${hash}`;
+	}
+	// GitHub, Gitea, and most other hosts use /commit/<hash>.
+	return `https://${host}/${repoPath}/commit/${hash}`;
+}
+
 async function findWorkspaceFilesByExtension(workspaceFolder: vscode.WorkspaceFolder, fileExt: string): Promise<string[]> {
 	const pattern = new vscode.RelativePattern(workspaceFolder, `**/*${fileExt}`);
 	const files = await vscode.workspace.findFiles(pattern, '**/{node_modules,.git,dist,build,out,coverage,.venv}/**');
@@ -2251,6 +2280,34 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					}
 				} catch (e: any) {
 					vscode.window.showErrorMessage('Could not open diff: ' + (e?.message || String(e)));
+				}
+			}
+			if (msg.command === 'openCommitRemote') {
+				const hash = typeof msg.hash === 'string' ? msg.hash.trim() : '';
+				if (!hash) { return; }
+				try {
+					const workspaceFolders = vscode.workspace.workspaceFolders;
+					const repo = workspaceFolders && workspaceFolders.length > 0
+						? workspaceFolders[0].uri.fsPath
+						: undefined;
+					if (!repo) {
+						vscode.window.showErrorMessage('No workspace folder found.');
+						return;
+					}
+					let remote = (await execFileText('git', ['remote', 'get-url', 'origin'], repo)).trim();
+					if (!remote) {
+						remote = (await execFileText('git', ['remote', 'get-url', 'upstream'], repo)).trim();
+					}
+					const url = buildCommitUrl(remote, hash);
+					if (!url) {
+						vscode.window.showErrorMessage(remote
+							? 'Could not build a commit URL for remote: ' + remote
+							: 'No git remote found for this repository.');
+						return;
+					}
+					await vscode.env.openExternal(vscode.Uri.parse(url));
+				} catch (e: any) {
+					vscode.window.showErrorMessage('Could not open commit: ' + (e?.message || String(e)));
 				}
 			}
 			if (msg.command === 'startServer') {
