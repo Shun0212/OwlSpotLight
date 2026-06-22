@@ -403,6 +403,25 @@ def tool_definitions() -> list[dict[str, Any]]:
                         "enum": ["semantic", "bm25", "hybrid", "keyword"],
                         "default": DEFAULT_SEARCH_MODE,
                     },
+                    "search_target": {
+                        "type": "string",
+                        "description": "Search all extracted code (functions), only functions changed by the selected git diff (changed_functions), or the changed lines shown as unified diff hunks (diff_hunks).",
+                        "enum": ["functions", "changed_functions", "diff_hunks"],
+                        "default": "functions",
+                    },
+                    "diff_base_ref": {
+                        "type": "string",
+                        "description": "Optional git base ref for diff hunk search. With no head ref this compares base...HEAD. Leave blank for HEAD vs working tree.",
+                    },
+                    "diff_head_ref": {
+                        "type": "string",
+                        "description": "Optional git head ref for branch-to-branch diff hunk search, used with diff_base_ref as base...head.",
+                    },
+                    "force_diff_refresh": {
+                        "type": "boolean",
+                        "description": "Refresh the cached diff snapshot before searching diff hunks.",
+                        "default": False,
+                    },
                     "server_url": {
                         "type": "string",
                         "description": "OwlSpotlight HTTP server URL. Defaults to OWLSPOTLIGHT_SERVER_URL or http://127.0.0.1:8000.",
@@ -532,7 +551,10 @@ def format_result_for_agent(result: dict[str, Any], directory: str, index: int) 
     name = result.get("function_name") or result.get("name") or "unknown"
     if result.get("class_name"):
         name = f"{result.get('class_name')}.{name}"
-    kind = "CodeBlock" if result.get("symbol_kind") == "code_block" else ("Method" if result.get("class_name") else "Function")
+    if result.get("symbol_kind") == "diff_hunk":
+        kind = "UnifiedDiff"
+    else:
+        kind = "CodeBlock" if result.get("symbol_kind") == "code_block" else ("Method" if result.get("class_name") else "Function")
     score = result.get("hybrid_score", result.get("score", result.get("similarity")))
     score_text = f"{float(score):.3f}" if isinstance(score, (int, float)) else "n/a"
     semantic = result.get("semantic_similarity")
@@ -570,6 +592,11 @@ def format_search_response_for_agent(arguments: dict[str, Any], result: dict[str
         f"file_ext={resolved_file_ext}",
         f"scope={arguments.get('scope', 'all')}",
     ]
+    search_target = result.get("search_target") or arguments.get("search_target")
+    if search_target:
+        meta_bits.append(f"target={search_target}")
+    if result.get("diff_compare"):
+        meta_bits.append(f"diff={result.get('diff_compare')}")
     include_globs = normalize_glob_patterns(arguments.get("include_globs"))
     exclude_globs = normalize_glob_patterns(arguments.get("exclude_globs"))
     if include_globs:
@@ -645,6 +672,14 @@ def call_search(arguments: dict[str, Any]) -> dict[str, Any]:
     if scope not in {"all", "source", "changed"}:
         scope = "all"
     search_mode = str(arguments.get("search_mode", DEFAULT_SEARCH_MODE)).strip()
+    search_target = str(arguments.get("search_target", "functions")).strip()
+    if search_target in {"changed", "changed_hunks", "changed_lines"}:
+        search_target = "changed_functions"
+    if search_target not in {"functions", "changed_functions", "diff_hunks"}:
+        search_target = "functions"
+    diff_base_ref = str(arguments.get("diff_base_ref", "") or "").strip()
+    diff_head_ref = str(arguments.get("diff_head_ref", "") or "").strip()
+    force_diff_refresh = bool(arguments.get("force_diff_refresh", False))
     include_globs = normalize_glob_patterns(arguments.get("include_globs"))
     exclude_globs = normalize_glob_patterns(arguments.get("exclude_globs"))
     server_url = str(arguments.get("server_url", DEFAULT_SERVER_URL)).rstrip("/")
@@ -659,7 +694,9 @@ def call_search(arguments: dict[str, Any]) -> dict[str, Any]:
         return {"content": [{"type": "text", "text": str(exc)}], "isError": True}
 
     include_files = None
-    if scope == "changed":
+    if search_target != "functions" and scope == "changed":
+        include_files = None
+    elif scope == "changed":
         include_files = changed_files(directory, file_ext)
     elif scope == "source":
         include_files = source_files(directory, file_ext) or None
@@ -680,6 +717,10 @@ def call_search(arguments: dict[str, Any]) -> dict[str, Any]:
         "include_globs": include_globs,
         "exclude_globs": exclude_globs,
         "search_mode": search_mode if search_mode in {"semantic", "bm25", "hybrid", "keyword"} else DEFAULT_SEARCH_MODE,
+        "search_target": search_target,
+        "diff_base_ref": diff_base_ref,
+        "diff_head_ref": diff_head_ref,
+        "force_diff_refresh": force_diff_refresh,
         "scope": scope,
         "capture_agent_event": True,
         "agent_source": "mcp",
@@ -705,6 +746,9 @@ def call_search(arguments: dict[str, Any]) -> dict[str, Any]:
         "directory": directory,
         "file_ext": file_ext,
         "scope": scope,
+        "search_target": search_target,
+        "diff_base_ref": diff_base_ref,
+        "diff_head_ref": diff_head_ref,
         "include_globs": include_globs,
         "exclude_globs": exclude_globs,
     }

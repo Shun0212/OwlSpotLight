@@ -11,6 +11,8 @@ window.onload = function() {
     let owlIgnoreTree = null;
     let agentSearchEvents = [];
     let agentActivityHidden = false;
+    let commitGraphData = [];
+    let commitGraphLoaded = false;
     let indexProgressWasActive = false;
     let statusBeforeIndexProgress = '';
 
@@ -22,6 +24,9 @@ window.onload = function() {
         const language = document.getElementById('languageSelect')?.value || '.py';
         const scope = document.getElementById('scopeSelect')?.value || 'all';
         const searchMode = document.getElementById('searchModeSelect')?.value || 'semantic';
+        const searchTarget = document.getElementById('searchTargetSelect')?.value || 'functions';
+        const diffBaseRef = document.getElementById('diffBaseRefInput')?.value || '';
+        const diffHeadRef = document.getElementById('diffHeadRefInput')?.value || '';
         const resultTypeFilter = document.getElementById('resultTypeFilter')?.value || 'function_level';
         const searchOptionsVisible = document.getElementById('searchOptions')?.style.display !== 'none';
         const statsFilter = document.getElementById('statsFilter')?.value || 'all';
@@ -38,6 +43,9 @@ window.onload = function() {
             language,
             scope,
             searchMode,
+            searchTarget,
+            diffBaseRef,
+            diffHeadRef,
             resultTypeFilter,
             searchOptionsVisible,
             statsFilter,
@@ -89,6 +97,16 @@ window.onload = function() {
                 const sel = document.getElementById('searchModeSelect');
                 if (sel) sel.value = state.searchMode;
             }
+            if (state.searchTarget && document.getElementById('searchTargetSelect')) {
+                const sel = document.getElementById('searchTargetSelect');
+                if (sel) sel.value = state.searchTarget;
+            }
+            if (typeof state.diffBaseRef === 'string' && document.getElementById('diffBaseRefInput')) {
+                document.getElementById('diffBaseRefInput').value = state.diffBaseRef;
+            }
+            if (typeof state.diffHeadRef === 'string' && document.getElementById('diffHeadRefInput')) {
+                document.getElementById('diffHeadRefInput').value = state.diffHeadRef;
+            }
             if (typeof state.searchOptionsVisible === 'boolean' && document.getElementById('searchOptions')) {
                 document.getElementById('searchOptions').style.display = state.searchOptionsVisible ? 'grid' : 'none';
             }
@@ -134,6 +152,7 @@ window.onload = function() {
                 renderAgentSearchEvents();
             }
             syncSegmentedControls();
+            updateDiffControlsVisibility();
         } catch (e) {
             console.warn('Failed to restore state', e);
         }
@@ -166,6 +185,16 @@ window.onload = function() {
             if (external.searchMode && document.getElementById('searchModeSelect')) {
                 const sel = document.getElementById('searchModeSelect');
                 if (sel) sel.value = external.searchMode;
+            }
+            if (external.searchTarget && document.getElementById('searchTargetSelect')) {
+                const sel = document.getElementById('searchTargetSelect');
+                if (sel) sel.value = external.searchTarget;
+            }
+            if (typeof external.diffBaseRef === 'string' && document.getElementById('diffBaseRefInput')) {
+                document.getElementById('diffBaseRefInput').value = external.diffBaseRef;
+            }
+            if (typeof external.diffHeadRef === 'string' && document.getElementById('diffHeadRefInput')) {
+                document.getElementById('diffHeadRefInput').value = external.diffHeadRef;
             }
             if (typeof external.searchOptionsVisible === 'boolean' && document.getElementById('searchOptions')) {
                 document.getElementById('searchOptions').style.display = external.searchOptionsVisible ? 'grid' : 'none';
@@ -212,6 +241,7 @@ window.onload = function() {
             }
             // 外部復元後ローカルへも保存
             syncSegmentedControls();
+            updateDiffControlsVisibility();
             saveState();
         } catch (e) {
             console.warn('Failed to restore external state', e);
@@ -298,6 +328,8 @@ window.onload = function() {
         if (document.getElementById('scopeSelect')) {
           document.getElementById('scopeSelect').onchange = () => {
             updateGeneralSummary();
+            updateDiffControlsVisibility();
+            updateSearchBehaviorSummary();
             saveState();
           };
         }
@@ -328,7 +360,7 @@ window.onload = function() {
           const langSel = document.getElementById('languageSelect');
           const langLabel = langSel ? (langSel.options[langSel.selectedIndex]?.text || langSel.value) : '';
           const scope = document.getElementById('scopeSelect')?.value || 'all';
-          const scopeLabel = { all: 'All', source: 'Source', changed: 'Changed' }[scope] || scope;
+          const scopeLabel = { all: 'All', source: 'Source', changed: 'Git Diff' }[scope] || scope;
           summary.textContent = [langLabel, scopeLabel].filter(Boolean).join(' · ');
           summary.title = summary.textContent;
         }
@@ -351,8 +383,14 @@ window.onload = function() {
           const summary = document.querySelector('#searchBehaviorPanel .option-summary');
           if (!summary) return;
           const mode = document.getElementById('searchModeSelect')?.value || 'semantic';
+          const target = getSearchTarget();
           const type = document.getElementById('resultTypeFilter')?.value || 'function_level';
           const modeLabel = { semantic: 'Semantic', hybrid: 'Hybrid', bm25: 'BM25', keyword: 'Keyword' }[mode] || mode;
+          const targetLabel = {
+            functions: 'Full code',
+            changed_functions: 'Changed functions',
+            diff_hunks: 'Unified diff'
+          }[target] || target;
           const typeLabel = {
             function_level: 'Function-level',
             all: 'All',
@@ -360,8 +398,204 @@ window.onload = function() {
             methods: 'Methods',
             codeblocks: 'CodeBlocks'
           }[type] || type;
-          summary.textContent = modeLabel + ' · ' + typeLabel;
+          summary.textContent = modeLabel + ' · ' + targetLabel + ' · ' + typeLabel;
           summary.title = summary.textContent;
+        }
+        // The effective search target: outside Git Diff scope it is always the
+        // full-code function search; inside Git Diff scope the diff-view toggle
+        // chooses between changed functions and the unified-diff view.
+        function getSearchTarget() {
+          const scope = document.getElementById('scopeSelect')?.value || 'all';
+          if (scope !== 'changed') return 'functions';
+          return document.getElementById('searchTargetSelect')?.value === 'diff_hunks' ? 'diff_hunks' : 'changed_functions';
+        }
+        function updateDiffControlsVisibility() {
+          const isDiff = (document.getElementById('scopeSelect')?.value || 'all') === 'changed';
+          const diffViewRow = document.getElementById('diffViewRow');
+          if (diffViewRow) diffViewRow.style.display = isDiff ? '' : 'none';
+          const diffOptions = document.getElementById('diffOptions');
+          if (diffOptions) diffOptions.style.display = isDiff ? 'grid' : 'none';
+          if (isDiff && !commitGraphLoaded) {
+            requestGitCommits();
+          }
+        }
+        function requestPrepareDiffSearch(force) {
+          const target = getSearchTarget();
+          // Only the unified-diff view needs the hunk index prepared in advance.
+          if (target !== 'diff_hunks') return;
+          const status = document.getElementById('diffStatus');
+          if (status) {
+            status.textContent = force ? 'Refreshing...' : 'Preparing...';
+          }
+          vscode.postMessage({
+            command: 'prepareDiffSearch',
+            lang: document.getElementById('languageSelect')?.value || '.py',
+            scope: document.getElementById('scopeSelect')?.value || 'all',
+            searchMode: document.getElementById('searchModeSelect')?.value || 'semantic',
+            searchTarget: target,
+            diffBaseRef: document.getElementById('diffBaseRefInput')?.value || '',
+            diffHeadRef: document.getElementById('diffHeadRefInput')?.value || '',
+            force: !!force
+          });
+        }
+
+        // ---- Commit graph (Git Diff base/head picker) -------------------------
+        const COMMIT_LANE_WIDTH = 14;
+        const COMMIT_ROW_HEIGHT = 30;
+        const COMMIT_NODE_RADIUS = 4;
+        const COMMIT_LANE_COLORS = [
+          '#4f9cff', '#22b07d', '#e0a23a', '#d05ce3', '#ef5e7a',
+          '#39bcc4', '#9b8cff', '#76b947', '#f08a3c', '#5fa8d3'
+        ];
+        function laneColor(col) {
+          return COMMIT_LANE_COLORS[((col % COMMIT_LANE_COLORS.length) + COMMIT_LANE_COLORS.length) % COMMIT_LANE_COLORS.length];
+        }
+        function requestGitCommits() {
+          const graph = document.getElementById('commitGraph');
+          if (graph && !commitGraphLoaded) {
+            graph.innerHTML = '<div class="commit-graph-empty">Loading commits…</div>';
+          }
+          vscode.postMessage({ command: 'getGitCommits', limit: 200 });
+        }
+        // Classic lane assignment: each lane "reserves" the next expected commit
+        // hash; merges/branches open or close lanes.
+        function computeCommitGraphLayout(commits) {
+          const colOf = new Map();
+          const lanes = [];
+          let maxLanes = 0;
+          for (const commit of commits) {
+            let col = lanes.indexOf(commit.hash);
+            if (col === -1) {
+              col = lanes.indexOf(null);
+              if (col === -1) { col = lanes.length; lanes.push(null); }
+            }
+            colOf.set(commit.hash, col);
+            // Any other lane that was also waiting for this commit converges here.
+            for (let k = 0; k < lanes.length; k++) {
+              if (k !== col && lanes[k] === commit.hash) { lanes[k] = null; }
+            }
+            const parents = Array.isArray(commit.parents) ? commit.parents : [];
+            lanes[col] = parents.length ? parents[0] : null;
+            for (let p = 1; p < parents.length; p++) {
+              if (lanes.indexOf(parents[p]) === -1) {
+                let slot = lanes.indexOf(null);
+                if (slot === -1) { slot = lanes.length; lanes.push(null); }
+                lanes[slot] = parents[p];
+              }
+            }
+            while (lanes.length && lanes[lanes.length - 1] === null) { lanes.pop(); }
+            maxLanes = Math.max(maxLanes, lanes.length, col + 1);
+          }
+          return { colOf, maxLanes };
+        }
+        function svgEl(name, attrs) {
+          const el = document.createElementNS('http://www.w3.org/2000/svg', name);
+          for (const key in attrs) { el.setAttribute(key, attrs[key]); }
+          return el;
+        }
+        function renderCommitGraph(commits) {
+          const container = document.getElementById('commitGraph');
+          if (!container) return;
+          container.innerHTML = '';
+          if (!commits || !commits.length) {
+            container.innerHTML = '<div class="commit-graph-empty">No commits found.</div>';
+            return;
+          }
+          const indexOf = new Map();
+          commits.forEach((c, i) => indexOf.set(c.hash, i));
+          const { colOf, maxLanes } = computeCommitGraphLayout(commits);
+          const graphWidth = Math.max(1, maxLanes) * COMMIT_LANE_WIDTH + 8;
+          const totalHeight = commits.length * COMMIT_ROW_HEIGHT;
+          const nodeX = (col) => col * COMMIT_LANE_WIDTH + COMMIT_LANE_WIDTH / 2 + 4;
+          const nodeY = (i) => i * COMMIT_ROW_HEIGHT + COMMIT_ROW_HEIGHT / 2;
+
+          const svg = svgEl('svg', { class: 'commit-graph-svg', width: graphWidth, height: totalHeight });
+          // Edges first so nodes draw on top.
+          commits.forEach((commit, i) => {
+            const cCol = colOf.get(commit.hash) || 0;
+            const cx = nodeX(cCol);
+            const cy = nodeY(i);
+            (commit.parents || []).forEach((parentHash) => {
+              if (!indexOf.has(parentHash)) return;
+              const j = indexOf.get(parentHash);
+              const pCol = colOf.get(parentHash) || 0;
+              const px = nodeX(pCol);
+              const py = nodeY(j);
+              const color = laneColor(Math.max(cCol, pCol));
+              let d;
+              if (px === cx) {
+                d = `M ${cx} ${cy} L ${px} ${py}`;
+              } else {
+                const midY = (cy + py) / 2;
+                d = `M ${cx} ${cy} C ${cx} ${midY} ${px} ${midY} ${px} ${py}`;
+              }
+              svg.appendChild(svgEl('path', { d, fill: 'none', stroke: color, 'stroke-width': '1.6' }));
+            });
+          });
+          commits.forEach((commit, i) => {
+            const col = colOf.get(commit.hash) || 0;
+            svg.appendChild(svgEl('circle', {
+              cx: nodeX(col), cy: nodeY(i), r: COMMIT_NODE_RADIUS,
+              fill: laneColor(col), class: 'commit-node'
+            }));
+          });
+
+          const rows = document.createElement('div');
+          rows.className = 'commit-rows';
+          rows.style.marginLeft = graphWidth + 'px';
+          commits.forEach((commit) => {
+            const row = document.createElement('div');
+            row.className = 'commit-row';
+            row.style.height = COMMIT_ROW_HEIGHT + 'px';
+            row.setAttribute('data-hash', commit.hash);
+            row.title = `${commit.short} ${commit.subject}\n${commit.author} · ${commit.date}\nClick: set Base · Shift+Click: set Head`;
+            const refsHtml = (commit.refs || [])
+              .map((r) => '<span class="commit-ref">' + escapeHtml(r.replace(/^HEAD -> /, '')) + '</span>')
+              .join('');
+            row.innerHTML =
+              '<span class="commit-hash">' + escapeHtml(commit.short) + '</span>' +
+              refsHtml +
+              '<span class="commit-subject">' + escapeHtml(commit.subject) + '</span>' +
+              '<span class="commit-meta">' + escapeHtml(commit.date) + '</span>' +
+              '<span class="commit-badge commit-badge-base">Base</span>' +
+              '<span class="commit-badge commit-badge-head">Head</span>';
+            row.addEventListener('click', (e) => {
+              const inputId = e.shiftKey ? 'diffHeadRefInput' : 'diffBaseRefInput';
+              const input = document.getElementById(inputId);
+              if (!input) return;
+              input.value = (input.value === commit.hash) ? '' : commit.hash;
+              input.dispatchEvent(new Event('change', { bubbles: true }));
+              highlightCommitSelection();
+            });
+            rows.appendChild(row);
+          });
+
+          const layout = document.createElement('div');
+          layout.className = 'commit-graph-layout';
+          layout.style.position = 'relative';
+          layout.style.height = totalHeight + 'px';
+          svg.style.position = 'absolute';
+          svg.style.top = '0';
+          svg.style.left = '0';
+          layout.appendChild(svg);
+          layout.appendChild(rows);
+          container.appendChild(layout);
+          highlightCommitSelection();
+        }
+        function refMatchesHash(ref, hash) {
+          if (!ref || !hash) return false;
+          if (ref === hash) return true;
+          // Allow an abbreviated hash (>= 4 chars) typed or clicked to match.
+          return ref.length >= 4 && hash.startsWith(ref);
+        }
+        function highlightCommitSelection() {
+          const base = (document.getElementById('diffBaseRefInput')?.value || '').trim();
+          const head = (document.getElementById('diffHeadRefInput')?.value || '').trim();
+          document.querySelectorAll('#commitGraph .commit-row').forEach((row) => {
+            const hash = row.getAttribute('data-hash') || '';
+            row.classList.toggle('is-base', refMatchesHash(base, hash));
+            row.classList.toggle('is-head', refMatchesHash(head, hash));
+          });
         }
         function setupSegmentedControls() {
           document.querySelectorAll('.segmented-control').forEach(control => {
@@ -384,6 +618,44 @@ window.onload = function() {
           });
         }
         setupSegmentedControls();
+        updateDiffControlsVisibility();
+        if (document.getElementById('searchModeSelect')) {
+          document.getElementById('searchModeSelect').onchange = () => {
+            syncSegmentedControls();
+            saveState();
+          };
+        }
+        if (document.getElementById('searchTargetSelect')) {
+          document.getElementById('searchTargetSelect').onchange = () => {
+            syncSegmentedControls();
+            updateDiffControlsVisibility();
+            saveState();
+          };
+        }
+        ['diffBaseRefInput', 'diffHeadRefInput'].forEach(id => {
+          const input = document.getElementById(id);
+          if (!input) return;
+          input.addEventListener('change', () => {
+            highlightCommitSelection();
+            saveState();
+          });
+          input.addEventListener('blur', () => {
+            highlightCommitSelection();
+            saveState();
+          });
+        });
+        if (document.getElementById('refreshDiffSearchBtn')) {
+          document.getElementById('refreshDiffSearchBtn').onclick = () => {
+            requestPrepareDiffSearch(true);
+            saveState();
+          };
+        }
+        if (document.getElementById('reloadCommitsBtn')) {
+          document.getElementById('reloadCommitsBtn').onclick = () => {
+            commitGraphLoaded = false;
+            requestGitCommits();
+          };
+        }
         if (document.getElementById('refreshOwlIgnoreTreeBtn')) {
           document.getElementById('refreshOwlIgnoreTreeBtn').onclick = () => {
             vscode.postMessage({ command: 'requestOwlIgnoreSettings', maxDepth: 4 });
@@ -622,11 +894,14 @@ window.onload = function() {
                         const lang = document.getElementById('languageSelect')?.value || '.py';
                         const scope = document.getElementById('scopeSelect')?.value || 'all';
                         const searchMode = document.getElementById('searchModeSelect')?.value || 'semantic';
+                        const searchTarget = getSearchTarget();
+                        const diffBaseRef = document.getElementById('diffBaseRefInput')?.value || '';
+                        const diffHeadRef = document.getElementById('diffHeadRefInput')?.value || '';
                         showLoading('status');
                         // 空状態を非表示
                         const empty = document.getElementById('emptyState');
                         if (empty) empty.style.display = 'none';
-                        vscode.postMessage({ command: 'search', text, lang, scope, searchMode });
+                        vscode.postMessage({ command: 'search', text, lang, scope, searchMode, searchTarget, diffBaseRef, diffHeadRef });
                         saveState();
                 }
         };
@@ -861,9 +1136,18 @@ window.onload = function() {
             const normalizedScope = ['all', 'source', 'changed'].includes(event.scope) ? event.scope : 'all';
             document.getElementById('scopeSelect').value = normalizedScope;
         }
+        if (event.search_target && document.getElementById('searchTargetSelect')) {
+            const rawTarget = event.search_target === 'changed_hunks' || event.search_target === 'changed'
+                ? 'changed_functions'
+                : event.search_target;
+            if (['changed_functions', 'diff_hunks'].includes(rawTarget)) {
+                document.getElementById('searchTargetSelect').value = rawTarget;
+            }
+        }
         currentFolderPath = event.directory || currentFolderPath;
         currentResults = Array.isArray(event.results) ? event.results : [];
         syncSegmentedControls();
+        updateDiffControlsVisibility();
         renderResults(currentResults, currentFolderPath || '');
         const statusEl = document.getElementById('status');
         if (statusEl) {
@@ -911,6 +1195,8 @@ window.onload = function() {
             const modelBits = [];
             if (event.agent_model) modelBits.push('Agent ' + event.agent_model);
             if (event.embedding_model) modelBits.push('Embedding ' + event.embedding_model.split('/').pop());
+            if (event.search_target && event.search_target !== 'functions') modelBits.push('Target ' + event.search_target);
+            if (event.diff_compare) modelBits.push('Diff ' + event.diff_compare);
             if (event.parent_event_id) modelBits.push('From #' + event.parent_event_id);
             if (Array.isArray(event.child_event_ids) && event.child_event_ids.length) {
                 modelBits.push('Follow-ups #' + event.child_event_ids.join(', #'));
@@ -962,22 +1248,65 @@ window.onload = function() {
         renderAgentSearchEvents();
     }
 
+    // 結果クリック時に VS Code ネイティブ diff エディタを開く（赤緑表示）。
+    function postOpenDiff(file, line) {
+        if (!file) return;
+        vscode.postMessage({
+            command: 'openDiff',
+            file: file,
+            line: line,
+            baseRef: document.getElementById('diffBaseRefInput')?.value || '',
+            headRef: document.getElementById('diffHeadRefInput')?.value || ''
+        });
+    }
+
+    // ロード済みコミットグラフから ref（ハッシュ/短縮ハッシュ）に対応する subject を引く。
+    function commitSubjectForRef(ref) {
+        if (!ref) return '';
+        const match = commitGraphData.find(function(c) {
+            return c.hash === ref || c.short === ref || (ref.length >= 4 && c.hash.startsWith(ref));
+        });
+        return match ? match.subject : '';
+    }
+    // diff 結果に対応するコミットメッセージ（head 優先、なければ base）。
+    function diffCommitSubject(r) {
+        const headRef = (r.diff_head_ref || document.getElementById('diffHeadRefInput')?.value || '').trim();
+        const baseRef = (r.diff_base_ref || document.getElementById('diffBaseRefInput')?.value || '').trim();
+        return commitSubjectForRef(headRef) || commitSubjectForRef(baseRef);
+    }
+
+    // unified diff のスニペットを +/- 付きで色分けした HTML に変換する。
+    function renderDiffSnippet(code, maxLines) {
+        const lines = String(code).split('\n').slice(0, maxLines || 10);
+        return lines.map(function(line) {
+            let cls = 'diff-line';
+            if (line.startsWith('@@')) cls += ' diff-hunk-header';
+            else if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('diff ') || line.startsWith('index ')) cls += ' diff-meta';
+            else if (line.startsWith('+')) cls += ' diff-add';
+            else if (line.startsWith('-')) cls += ' diff-del';
+            return '<span class="' + cls + '">' + (escapeHtml(line) || '&nbsp;') + '</span>';
+        }).join('');
+    }
+
     // 結果描画を関数化（復元時にも利用）
     function renderResults(results, folderPath) {
         const resultsContainer = document.getElementById('results');
         const statusEl = document.getElementById('status');
         const emptyEl = document.getElementById('emptyState');
         const resultTypeFilter = document.getElementById('resultTypeFilter')?.value || 'function_level';
+        const inDiffScope = (document.getElementById('scopeSelect')?.value || 'all') === 'changed';
         const formatScore = (value) => {
             if (typeof value !== 'number' || !Number.isFinite(value)) return null;
             return String(Math.round(Math.max(0, Math.min(1, value)) * 100));
         };
         const symbolLabel = (result) => {
+            if (result.symbol_kind === 'diff_hunk') return result.search_target === 'diff_hunks' ? 'UnifiedDiff' : 'ChangedLines';
             if (result.symbol_kind === 'code_block') return 'CodeBlock';
             if (result.class_name || result.symbol_kind === 'method') return 'Method';
             return 'Function';
         };
         const visibleResults = results.filter((r) => {
+            if (r.symbol_kind === 'diff_hunk') return resultTypeFilter === 'all' || resultTypeFilter === 'function_level';
             if (resultTypeFilter === 'functions') return !r.class_name && r.symbol_kind !== 'code_block';
             if (resultTypeFilter === 'methods') return !!r.class_name || r.symbol_kind === 'method';
             if (resultTypeFilter === 'function_level') return r.symbol_kind !== 'code_block';
@@ -1006,6 +1335,18 @@ window.onload = function() {
         // 類似度の最大値を取得（バー表示の正規化用）
         const maxScore = visibleResults.reduce((max, r) => Math.max(max, r.hybrid_score || r.score || r.similarity || 0), 0);
 
+        // ファイルごとに hunk の行番号を集約（diff 結果カードの hunk リンク用）。
+        const diffHunkLinesByFile = {};
+        visibleResults.forEach(function(r) {
+            if (r.symbol_kind !== 'diff_hunk') return;
+            const f = r.file_path || r.file || '';
+            const line = r.lineno || r.line_number || 1;
+            (diffHunkLinesByFile[f] = diffHunkLinesByFile[f] || []).push(line);
+        });
+        Object.keys(diffHunkLinesByFile).forEach(function(f) {
+            diffHunkLinesByFile[f] = Array.from(new Set(diffHunkLinesByFile[f])).sort(function(a, b) { return a - b; });
+        });
+
         visibleResults.forEach(function(r, index) {
             let relPath = r.file_path || r.file || '';
             if (relPath && folderPath && relPath.startsWith(folderPath)) {
@@ -1025,7 +1366,12 @@ window.onload = function() {
             let titleClass = 'result-title';
             let itemClass = 'result-item';
 
-            if (r.symbol_kind === 'code_block') {
+            if (r.symbol_kind === 'diff_hunk') {
+                const diffSubject = diffCommitSubject(r);
+                displayTitle = '<span class="function-name">' + escapeHtml(diffSubject || functionName) + '</span>';
+                titleClass += ' diff-title';
+                itemClass += ' diff-item';
+            } else if (r.symbol_kind === 'code_block') {
                 const staticInfo = r.python_static || {};
                 const calls = Array.isArray(staticInfo.calls) && staticInfo.calls.length
                     ? ' <span class="codeblock-calls">calls: ' + escapeHtml(staticInfo.calls.slice(0, 3).join(', ')) + '</span>'
@@ -1080,6 +1426,9 @@ window.onload = function() {
             if (bm25Score && r.bm25_score > 0) {
                 metaBadges.push('<span class="meta-badge score-meta" title="Relative BM25 score within this search">BM25 ' + bm25Score + '</span>');
             }
+            if (r.symbol_kind === 'diff_hunk' && r.diff_compare) {
+                metaBadges.push('<span class="meta-badge score-meta">' + escapeHtml(r.diff_compare) + '</span>');
+            }
             const metaLine = metaBadges.length ? '<div class="result-meta">' + metaBadges.join('') + '</div>' : '';
 
             // ランクバッジ
@@ -1092,11 +1441,14 @@ window.onload = function() {
                 ? '<div class="score-bar-wrapper"><div class="score-bar ' + barClass + '" style="width:' + barWidth + '%;"></div></div>'
                 : '';
             const snippetSource = r.raw_code || r.code || '';
+            const isDiffResult = r.symbol_kind === 'diff_hunk';
             const snippet = snippetSource
-                ? escapeHtml(String(snippetSource).trim().split('\n').slice(0, 3).join('\n'))
+                ? (isDiffResult
+                    ? renderDiffSnippet(snippetSource, 12)
+                    : escapeHtml(String(snippetSource).trim().split('\n').slice(0, 3).join('\n')))
                 : '';
 
-            resultDiv.innerHTML = 
+            resultDiv.innerHTML =
                 '<div class="result-header">' +
                   rankBadge +
                   '<div class="' + titleClass + '">' + displayTitle + '</div>' +
@@ -1104,22 +1456,64 @@ window.onload = function() {
                 '</div>' +
                 '<div class="result-path">' + escapeHtml(relPath) + ':' + (r.lineno || r.line_number || 1) + '</div>' +
                 metaLine +
-                '<div class="result-snippet">' + snippet + '</div>' +
+                '<div class="result-snippet' + (isDiffResult ? ' diff-snippet' : '') + '">' + snippet + '</div>' +
                 scoreBar;
 
-            resultDiv.onclick = function() {
-                const jumpData = {
-                    command: 'jump', 
-                    file: this.getAttribute('data-file'), 
-                    line: this.getAttribute('data-line'),
-                    functionName: functionName,
-                    className: className || null,
-                    startLine: r.lineno || r.line_number || 1,
-                    endLine: r.end_lineno || null
+            const fileAttr = r.file_path || r.file;
+            const lineAttr = r.lineno || r.line_number || 1;
+            if (isDiffResult) {
+                // Unified diff の結果は最初からネイティブ diff エディタで開く。
+                resultDiv.onclick = function() {
+                    postOpenDiff(fileAttr, lineAttr);
                 };
-                console.log('Jump with range info:', jumpData);
-                vscode.postMessage(jumpData);
-            };
+                // 同じファイルの他 hunk へ素早く飛べるリンクを添える。
+                const hunkLines = diffHunkLinesByFile[fileAttr] || [];
+                if (hunkLines.length > 1) {
+                    const linksWrap = document.createElement('div');
+                    linksWrap.className = 'diff-hunk-links';
+                    const label = document.createElement('span');
+                    label.className = 'diff-hunk-links-label';
+                    label.textContent = 'hunks:';
+                    linksWrap.appendChild(label);
+                    hunkLines.forEach(function(ln, i) {
+                        const link = document.createElement('button');
+                        link.type = 'button';
+                        link.className = 'diff-hunk-link' + (ln === lineAttr ? ' active' : '');
+                        link.textContent = '#' + (i + 1);
+                        link.title = fileAttr + ':' + ln;
+                        link.onclick = function(e) {
+                            e.stopPropagation();
+                            postOpenDiff(fileAttr, ln);
+                        };
+                        linksWrap.appendChild(link);
+                    });
+                    resultDiv.appendChild(linksWrap);
+                }
+            } else {
+                resultDiv.onclick = function() {
+                    vscode.postMessage({
+                        command: 'jump',
+                        file: fileAttr,
+                        line: lineAttr,
+                        functionName: functionName,
+                        className: className || null,
+                        startLine: r.lineno || r.line_number || 1,
+                        endLine: r.end_lineno || null
+                    });
+                };
+                // Git Diff スコープでは関数結果にも「Open diff」アクションを添える。
+                if (inDiffScope && fileAttr) {
+                    const diffBtn = document.createElement('button');
+                    diffBtn.type = 'button';
+                    diffBtn.className = 'secondary-action result-diff-btn';
+                    diffBtn.textContent = 'Open diff';
+                    diffBtn.onclick = function(e) {
+                        e.stopPropagation();
+                        postOpenDiff(fileAttr, lineAttr);
+                    };
+                    resultDiv.appendChild(diffBtn);
+                }
+            }
 
             resultsContainer.appendChild(resultDiv);
         });
@@ -1171,6 +1565,35 @@ window.onload = function() {
                 }
                 if (msg.type === 'indexProgress') {
                         applyIndexProgress(msg.progress);
+                }
+                if (msg.type === 'diffPrepared') {
+                        const status = document.getElementById('diffStatus');
+                        const data = msg.data || {};
+                        if (status) {
+                                const count = typeof data.num_diff_hunks === 'number' ? data.num_diff_hunks : 0;
+                                const files = typeof data.num_files === 'number' ? data.num_files : 0;
+                                const cache = data.diff_cache_hit ? 'cache' : 'fresh';
+                                const compare = data.diff_compare ? ' · ' + data.diff_compare : '';
+                                status.textContent = `${count} hunks / ${files} files · ${cache}${compare}`;
+                        }
+                        saveState();
+                }
+                if (msg.type === 'diffPrepareError') {
+                        const status = document.getElementById('diffStatus');
+                        if (status) {
+                                status.textContent = msg.message || 'Failed to prepare diff.';
+                        }
+                        saveState();
+                }
+                if (msg.type === 'gitCommits') {
+                        commitGraphData = Array.isArray(msg.commits) ? msg.commits : [];
+                        commitGraphLoaded = true;
+                        if (msg.error && !commitGraphData.length) {
+                                const container = document.getElementById('commitGraph');
+                                if (container) container.innerHTML = '<div class="commit-graph-empty">' + escapeHtml(msg.error) + '</div>';
+                        } else {
+                                renderCommitGraph(commitGraphData);
+                        }
                 }
                 if (msg.type === 'agentFeedbackStatus') {
                         const item = document.querySelector('.agent-review-item[data-event-id="' + msg.eventId + '"]');
