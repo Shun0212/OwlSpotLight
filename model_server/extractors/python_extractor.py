@@ -112,6 +112,28 @@ def _called_names(node: ast.AST) -> list[str]:
     return sorted(names)
 
 
+def _iter_within_scope(node: ast.AST):
+    """Yield descendants of node without entering nested function/class scopes."""
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            continue
+        yield child
+        yield from _iter_within_scope(child)
+
+
+def _return_expressions(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[str]:
+    """Collect the expressions returned by this function (ignoring nested scopes)."""
+    exprs: list[str] = []
+    seen: set[str] = set()
+    for child in _iter_within_scope(node):
+        if isinstance(child, ast.Return) and child.value is not None:
+            text = _annotation_name(child.value)
+            if text and text not in seen:
+                seen.add(text)
+                exprs.append(text)
+    return exprs
+
+
 def _import_names(node: ast.AST) -> list[str]:
     imports: list[str] = []
     for child in ast.walk(node):
@@ -158,6 +180,7 @@ def _function_item(
         "docstring": ast.get_docstring(node),
         "params": _argument_names(node),
         "returns": _annotation_name(node.returns),
+        "returns_exprs": _return_expressions(node),
         "decorators": decorators,
         "calls": _called_names(node),
         "assigned_names": _assigned_names(node),

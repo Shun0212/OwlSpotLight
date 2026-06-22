@@ -528,36 +528,68 @@ def format_result_for_agent(result: dict[str, Any], directory: str, index: int) 
         rel_path = file_path
     line = result.get("lineno") or result.get("line_number") or 1
     end_line = result.get("end_lineno")
-    location = f"{rel_path}:{line}" + (f"-{end_line}" if end_line else "")
-    name = result.get("function_name") or result.get("name") or "unknown"
-    if result.get("class_name"):
-        name = f"{result.get('class_name')}.{name}"
-    kind = "CodeBlock" if result.get("symbol_kind") == "code_block" else ("Method" if result.get("class_name") else "Function")
+    location = f"{rel_path}:L{line}" + (f"-L{end_line}" if end_line else "")
+    func_name = result.get("function_name") or result.get("name") or "unknown"
+    display_name = f"{result.get('class_name')}.{func_name}" if result.get("class_name") else func_name
     score = result.get("hybrid_score", result.get("score", result.get("similarity")))
     score_text = f"{float(score):.3f}" if isinstance(score, (int, float)) else "n/a"
-    semantic = result.get("semantic_similarity")
-    bm25 = result.get("bm25_score")
-    parts = [
-        f"{index}. {kind} `{name}` at `{location}`",
-        f"   rank_score={score_text}"
-        + (f", semantic={float(semantic):.3f}" if isinstance(semantic, (int, float)) else "")
-        + (f", bm25={float(bm25):.3f}" if isinstance(bm25, (int, float)) and bm25 > 0 else ""),
-    ]
-    static = result.get("python_static") or {}
-    routes = static.get("routes") if isinstance(static, dict) else None
-    if isinstance(routes, list) and routes:
+
+    static = result.get("python_static") if isinstance(result.get("python_static"), dict) else {}
+    symbol_kind = result.get("symbol_kind")
+    parts = [f"{index}. {display_name}  `{location}`  rank={score_text}"]
+
+    routes = static.get("routes")
+    if isinstance(routes, list) and routes and isinstance(routes[0], dict):
         route = routes[0]
-        if isinstance(route, dict):
-            parts.append(f"   route={route.get('method', '')} {route.get('path', '')}".rstrip())
-    calls = static.get("calls") if isinstance(static, dict) else None
-    if isinstance(calls, list) and calls:
-        parts.append(f"   calls={', '.join(str(call) for call in calls[:6])}")
-    snippet_source = str(result.get("raw_code") or result.get("code") or "")
-    snippet_lines = [line.rstrip() for line in snippet_source.strip().splitlines()[:8]]
-    if snippet_lines:
-        snippet = truncate_text("\n".join(snippet_lines), 900)
-        parts.append("   snippet:\n```text\n" + snippet + "\n```")
+        parts.append(f"   route: {route.get('method', '')} {route.get('path', '')}".rstrip())
+
+    has_signature = static.get("params") is not None or static.get("returns")
+    if symbol_kind in {"function", "method"} and has_signature:
+        prefix = "async def " if static.get("is_async") else "def "
+        params = static.get("params") or []
+        signature = f"{prefix}{func_name}({', '.join(str(param) for param in params)})"
+        returns = static.get("returns")
+        if returns:
+            signature += f" -> {returns}"
+        parts.append(f"   {signature}")
+        # Option A: prefer the return annotation; fall back to actual return expressions.
+        if not returns:
+            return_exprs = static.get("returns_exprs") or []
+            if return_exprs:
+                parts.append(f"   returns: {', '.join(str(expr) for expr in return_exprs[:4])}")
+        calls = static.get("calls") or []
+        if calls:
+            parts.append(f"   calls: {', '.join(str(call) for call in calls[:8])}")
+    elif symbol_kind == "code_block":
+        block_type = static.get("block_type")
+        if block_type:
+            parts.append(f"   block: {block_type}")
+        calls = static.get("calls") or []
+        if calls:
+            parts.append(f"   calls: {', '.join(str(call) for call in calls[:8])}")
+    else:
+        # Non-Python or tree-sitter fallback: keep a short snippet instead of a full block.
+        snippet_source = str(result.get("raw_code") or result.get("code") or "")
+        snippet_lines = [item.rstrip() for item in snippet_source.strip().splitlines()[:3]]
+        if snippet_lines:
+            snippet = truncate_text("\n".join(snippet_lines), 300)
+            parts.append("   " + snippet.replace("\n", "\n   "))
     return "\n".join(parts)
+
+
+_STRUCTURED_DROP_KEYS = ("raw_code", "code")
+_STRUCTURED_STATIC_DROP_KEYS = ("call_graph", "import_dependency")
+
+
+def slim_result_for_structured(result: dict[str, Any]) -> dict[str, Any]:
+    """Drop the bulky, duplicated fields before echoing results in structuredContent."""
+    slim = {key: value for key, value in result.items() if key not in _STRUCTURED_DROP_KEYS}
+    static = slim.get("python_static")
+    if isinstance(static, dict):
+        slim["python_static"] = {
+            key: value for key, value in static.items() if key not in _STRUCTURED_STATIC_DROP_KEYS
+        }
+    return slim
 
 
 def format_search_response_for_agent(arguments: dict[str, Any], result: dict[str, Any]) -> str:
@@ -712,7 +744,7 @@ def call_search(arguments: dict[str, Any]) -> dict[str, Any]:
     return {
         "content": [{"type": "text", "text": text}],
         "structuredContent": {
-            "results": results,
+            "results": [slim_result_for_structured(item) for item in results],
             "meta": {
                 key: value
                 for key, value in result.items()
