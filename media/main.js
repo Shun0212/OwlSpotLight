@@ -418,6 +418,27 @@ window.onload = function() {
           if (isDiff && !commitGraphLoaded) {
             requestGitCommits();
           }
+          updateDiffRangeBar();
+        }
+        // フルハッシュは 7 桁に短縮（ブランチ/タグ名はそのまま）。
+        function shortRef(ref) {
+          const v = (ref || '').trim();
+          return /^[0-9a-f]{12,40}$/i.test(v) ? v.slice(0, 7) : v;
+        }
+        // 現在 Base/Head で検索される diff 範囲を検索バー直下に常時表示する。
+        function updateDiffRangeBar() {
+          const bar = document.getElementById('diffRangeBar');
+          if (!bar) return;
+          const isDiff = (document.getElementById('scopeSelect')?.value || 'all') === 'changed';
+          if (!isDiff) { bar.style.display = 'none'; return; }
+          const base = shortRef(document.getElementById('diffBaseRefInput')?.value || '');
+          const head = shortRef(document.getElementById('diffHeadRefInput')?.value || '');
+          let range;
+          if (base && head) range = base + ' → ' + head;
+          else if (base) range = base + ' → HEAD';
+          else range = 'HEAD → working tree';
+          bar.textContent = 'Diff range: ' + range;
+          bar.style.display = '';
         }
         function requestPrepareDiffSearch(force) {
           const target = getSearchTarget();
@@ -637,12 +658,15 @@ window.onload = function() {
           if (!input) return;
           input.addEventListener('change', () => {
             highlightCommitSelection();
+            updateDiffRangeBar();
             saveState();
           });
           input.addEventListener('blur', () => {
             highlightCommitSelection();
+            updateDiffRangeBar();
             saveState();
           });
+          input.addEventListener('input', updateDiffRangeBar);
         });
         if (document.getElementById('refreshDiffSearchBtn')) {
           document.getElementById('refreshDiffSearchBtn').onclick = () => {
@@ -1249,14 +1273,24 @@ window.onload = function() {
     }
 
     // 結果クリック時に VS Code ネイティブ diff エディタを開く（赤緑表示）。
-    function postOpenDiff(file, line) {
+    function postOpenDiff(file, line, baseRef, headRef) {
         if (!file) return;
         vscode.postMessage({
             command: 'openDiff',
             file: file,
             line: line,
-            baseRef: document.getElementById('diffBaseRefInput')?.value || '',
-            headRef: document.getElementById('diffHeadRefInput')?.value || ''
+            baseRef: typeof baseRef === 'string' ? baseRef : (document.getElementById('diffBaseRefInput')?.value || ''),
+            headRef: typeof headRef === 'string' ? headRef : (document.getElementById('diffHeadRefInput')?.value || '')
+        });
+    }
+    // 作業ツリーの実ファイルを開いて、その行へ飛ぶ（現在地へジャンプ）。
+    function postJump(file, line) {
+        if (!file) return;
+        vscode.postMessage({
+            command: 'jump',
+            file: file,
+            line: line,
+            startLine: line
         });
     }
 
@@ -1268,8 +1302,10 @@ window.onload = function() {
         });
         return match ? match.subject : '';
     }
-    // diff 結果に対応するコミットメッセージ（head 優先、なければ base）。
+    // diff 結果に対応するコミットメッセージ。サーバーが hunk ごとに紐づけた
+    // commit_subject を最優先し、無ければ ref から引く（head 優先、なければ base）。
     function diffCommitSubject(r) {
+        if (r.commit_subject) return r.commit_subject;
         const headRef = (r.diff_head_ref || document.getElementById('diffHeadRefInput')?.value || '').trim();
         const baseRef = (r.diff_base_ref || document.getElementById('diffBaseRefInput')?.value || '').trim();
         return commitSubjectForRef(headRef) || commitSubjectForRef(baseRef);
@@ -1426,6 +1462,11 @@ window.onload = function() {
             if (bm25Score && r.bm25_score > 0) {
                 metaBadges.push('<span class="meta-badge score-meta" title="Relative BM25 score within this search">BM25 ' + bm25Score + '</span>');
             }
+            if (r.symbol_kind === 'diff_hunk' && typeof r.commit_hunk_count === 'number') {
+                const fileCount = typeof r.commit_file_count === 'number' ? r.commit_file_count : 0;
+                const label = fileCount + ' file' + (fileCount === 1 ? '' : 's') + ' · ' + r.commit_hunk_count + ' hunk' + (r.commit_hunk_count === 1 ? '' : 's');
+                metaBadges.push('<span class="meta-badge score-meta" title="Files and hunks changed in this commit">' + escapeHtml(label) + '</span>');
+            }
             if (r.symbol_kind === 'diff_hunk' && r.diff_compare) {
                 metaBadges.push('<span class="meta-badge score-meta">' + escapeHtml(r.diff_compare) + '</span>');
             }
@@ -1466,29 +1507,72 @@ window.onload = function() {
                 resultDiv.onclick = function() {
                     postOpenDiff(fileAttr, lineAttr);
                 };
-                // 同じファイルの他 hunk へ素早く飛べるリンクを添える。
-                const hunkLines = diffHunkLinesByFile[fileAttr] || [];
-                if (hunkLines.length > 1) {
-                    const linksWrap = document.createElement('div');
-                    linksWrap.className = 'diff-hunk-links';
-                    const label = document.createElement('span');
-                    label.className = 'diff-hunk-links-label';
-                    label.textContent = 'hunks:';
-                    linksWrap.appendChild(label);
-                    hunkLines.forEach(function(ln, i) {
-                        const link = document.createElement('button');
-                        link.type = 'button';
-                        link.className = 'diff-hunk-link' + (ln === lineAttr ? ' active' : '');
-                        link.textContent = '#' + (i + 1);
-                        link.title = fileAttr + ':' + ln;
-                        link.onclick = function(e) {
+                // コミット内の全 hunk を展開して見られるようにする。
+                const commitHunks = Array.isArray(r.commit_hunks) ? r.commit_hunks : [];
+                if (commitHunks.length > 1) {
+                    const toggle = document.createElement('button');
+                    toggle.type = 'button';
+                    toggle.className = 'diff-hunks-toggle';
+
+                    const list = document.createElement('div');
+                    list.className = 'diff-commit-hunks';
+                    // commit_hunks はサーバー側でスコア降順に並んでいる。
+                    commitHunks.forEach(function(h) {
+                        const hFile = h.file_path || fileAttr;
+                        const hLine = h.lineno || 1;
+                        const row = document.createElement('button');
+                        row.type = 'button';
+                        row.className = 'diff-commit-hunk-head' + (h.is_representative ? ' representative' : '');
+                        row.innerHTML = '<span class="dch-path">' + escapeHtml(String(h.path || hFile)) + '</span>';
+                        row.title = 'Open diff at ' + hFile + ':' + hLine;
+                        row.onclick = function(e) {
                             e.stopPropagation();
-                            postOpenDiff(fileAttr, ln);
+                            postOpenDiff(hFile, hLine);
                         };
-                        linksWrap.appendChild(link);
+                        list.appendChild(row);
                     });
-                    resultDiv.appendChild(linksWrap);
+
+                    const applyExpanded = function() {
+                        const expanded = list.classList.contains('expanded');
+                        toggle.textContent = (expanded ? '▾ ' : '▸ ') + 'Files in this commit (' + commitHunks.length + ')';
+                    };
+                    applyExpanded();
+                    toggle.onclick = function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        list.classList.toggle('expanded');
+                        applyExpanded();
+                    };
+                    resultDiv.appendChild(toggle);
+                    resultDiv.appendChild(list);
                 }
+
+                // アクション: 前の状態（親コミット↔このコミット）と現在地へジャンプ。
+                const actions = document.createElement('div');
+                actions.className = 'diff-result-actions';
+                if (r.commit_hash) {
+                    const beforeBtn = document.createElement('button');
+                    beforeBtn.type = 'button';
+                    beforeBtn.className = 'secondary-action diff-action-btn';
+                    beforeBtn.textContent = 'Show previous state';
+                    beforeBtn.title = 'Compare this commit against its parent';
+                    beforeBtn.onclick = function(e) {
+                        e.stopPropagation();
+                        postOpenDiff(fileAttr, lineAttr, r.commit_hash + '^', r.commit_hash);
+                    };
+                    actions.appendChild(beforeBtn);
+                }
+                const jumpBtn = document.createElement('button');
+                jumpBtn.type = 'button';
+                jumpBtn.className = 'secondary-action diff-action-btn';
+                jumpBtn.textContent = 'Jump to current';
+                jumpBtn.title = 'Open the current file location in the working tree';
+                jumpBtn.onclick = function(e) {
+                    e.stopPropagation();
+                    postJump(fileAttr, lineAttr);
+                };
+                actions.appendChild(jumpBtn);
+                resultDiv.appendChild(actions);
             } else {
                 resultDiv.onclick = function() {
                     vscode.postMessage({
@@ -1573,8 +1657,8 @@ window.onload = function() {
                                 const count = typeof data.num_diff_hunks === 'number' ? data.num_diff_hunks : 0;
                                 const files = typeof data.num_files === 'number' ? data.num_files : 0;
                                 const cache = data.diff_cache_hit ? 'cache' : 'fresh';
-                                const compare = data.diff_compare ? ' · ' + data.diff_compare : '';
-                                status.textContent = `${count} hunks / ${files} files · ${cache}${compare}`;
+                                // Range is shown separately in the diff range bar, so keep this line compact.
+                                status.textContent = `${count} hunks / ${files} files · ${cache}`;
                         }
                         saveState();
                 }

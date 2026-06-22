@@ -2429,6 +2429,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
       <button id="searchBtn">Search</button>
       <button id="searchOptionsBtn" class="secondary-action" title="Show search options">Options</button>
     </div>
+    <div id="diffRangeBar" class="diff-range-bar" style="display:none;" title="Diff range currently being searched"></div>
     <div class="search-options" id="searchOptions" style="display:none;">
       <details class="option-panel" id="generalPanel">
         <summary>

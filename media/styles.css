@@ -304,12 +304,23 @@ button:focus {
 }
 
 /* ===== Search bar ===== */
-.searchbar { 
-  display: flex; 
-  gap: 0.4em; 
+.searchbar {
+  display: flex;
+  gap: 0.4em;
   padding: 0.6em 0.8em;
-  background: var(--vscode-sideBar-background, #f8f8f8); 
+  background: var(--vscode-sideBar-background, #f8f8f8);
   align-items: center;
+}
+
+.diff-range-bar {
+  padding: 0.2em 0.9em 0.5em;
+  background: var(--vscode-sideBar-background, #f8f8f8);
+  color: var(--vscode-descriptionForeground, #888888);
+  font-size: 0.75em;
+  font-family: var(--vscode-editor-font-family, monospace);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .searchbar input[type=text] {
@@ -1456,6 +1467,85 @@ input[type=text]::placeholder {
 .diff-hunk-link.active {
   background: var(--vscode-button-background, #0078d4);
   color: var(--vscode-button-foreground, #ffffff);
+}
+
+/* ===== Commit hunk list (per-result, expandable) ===== */
+.diff-hunks-toggle {
+  display: block;
+  width: 100%;
+  margin-top: 0.55em;
+  background: var(--vscode-button-secondaryBackground, #3a3d41);
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 5px;
+  padding: 0.5em 0.7em;
+  color: var(--vscode-button-secondaryForeground, #ffffff);
+  font-size: 0.92em;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+.diff-hunks-toggle:hover {
+  background: var(--vscode-button-secondaryHoverBackground, #45494e);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+
+.diff-commit-hunks {
+  display: none;
+  margin-top: 0.35em;
+  flex-direction: column;
+  gap: 0.1em;
+  border-left: 2px solid var(--vscode-sideBarSectionHeader-border, #3a3d41);
+  padding-left: 0.5em;
+}
+.diff-commit-hunks.expanded {
+  display: flex;
+}
+
+.diff-commit-hunk-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5em;
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  padding: 0.2em 0.3em;
+  cursor: pointer;
+  color: var(--vscode-foreground, #cccccc);
+  font-size: 0.74em;
+}
+.diff-commit-hunk-head:hover {
+  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.12));
+  box-shadow: none;
+  color: var(--vscode-textLink-foreground, #3794ff);
+}
+.diff-commit-hunk-head.representative .dch-path {
+  font-weight: 600;
+  color: var(--vscode-charts-blue, #3794ff);
+}
+.dch-path {
+  font-family: var(--vscode-editor-font-family, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dch-stat {
+  flex-shrink: 0;
+  font-size: 0.92em;
+}
+.dch-add { color: var(--vscode-gitDecoration-addedResourceForeground, #2ea043); }
+.dch-del { color: var(--vscode-gitDecoration-deletedResourceForeground, #cf222e); }
+
+.diff-result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4em;
+  margin-top: 0.5em;
+}
+.diff-action-btn {
+  font-size: 0.72em;
+  padding: 0.25em 0.6em;
 }
 
 /* ===== Responsive ===== */
