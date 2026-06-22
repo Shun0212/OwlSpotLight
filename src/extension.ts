@@ -1024,6 +1024,7 @@ async function detectLanguages(): Promise<string[]> {
 }
 
 type SearchScope = 'all' | 'source' | 'changed';
+type SearchTarget = 'functions' | 'changed_functions' | 'diff_hunks';
 type AgentSearchEvent = {
 	id: number;
 	created_at: number;
@@ -1034,6 +1035,7 @@ type AgentSearchEvent = {
 	file_ext?: string;
 	scope?: string;
 	search_mode?: string;
+	search_target?: string;
 	result_count?: number;
 	results?: any[];
 };
@@ -1087,6 +1089,72 @@ function execFileResult(command: string, args: string[], cwd: string): Promise<{
 	});
 }
 
+// Read the raw content of a file at a given git ref (untrimmed, larger buffer
+// for source files). Returns '' when the path does not exist at that ref.
+function gitShowFileContent(repo: string, ref: string, relPath: string): Promise<string> {
+	return new Promise((resolve) => {
+		cp.execFile(
+			'git',
+			['show', `${ref}:${relPath}`],
+			{ cwd: repo, maxBuffer: 64 * 1024 * 1024 },
+			(error, stdout) => {
+				resolve(error ? '' : stdout.toString());
+			}
+		);
+	});
+}
+
+// Virtual documents backing the left/right sides of the native diff editor.
+// The URI carries the repo, ref, and repo-relative path in its query.
+const OWL_DIFF_SCHEME = 'owlspotlight-diff';
+
+class OwlGitShowContentProvider implements vscode.TextDocumentContentProvider {
+	async provideTextDocumentContent(uri: vscode.Uri): Promise<string> {
+		const params = new URLSearchParams(uri.query);
+		const ref = params.get('ref') || 'HEAD';
+		const repo = params.get('repo') || '';
+		const relPath = params.get('path') || '';
+		if (!repo || !relPath) {
+			return '';
+		}
+		return gitShowFileContent(repo, ref, relPath);
+	}
+}
+
+function buildGitShowUri(repo: string, ref: string, relPath: string): vscode.Uri {
+	const query = new URLSearchParams({ ref, repo, path: relPath }).toString();
+	return vscode.Uri.parse(`${OWL_DIFF_SCHEME}:/${relPath}?${query}`);
+}
+
+// Turn a git remote URL + commit hash into a web URL for the commit. Handles
+// scp-style (git@host:owner/repo) and ssh/https/git URLs for the common hosts.
+function buildCommitUrl(remoteUrl: string, hash: string): string | undefined {
+	let remote = (remoteUrl || '').trim();
+	if (!remote) { return undefined; }
+	remote = remote.replace(/\.git$/, '');
+	let host = '';
+	let repoPath = '';
+	const scp = remote.match(/^[^@]+@([^:]+):(.+)$/);
+	if (scp) {
+		host = scp[1];
+		repoPath = scp[2];
+	} else {
+		const m = remote.match(/^(?:ssh|https?|git):\/\/(?:[^@/]+@)?([^/]+)\/(.+)$/);
+		if (m) {
+			host = m[1];
+			repoPath = m[2];
+		}
+	}
+	if (!host || !repoPath) { return undefined; }
+	host = host.replace(/:\d+$/, '');
+	repoPath = repoPath.replace(/^\/+/, '');
+	if (host.toLowerCase().includes('gitlab')) {
+		return `https://${host}/${repoPath}/-/commit/${hash}`;
+	}
+	// GitHub, Gitea, and most other hosts use /commit/<hash>.
+	return `https://${host}/${repoPath}/commit/${hash}`;
+}
+
 async function findWorkspaceFilesByExtension(workspaceFolder: vscode.WorkspaceFolder, fileExt: string): Promise<string[]> {
 	const pattern = new vscode.RelativePattern(workspaceFolder, `**/*${fileExt}`);
 	const files = await vscode.workspace.findFiles(pattern, '**/{node_modules,.git,dist,build,out,coverage,.venv}/**');
@@ -1135,6 +1203,33 @@ async function resolveSearchScopeFiles(
 		return findChangedFilesByExtension(workspaceFolder, fileExt);
 	}
 	return undefined;
+}
+
+async function resolveSearchIncludeFiles(
+	workspaceFolder: vscode.WorkspaceFolder,
+	fileExt: string,
+	scope: SearchScope,
+	searchTarget: SearchTarget
+): Promise<string[] | undefined> {
+	void searchTarget;
+	if (scope === 'changed') {
+		// Git Diff scope is resolved server-side from the selected base/head refs
+		// (both the changed_functions and diff_hunks targets), so no client-side
+		// file scoping is applied here.
+		return undefined;
+	}
+	return resolveSearchScopeFiles(workspaceFolder, fileExt, scope);
+}
+
+function normalizeSearchTarget(value: unknown): SearchTarget {
+	if (value === 'diff_hunks') {
+		return 'diff_hunks';
+	}
+	// Accept the new value and gracefully map the removed legacy "changed lines" value.
+	if (value === 'changed_functions' || value === 'changed_hunks' || value === 'changed') {
+		return 'changed_functions';
+	}
+	return 'functions';
 }
 
 function formatSearchResultLabel(result: any): string {
@@ -1797,6 +1892,95 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                 }
                                 return;
                         }
+                        if (msg.command === 'prepareDiffSearch') {
+                                const workspaceFolders = vscode.workspace.workspaceFolders;
+                                if (!workspaceFolders || workspaceFolders.length === 0) {
+                                        webviewView.webview.postMessage({ type: 'diffPrepareError', message: 'No workspace folder found.' });
+                                        return;
+                                }
+                                const serverPort = await resolveActiveServerPort();
+                                if (serverPort === undefined) {
+                                        webviewView.webview.postMessage({ type: 'diffPrepareError', message: 'OwlSpotlight server is not running.' });
+                                        return;
+                                }
+                                const workspaceFolder = workspaceFolders[0];
+                                const folderPath = workspaceFolder.uri.fsPath;
+                                const fileExt = msg.lang || '.py';
+                                const scope = (msg.scope === 'source' || msg.scope === 'changed') ? msg.scope as SearchScope : 'all';
+                                const searchMode = ['semantic', 'bm25', 'hybrid', 'keyword'].includes(msg.searchMode) ? msg.searchMode : 'semantic';
+                                const searchTarget = normalizeSearchTarget(msg.searchTarget);
+                                const diffBaseRef = typeof msg.diffBaseRef === 'string' ? msg.diffBaseRef.trim() : '';
+                                const diffHeadRef = typeof msg.diffHeadRef === 'string' ? msg.diffHeadRef.trim() : '';
+                                const includeFiles = await resolveSearchIncludeFiles(workspaceFolder, fileExt, scope, searchTarget);
+                                try {
+                                        const res = await fetch(getServerUrl('/prepare_diff_search', serverPort), {
+                                                method: 'POST',
+                                                headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({
+                                                        directory: folderPath,
+                                                        file_ext: fileExt,
+                                                        include_files: includeFiles,
+                                                        search_mode: searchMode,
+                                                        search_target: searchTarget,
+                                                        diff_base_ref: diffBaseRef,
+                                                        diff_head_ref: diffHeadRef,
+                                                        force: !!msg.force
+                                                })
+                                        });
+                                        if (!res.ok) {
+                                                throw new Error(`HTTP ${res.status}`);
+                                        }
+                                        const data: any = await res.json();
+                                        webviewView.webview.postMessage({ type: 'diffPrepared', data });
+                                } catch (error: any) {
+                                        webviewView.webview.postMessage({
+                                                type: 'diffPrepareError',
+                                                message: `Failed to prepare diff search: ${error?.message || String(error)}`
+                                        });
+                                }
+                                return;
+                        }
+                        if (msg.command === 'getGitCommits') {
+                                const workspaceFolders = vscode.workspace.workspaceFolders;
+                                if (!workspaceFolders || workspaceFolders.length === 0) {
+                                        webviewView.webview.postMessage({ type: 'gitCommits', commits: [], error: 'No workspace folder found.' });
+                                        return;
+                                }
+                                const folderPath = workspaceFolders[0].uri.fsPath;
+                                const requestedLimit = typeof msg.limit === 'number' && Number.isFinite(msg.limit) ? Math.floor(msg.limit) : 200;
+                                const limit = Math.min(1000, Math.max(1, requestedLimit));
+                                // Unit separator (0x1f) between fields, record separator (0x1e) between commits.
+                                const fmt = ['%H', '%h', '%P', '%an', '%ar', '%D', '%s'].join('%x1f') + '%x1e';
+                                const out = await execFileText(
+                                        'git',
+                                        // --branches/--remotes/--tags + HEAD draws the graph across branches
+                                        // without pulling in stash entries (refs/stash) like --all would.
+                                        ['log', '--date-order', '--branches', '--remotes', '--tags', 'HEAD', `--max-count=${limit}`, `--pretty=format:${fmt}`],
+                                        folderPath
+                                );
+                                if (!out.trim()) {
+                                        webviewView.webview.postMessage({ type: 'gitCommits', commits: [], error: 'No commits found, or this folder is not a git repository.' });
+                                        return;
+                                }
+                                const commits = out
+                                        .split('\x1e')
+                                        .map((rec) => rec.replace(/^[\r\n]+/, '').trim())
+                                        .filter(Boolean)
+                                        .map((rec) => {
+                                                const [hash, short, parents, author, date, refs, subject] = rec.split('\x1f');
+                                                return {
+                                                        hash: hash || '',
+                                                        short: short || (hash || '').slice(0, 7),
+                                                        parents: (parents || '').split(' ').map((p) => p.trim()).filter(Boolean),
+                                                        author: author || '',
+                                                        date: date || '',
+                                                        refs: (refs || '').split(',').map((r) => r.trim()).filter(Boolean),
+                                                        subject: subject || ''
+                                                };
+                                        });
+                                webviewView.webview.postMessage({ type: 'gitCommits', commits });
+                                return;
+                        }
                         if (msg.command === 'search') {
 				// サーバー起動チェック
 				let serverUp = true;
@@ -1834,18 +2018,16 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				const folderPath = workspaceFolder.uri.fsPath;
 				const scope = (msg.scope === 'source' || msg.scope === 'changed') ? msg.scope as SearchScope : 'all';
 				const searchMode = ['semantic', 'bm25', 'hybrid', 'keyword'].includes(msg.searchMode) ? msg.searchMode : 'semantic';
+				const searchTarget = normalizeSearchTarget(msg.searchTarget);
+				const diffBaseRef = typeof msg.diffBaseRef === 'string' ? msg.diffBaseRef.trim() : '';
+				const diffHeadRef = typeof msg.diffHeadRef === 'string' ? msg.diffHeadRef.trim() : '';
 				const originalQuery = query;
 				if (searchMode !== 'keyword') {
 					query = await translateJapaneseToEnglish(query);
 				}
 				// Always send both original and translated query to Webview for debugging
 				webviewView.webview.postMessage({ type: 'translatedQuery', original: originalQuery, translated: query });
-				const includeFiles = await resolveSearchScopeFiles(workspaceFolder, fileExt, scope);
-				if (scope === 'changed' && includeFiles && includeFiles.length === 0) {
-					webviewView.webview.postMessage({ type: 'results', results: [], folderPath });
-					webviewView.webview.postMessage({ type: 'status', message: `No changed ${fileExt} files found.` });
-					return;
-				}
+				const includeFiles = await resolveSearchIncludeFiles(workspaceFolder, fileExt, scope, searchTarget);
 				webviewView.webview.postMessage({ type: 'status', message: 'Searching...' });
 				const serverPort = await resolveActiveServerPort();
 				if (serverPort === undefined) {
@@ -1856,7 +2038,18 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					const res = await fetch(getServerUrl('/search_functions_simple', serverPort), {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({ directory: folderPath, query, top_k: 30, file_ext: fileExt, include_files: includeFiles, search_mode: searchMode })
+						body: JSON.stringify({
+							directory: folderPath,
+							query,
+							top_k: 30,
+							file_ext: fileExt,
+							include_files: includeFiles,
+							search_mode: searchMode,
+							scope,
+							search_target: searchTarget,
+							diff_base_ref: diffBaseRef,
+							diff_head_ref: diffHeadRef
+						})
 					});
 					const data: any = await res.json();
 					if (data?.cancelled) {
@@ -2057,6 +2250,66 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					vscode.window.showErrorMessage('Could not open file: ' + file);
 				}
 			}
+			if (msg.command === 'openDiff') {
+				const file: string = msg.file;
+				const baseRef = typeof msg.baseRef === 'string' ? msg.baseRef.trim() : '';
+				const headRef = typeof msg.headRef === 'string' ? msg.headRef.trim() : '';
+				const line = Number(msg.line);
+				try {
+					const workspaceFolders = vscode.workspace.workspaceFolders;
+					const repo = workspaceFolders && workspaceFolders.length > 0
+						? workspaceFolders[0].uri.fsPath
+						: path.dirname(file);
+					let relPath = path.relative(repo, file).replace(/\\/g, '/');
+					if (!relPath || relPath.startsWith('..')) {
+						relPath = path.basename(file);
+					}
+					const baseDisplay = baseRef || 'HEAD';
+					const headDisplay = headRef || 'Working Tree';
+					const leftUri = buildGitShowUri(repo, baseDisplay, relPath);
+					const rightUri = headRef ? buildGitShowUri(repo, headRef, relPath) : vscode.Uri.file(file);
+					const title = `${relPath} (${baseDisplay} ↔ ${headDisplay})`;
+					await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title, { preview: true });
+					if (Number.isFinite(line) && line > 0) {
+						const editor = vscode.window.activeTextEditor;
+						if (editor) {
+							const pos = new vscode.Position(Math.max(0, line - 1), 0);
+							editor.selection = new vscode.Selection(pos, pos);
+							editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+						}
+					}
+				} catch (e: any) {
+					vscode.window.showErrorMessage('Could not open diff: ' + (e?.message || String(e)));
+				}
+			}
+			if (msg.command === 'openCommitRemote') {
+				const hash = typeof msg.hash === 'string' ? msg.hash.trim() : '';
+				if (!hash) { return; }
+				try {
+					const workspaceFolders = vscode.workspace.workspaceFolders;
+					const repo = workspaceFolders && workspaceFolders.length > 0
+						? workspaceFolders[0].uri.fsPath
+						: undefined;
+					if (!repo) {
+						vscode.window.showErrorMessage('No workspace folder found.');
+						return;
+					}
+					let remote = (await execFileText('git', ['remote', 'get-url', 'origin'], repo)).trim();
+					if (!remote) {
+						remote = (await execFileText('git', ['remote', 'get-url', 'upstream'], repo)).trim();
+					}
+					const url = buildCommitUrl(remote, hash);
+					if (!url) {
+						vscode.window.showErrorMessage(remote
+							? 'Could not build a commit URL for remote: ' + remote
+							: 'No git remote found for this repository.');
+						return;
+					}
+					await vscode.env.openExternal(vscode.Uri.parse(url));
+				} catch (e: any) {
+					vscode.window.showErrorMessage('Could not open commit: ' + (e?.message || String(e)));
+				}
+			}
 			if (msg.command === 'startServer') {
 				console.log('[OwlSpotlight] startServer command received from Webview');
 				// Webviewからのサーバー起動要求はコマンド経由で実行
@@ -2233,6 +2486,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
       <button id="searchBtn">Search</button>
       <button id="searchOptionsBtn" class="secondary-action" title="Show search options">Options</button>
     </div>
+    <div id="diffRangeBar" class="diff-range-bar" style="display:none;" title="Diff range currently being searched"></div>
     <div class="search-options" id="searchOptions" style="display:none;">
       <details class="option-panel" id="generalPanel">
         <summary>
@@ -2250,7 +2504,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
           <select id="scopeSelect" title="Search scope">
             <option value="all">All</option>
             <option value="source">Source</option>
-            <option value="changed">Changed</option>
+            <option value="changed">Git Diff</option>
           </select>
         </label>
       </details>
@@ -2273,6 +2527,38 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
             <option value="bm25">BM25</option>
             <option value="keyword">Keyword</option>
           </select>
+        </div>
+        <div class="option-row" id="diffViewRow" style="display:none;">
+          <span>Diff view</span>
+          <div class="segmented-control" data-select="searchTargetSelect" role="group" aria-label="Diff view">
+            <button type="button" class="segment-btn active" data-value="changed_functions" title="Search only the functions changed by the selected diff">Functions</button>
+            <button type="button" class="segment-btn" data-value="diff_hunks" title="Show the changed lines as unified diff hunks">Unified diff</button>
+          </div>
+          <select id="searchTargetSelect" title="Diff view" class="hidden-select" aria-hidden="true" tabindex="-1">
+            <option value="changed_functions" selected>Functions</option>
+            <option value="diff_hunks">Unified diff</option>
+          </select>
+        </div>
+        <div class="diff-options" id="diffOptions" style="display:none;">
+          <label>
+            <span>Base</span>
+            <input id="diffBaseRefInput" type="text" placeholder="main, origin/main, tag... (blank = HEAD)" />
+          </label>
+          <label>
+            <span>Head</span>
+            <input id="diffHeadRefInput" type="text" placeholder="HEAD or branch (blank = working tree)" />
+          </label>
+          <div class="diff-actions">
+            <button type="button" id="refreshDiffSearchBtn" class="secondary-action">Refresh Diff</button>
+            <span id="diffStatus" class="diff-status"></span>
+          </div>
+          <div class="commit-graph-wrap" id="commitGraphWrap">
+            <div class="commit-graph-toolbar">
+              <span class="commit-graph-hint">Click = Base · Shift+Click = Head</span>
+              <button type="button" id="reloadCommitsBtn" class="secondary-action">Reload commits</button>
+            </div>
+            <div class="commit-graph" id="commitGraph"><div class="commit-graph-empty">Loading commits…</div></div>
+          </div>
         </div>
         <div class="option-row">
           <span>Type</span>
@@ -2569,6 +2855,11 @@ export function activate(context: vscode.ExtensionContext) {
 		watcher.onDidDelete(scheduleIncrementalIndex, undefined, context.subscriptions);
 		context.subscriptions.push(watcher);
 	}
+
+	// git の任意リビジョンの内容を仮想ドキュメントとして提供（ネイティブ diff エディタ用）
+	context.subscriptions.push(
+		vscode.workspace.registerTextDocumentContentProvider(OWL_DIFF_SCHEME, new OwlGitShowContentProvider())
+	);
 
 	// サイドバーWebviewViewProvider登録
 	const sidebarProvider = new OwlspotlightSidebarProvider(context, owlOutputChannel);
