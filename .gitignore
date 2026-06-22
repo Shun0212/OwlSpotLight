@@ -8,3 +8,4 @@ model_server/.owl_index
 model_server/.env
 **/__pycache__
 *.pyc
+.claude/settings.local.json

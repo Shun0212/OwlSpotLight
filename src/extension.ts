@@ -1173,7 +1173,9 @@ function buildAgentSetupPayload(
 			}
 		}
 	};
-	const codexCommand = [
+	const quoteCommandParts = (parts: string[]): string =>
+		parts.map(part => part.includes(' ') ? `"${part.replace(/"/g, '\\"')}"` : part).join(' ');
+	const codexCommand = quoteCommandParts([
 		'codex',
 		'mcp',
 		'add',
@@ -1185,7 +1187,22 @@ function buildAgentSetupPayload(
 		'--',
 		mcpPythonCommand,
 		mcpServerPath
-	].map(part => part.includes(' ') ? `"${part.replace(/"/g, '\\"')}"` : part).join(' ');
+	]);
+	const claudeCommand = quoteCommandParts([
+		'claude',
+		'mcp',
+		'add',
+		'owlspotlight',
+		'--scope',
+		'user',
+		'--env',
+		`OWLSPOTLIGHT_SERVER_URL=${serverUrl}`,
+		'--env',
+		`OWLSPOTLIGHT_WORKSPACE=${workspaceRoot}`,
+		'--',
+		mcpPythonCommand,
+		mcpServerPath
+	]);
 	const instructions = [
 		'Use OwlSpotlight before grep/ripgrep for local code search when looking for functions, methods, routes, handlers, storage logic, auth/session logic, or code blocks.',
 		`Workspace: ${workspaceRoot}`,
@@ -1193,7 +1210,10 @@ function buildAgentSetupPayload(
 		'Codex CLI setup:',
 		`- ${codexCommand}`,
 		'- Restart Codex after adding the MCP server. /mcp should show owlspotlight; project .mcp.json alone is not enough for Codex CLI.',
-		'- Claude Code support is planned in the next few days.',
+		'Claude Code setup:',
+		`- ${claudeCommand}`,
+		'- Or commit the generated .mcp.json to the repo root; Claude Code loads project-scoped MCP servers from it automatically.',
+		'- Restart Claude Code (or run /mcp) after registering so owlspotlight appears in the tool list.',
 		'Available MCP tools:',
 		'- owlspotlight.search_code: semantic/BM25/hybrid/keyword search over this workspace. You can call it with only query; directory defaults to this workspace, file_ext defaults to auto, search_mode defaults to semantic, and top_k defaults to 30. Use include_globs/exclude_globs to scope noisy repos, for example {"include_globs":["src/**/*.ts"],"exclude_globs":["tests/**"]}.',
 		'- owlspotlight.grep_repo: repository-wide grep for exact identifiers, call sites, tests, and docs after semantic discovery. Use it for OR patterns like "ClassA|ClassB|torch.multinomial"; patterns containing | are treated as regex alternation when regex is omitted. Pass the same include_globs/exclude_globs when you want the same scope as search_code.',
@@ -1212,7 +1232,7 @@ function buildAgentSetupPayload(
 		'4. Call owlspotlight.mark_results_used for the ranks or grep locations you actually referenced so OwlSpotlight preserves the evidence trail.',
 		'5. Do not wait for human fallback. Use the mirrored sidebar only as observability unless the user explicitly asks for review.'
 	].join('\n');
-	return { mcpConfig, instructions, codexCommand, mcpPythonCommand, mcpServerPath };
+	return { mcpConfig, instructions, codexCommand, claudeCommand, mcpPythonCommand, mcpServerPath };
 }
 
 function mergeOwlspotlightMcpConfig(existing: any, owlspotlightEntry: any): any {
@@ -1265,6 +1285,47 @@ async function removeCodexMcp(workspaceRoot: string): Promise<boolean> {
 	return true;
 }
 
+async function registerClaudeMcp(
+	workspaceRoot: string,
+	serverUrl: string,
+	mcpPythonCommand: string,
+	mcpServerPath: string
+): Promise<boolean> {
+	await execFileResult('claude', ['mcp', 'remove', 'owlspotlight', '--scope', 'user'], workspaceRoot);
+	const result = await execFileResult(
+		'claude',
+		[
+			'mcp',
+			'add',
+			'owlspotlight',
+			'--scope',
+			'user',
+			'--env',
+			`OWLSPOTLIGHT_SERVER_URL=${serverUrl}`,
+			'--env',
+			`OWLSPOTLIGHT_WORKSPACE=${workspaceRoot}`,
+			'--',
+			mcpPythonCommand,
+			mcpServerPath
+		],
+		workspaceRoot
+	);
+	if (!result.ok) {
+		vscode.window.showErrorMessage(result.output || 'Failed to register OwlSpotlight MCP with Claude Code. Is the claude CLI installed and on PATH?');
+		return false;
+	}
+	return true;
+}
+
+async function removeClaudeMcp(workspaceRoot: string): Promise<boolean> {
+	const result = await execFileResult('claude', ['mcp', 'remove', 'owlspotlight', '--scope', 'user'], workspaceRoot);
+	if (!result.ok) {
+		vscode.window.showErrorMessage(result.output || 'Failed to remove OwlSpotlight MCP from Claude Code.');
+		return false;
+	}
+	return true;
+}
+
 async function generateAgentSetup(context: vscode.ExtensionContext): Promise<void> {
 	const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 	if (!workspaceRoot) {
@@ -1273,7 +1334,7 @@ async function generateAgentSetup(context: vscode.ExtensionContext): Promise<voi
 	}
 	const serverPort = await resolveActiveServerPort();
 	const serverUrl = getServerBaseUrl(serverPort ?? activeServerPort);
-	const { mcpConfig, instructions, codexCommand, mcpPythonCommand, mcpServerPath } = buildAgentSetupPayload(context, workspaceRoot, serverUrl);
+	const { mcpConfig, instructions, codexCommand, claudeCommand, mcpPythonCommand, mcpServerPath } = buildAgentSetupPayload(context, workspaceRoot, serverUrl);
 	const mcpJson = JSON.stringify(mcpConfig, null, 2);
 	const combined = [
 		'Agent instructions:',
@@ -1282,6 +1343,9 @@ async function generateAgentSetup(context: vscode.ExtensionContext): Promise<voi
 		'Codex CLI command:',
 		codexCommand,
 		'',
+		'Claude Code command:',
+		claudeCommand,
+		'',
 		'.mcp.json:',
 		mcpJson
 	].join('\n');
@@ -1289,13 +1353,16 @@ async function generateAgentSetup(context: vscode.ExtensionContext): Promise<voi
 		[
 			{ label: 'Register Codex MCP globally', value: 'registerCodex' },
 			{ label: 'Remove Codex MCP registration', value: 'removeCodex' },
+			{ label: 'Register Claude Code MCP (user scope)', value: 'registerClaude' },
+			{ label: 'Remove Claude Code MCP registration', value: 'removeClaude' },
 			{ label: 'Create/update workspace .mcp.json', value: 'write' },
 			{ label: 'Copy Codex CLI command to clipboard', value: 'copyCodex' },
+			{ label: 'Copy Claude Code command to clipboard', value: 'copyClaude' },
 			{ label: 'Copy .mcp.json to clipboard', value: 'copyMcp' },
 			{ label: 'Copy agent instructions to clipboard', value: 'copyInstructions' },
 			{ label: 'Copy both to clipboard', value: 'copyBoth' }
 		],
-		{ placeHolder: 'Register OwlSpotlight for Codex or generate MCP setup for Cursor and similar clients' }
+		{ placeHolder: 'Register OwlSpotlight for Codex or Claude Code, or generate MCP setup for Cursor and similar clients' }
 	);
 	if (!pick) {
 		return;
@@ -1312,6 +1379,21 @@ async function generateAgentSetup(context: vscode.ExtensionContext): Promise<voi
 		const removed = await removeCodexMcp(workspaceRoot);
 		if (removed) {
 			vscode.window.showInformationMessage('Removed OwlSpotlight MCP from Codex CLI. Restart Codex if a session is already open.');
+		}
+		return;
+	}
+	if (pick.value === 'registerClaude') {
+		const registered = await registerClaudeMcp(workspaceRoot, serverUrl, mcpPythonCommand, mcpServerPath);
+		if (registered) {
+			await vscode.env.clipboard.writeText(instructions);
+			vscode.window.showInformationMessage('Registered OwlSpotlight MCP with Claude Code. Restart Claude Code and run /mcp to verify.');
+		}
+		return;
+	}
+	if (pick.value === 'removeClaude') {
+		const removed = await removeClaudeMcp(workspaceRoot);
+		if (removed) {
+			vscode.window.showInformationMessage('Removed OwlSpotlight MCP from Claude Code. Restart Claude Code if a session is already open.');
 		}
 		return;
 	}
@@ -1336,6 +1418,8 @@ async function generateAgentSetup(context: vscode.ExtensionContext): Promise<voi
 		? mcpJson
 		: pick.value === 'copyCodex'
 			? codexCommand
+			: pick.value === 'copyClaude'
+			? claudeCommand
 			: pick.value === 'copyInstructions'
 			? instructions
 			: combined;
