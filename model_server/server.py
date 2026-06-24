@@ -690,6 +690,9 @@ class DiffSearchState:
         self.signature: str = ""
         self.embedding_signature: str = ""
         self.hunks: list[dict] = []
+        # The searched/indexed unit: one entry per (commit, file). Each unit's
+        # text is the file's full git-diff, so embedding happens at the file level.
+        self.units: list[dict] = []
         self.file_count: int = 0
         self.embeddings: Optional[np.ndarray] = None
         self.faiss_index: Optional[faiss.IndexFlatL2] = None
@@ -703,9 +706,10 @@ class DiffSearchState:
         self.faiss_index = None
         self.index_embedding_ms = 0.0
 
-    def replace_hunks(self, signature: str, hunks: list[dict], file_count: int, hunk_build_ms: float):
+    def replace_hunks(self, signature: str, hunks: list[dict], units: list[dict], file_count: int, hunk_build_ms: float):
         self.signature = signature
         self.hunks = hunks
+        self.units = units
         self.file_count = file_count
         self.hunk_build_ms = hunk_build_ms
         self.last_prepared = time.time()
@@ -985,6 +989,22 @@ def format_line_ranges(ranges: list[tuple[int, int]]) -> str:
     return ", ".join(str(start) if start == end else f"{start}-{end}" for start, end in ranges)
 
 
+def diff_file_header(old_path: Optional[str], new_path: Optional[str]) -> str:
+    """Reconstruct a git-style file header (``diff --git`` / ``---`` / ``+++``)
+    for a hunk so the text fed to the embedding model matches real ``git diff``
+    output, which is the format the model was trained on. ``None`` paths (added
+    or deleted files) render as ``/dev/null`` like git does."""
+    a_path = old_path or new_path or ""
+    b_path = new_path or old_path or ""
+    old_disp = f"a/{old_path}" if old_path else "/dev/null"
+    new_disp = f"b/{new_path}" if new_path else "/dev/null"
+    return "\n".join([
+        f"diff --git a/{a_path} b/{b_path}",
+        f"--- {old_disp}",
+        f"+++ {new_disp}",
+    ])
+
+
 def diff_signature(
     directory: str,
     file_ext: str,
@@ -1094,6 +1114,14 @@ def collect_diff_hunks(
             end_line = max(first_line, new_line - 1)
             changed_code = "\n".join(changed_lines).rstrip()
             unified_diff = "\n".join([hunk_header, *diff_lines]).rstrip()
+            # Text actually fed to embedding / BM25 / keyword search: a git-diff
+            # formatted hunk (file header + @@ header + +/- and context lines)
+            # so it matches the format the model was trained on.
+            search_diff = "\n".join([
+                diff_file_header(current_old_path, current_new_path),
+                hunk_header,
+                *diff_lines,
+            ]).rstrip()
             range_bits = []
             if added_ranges:
                 range_bits.append("+" + format_line_ranges(added_ranges))
@@ -1109,12 +1137,14 @@ def collect_diff_hunks(
                 "file": file_path,
                 "file_path": file_path,
                 "path": str(rel_path),
+                "diff_old_path": current_old_path,
+                "diff_new_path": current_new_path,
                 "lineno": first_line,
                 "line_number": first_line,
                 "end_lineno": end_line,
                 "raw_code": changed_code,
                 "code": changed_code,
-                "search_text": changed_code,
+                "search_text": search_diff,
                 "changed_code": changed_code,
                 "diff_code": unified_diff,
                 "diff_compare": display_diff_compare(base_ref, head_ref),
@@ -1356,6 +1386,77 @@ def keyword_search_matches(functions: list[dict], query: str) -> dict[int, list[
     return matches
 
 
+def build_file_diff_units(hunks: list[dict]) -> list[dict]:
+    """Collapse per-hunk diff entries into one unit per (commit, file). Each
+    unit's text is the file's full git-diff (a single file header followed by all
+    of that file's @@ hunks), matching real ``git diff`` output, so embedding and
+    semantic matching happen at the file level. A file changed by several commits
+    in the range yields one unit per commit."""
+    order: list[tuple[str, str]] = []
+    groups: dict[tuple[str, str], list[dict]] = {}
+    for hunk in hunks:
+        commit_key = hunk.get("commit_hash") or hunk.get("commit_subject") or ""
+        rel = str(hunk.get("path") or hunk.get("file_path") or "")
+        key = (commit_key, rel)
+        bucket = groups.get(key)
+        if bucket is None:
+            bucket = []
+            groups[key] = bucket
+            order.append(key)
+        bucket.append(hunk)
+
+    units: list[dict] = []
+    for key in order:
+        bucket = groups[key]
+        first = bucket[0]
+        rel = str(first.get("path") or "")
+        # One file header + every @@ hunk body, exactly like git diff for a file.
+        header = diff_file_header(first.get("diff_old_path"), first.get("diff_new_path"))
+        bodies = [str(h.get("diff_code") or "") for h in bucket if h.get("diff_code")]
+        file_diff = "\n".join([header, *bodies]).rstrip()
+        changed_code = "\n".join(
+            str(h.get("changed_code") or "") for h in bucket if h.get("changed_code")
+        ).rstrip()
+        added_ranges: list[tuple[int, int]] = []
+        removed_ranges: list[tuple[int, int]] = []
+        additions = 0
+        deletions = 0
+        for h in bucket:
+            additions += int(h.get("additions") or 0)
+            deletions += int(h.get("deletions") or 0)
+            added_ranges.extend((int(a), int(b)) for a, b in (h.get("added_ranges") or []))
+            removed_ranges.extend((int(a), int(b)) for a, b in (h.get("removed_ranges") or []))
+        range_bits = []
+        if added_ranges:
+            range_bits.append("+" + format_line_ranges(added_ranges))
+        if removed_ranges:
+            range_bits.append("-" + format_line_ranges(removed_ranges))
+        range_label = f" ({', '.join(range_bits)})" if range_bits else ""
+        first_line = first.get("lineno") or 1
+        end_line = max((int(h.get("end_lineno") or 0) for h in bucket), default=first_line) or first_line
+
+        unit = dict(first)
+        unit.update({
+            "name": f"Diff hunk: {rel}{range_label}",
+            "function_name": f"Diff hunk: {rel}{range_label}",
+            "raw_code": file_diff,
+            "code": file_diff,
+            "search_text": file_diff,
+            "diff_code": file_diff,
+            "changed_code": changed_code,
+            "lineno": first_line,
+            "line_number": first_line,
+            "end_lineno": end_line,
+            "added_ranges": added_ranges,
+            "removed_ranges": removed_ranges,
+            "additions": additions,
+            "deletions": deletions,
+            "file_hunk_count": len(bucket),
+        })
+        units.append(unit)
+    return units
+
+
 def diff_result_for_target(hunk: dict, search_target: str) -> dict:
     # Only the "diff_hunks" (unified diff) target reaches this code path now;
     # the legacy "changed lines" target was removed.
@@ -1458,9 +1559,11 @@ def prepare_diff_search_index(
             diff_base_ref,
             diff_head_ref,
         )
+        units = build_file_diff_units(hunks)
         diff_search_state.replace_hunks(
             signature,
             hunks,
+            units,
             file_count,
             (time.perf_counter() - start) * 1000,
         )
@@ -1478,7 +1581,7 @@ def prepare_diff_search_index(
             and diff_search_state.faiss_index is not None
         )
         if not embedding_cache_hit:
-            texts = [str(hunk.get("search_text") or "") for hunk in diff_search_state.hunks]
+            texts = [str(unit.get("search_text") or "") for unit in diff_search_state.units]
             if texts:
                 progress.raise_if_cancelled()
                 start = time.perf_counter()
@@ -1497,6 +1600,7 @@ def prepare_diff_search_index(
 
     return {
         "num_diff_hunks": len(diff_search_state.hunks),
+        "num_diff_units": len(diff_search_state.units),
         "num_files": diff_search_state.file_count,
         "diff_cache_hit": hunk_cache_hit,
         "diff_embedding_cache_hit": embedding_cache_hit,
@@ -1513,12 +1617,15 @@ def prepare_diff_search_index(
 def search_diff_hunks(req: SearchFunctionsSimpleRequest) -> dict:
     # This path now only serves the unified-diff ("diff_hunks") view.
     search_target = "diff_hunks"
-    # Diff search defaults to hybrid: semantic over the changed code combined
-    # with BM25 over each hunk's commit message. The plain "semantic" default
-    # coming from the shared mode selector is promoted to hybrid here; an
-    # explicit bm25/hybrid/keyword choice is still honored.
-    requested_mode = req.search_mode if req.search_mode in {"semantic", "bm25", "hybrid", "keyword"} else "hybrid"
-    search_mode = "hybrid" if requested_mode == "semantic" else requested_mode
+    # The shared mode selector is honored directly so every option works in diff
+    # search:
+    #   semantic -> pure semantic over the git-diff text (the "diff + semantic
+    #               only" option, no commit-message BM25 mixed in)
+    #   hybrid   -> semantic over the diff text + BM25 over the commit message
+    #   bm25     -> BM25 over the commit message
+    #   keyword  -> literal keyword match over the diff text
+    # When the caller sends no/invalid mode, fall back to the diff-tuned hybrid.
+    search_mode = req.search_mode if req.search_mode in {"semantic", "bm25", "hybrid", "keyword"} else "hybrid"
     # Diff hybrid weighting: 60% semantic (changed code) / 40% BM25 (commit
     # message). The shared request default (0.75) is not a deliberate per-search
     # choice, so use the diff-tuned weight unless the caller explicitly overrode it.
@@ -1535,9 +1642,9 @@ def search_diff_hunks(req: SearchFunctionsSimpleRequest) -> dict:
         req.diff_head_ref,
         req.force_diff_refresh,
     )
-    hunks = diff_search_state.hunks
+    units = diff_search_state.units
     needs_embeddings = search_mode in {"semantic", "hybrid"}
-    if not hunks or (needs_embeddings and diff_search_state.faiss_index is None):
+    if not units or (needs_embeddings and diff_search_state.faiss_index is None):
         return {
             "results": [],
             "message": "No changed hunks found.",
@@ -1548,63 +1655,52 @@ def search_diff_hunks(req: SearchFunctionsSimpleRequest) -> dict:
             **prepared,
         }
 
-    # ---- The search unit is the commit. Group hunks by the commit that
-    # introduced them; each commit yields a single result. ----
+    # ---- The scored element is one file per commit (each unit is a file's whole
+    # diff, embedded together). Units are grouped back by their commit; a commit's
+    # score is the MAX over its files, and the best-matching file represents it.
+    # Each commit still yields a single result. ----
     commit_order: list[str] = []
-    commit_to_hunks: dict[str, list[int]] = {}
-    hunk_commit_key: list[str] = []
-    for idx, hunk in enumerate(hunks):
-        key = hunk.get("commit_hash") or hunk.get("commit_subject") or f"__file__{hunk.get('file_path')}"
-        bucket = commit_to_hunks.get(key)
+    commit_to_units: dict[str, list[int]] = {}
+    unit_commit_key: list[str] = []
+    for idx, unit in enumerate(units):
+        key = unit.get("commit_hash") or unit.get("commit_subject") or f"__file__{unit.get('file_path')}"
+        bucket = commit_to_units.get(key)
         if bucket is None:
             bucket = []
-            commit_to_hunks[key] = bucket
+            commit_to_units[key] = bucket
             commit_order.append(key)
         bucket.append(idx)
-        hunk_commit_key.append(key)
+        unit_commit_key.append(key)
 
     def build_commit_result(rank: int, key: str, hybrid_score, semantic_score: float,
                             bm25_score: float, rep_index: int, extra: Optional[dict] = None,
                             score_by_index: Optional[dict] = None) -> dict:
-        # Represent the commit with its best-matching hunk so the existing diff
-        # UI (snippet, click-to-open) keeps working, then layer commit-level
-        # scores and a summary of every file/hunk the commit touched on top.
-        item = diff_result_for_target(hunks[rep_index], search_target)
-        hunk_indices = commit_to_hunks[key]
+        # Represent the commit with its best-matching file so the existing diff UI
+        # (snippet, click-to-open) keeps working, then layer commit-level scores
+        # and one entry per file the commit touched on top.
+        item = diff_result_for_target(units[rep_index], search_target)
+        unit_indices = commit_to_units[key]
         scores = score_by_index or {}
-        rep_rel = str(hunks[rep_index].get("path") or hunks[rep_index].get("file_path") or "")
-        # Group the commit's hunks by file: one entry per file, jumping to that
-        # file's best-matching hunk and summing its change counts.
-        file_order: list[str] = []
-        by_file: dict[str, dict] = {}
-        for i in hunk_indices:
-            source = hunks[i]
+        rep_rel = str(units[rep_index].get("path") or units[rep_index].get("file_path") or "")
+        files_grouped = []
+        total_hunks = 0
+        for i in unit_indices:
+            source = units[i]
             rel = str(source.get("path") or source.get("file_path") or "")
-            score = scores.get(i, 0.0)
-            entry = by_file.get(rel)
-            if entry is None:
-                entry = {
-                    "path": source.get("path"),
-                    "file_path": source.get("file_path"),
-                    "lineno": source.get("lineno"),
-                    "additions": 0,
-                    "deletions": 0,
-                    "hunk_count": 0,
-                    "score": score,
-                    "is_representative": rel == rep_rel,
-                }
-                by_file[rel] = entry
-                file_order.append(rel)
-            entry["additions"] += source.get("additions") or 0
-            entry["deletions"] += source.get("deletions") or 0
-            entry["hunk_count"] += 1
-            if score >= entry["score"]:
-                # Jump to the highest-scoring hunk within the file.
-                entry["score"] = score
-                entry["lineno"] = source.get("lineno")
-        commit_files_grouped = [by_file[rel] for rel in file_order]
-        # Most relevant file first (best hunk's semantic score).
-        commit_files_grouped.sort(key=lambda f: f["score"], reverse=True)
+            file_hunks = source.get("file_hunk_count") or 1
+            total_hunks += file_hunks
+            files_grouped.append({
+                "path": source.get("path"),
+                "file_path": source.get("file_path"),
+                "lineno": source.get("lineno"),
+                "additions": source.get("additions") or 0,
+                "deletions": source.get("deletions") or 0,
+                "hunk_count": file_hunks,
+                "score": scores.get(i, 0.0),
+                "is_representative": rel == rep_rel,
+            })
+        # Most relevant file first (its file-level semantic score).
+        files_grouped.sort(key=lambda f: f["score"], reverse=True)
         item.update({
             "rank": rank,
             "score": hybrid_score,
@@ -1613,22 +1709,22 @@ def search_diff_hunks(req: SearchFunctionsSimpleRequest) -> dict:
             "bm25_score": bm25_score,
             "hybrid_score": hybrid_score,
             "search_mode": search_mode,
-            "commit_file_count": len(file_order),
-            "commit_hunk_count": len(hunk_indices),
-            "commit_files": file_order,
-            "commit_hunks": commit_files_grouped,
+            "commit_file_count": len(unit_indices),
+            "commit_hunk_count": total_hunks,
+            "commit_files": [units[i].get("path") for i in unit_indices],
+            "commit_hunks": files_grouped,
         })
         if extra:
             item.update(extra)
         return item
 
     if search_mode == "keyword":
-        matches = keyword_search_matches(hunks, req.query)
+        matches = keyword_search_matches(units, req.query)
         commit_match: dict[str, tuple[int, list[str]]] = {}
-        for hunk_index in sorted(matches):
-            key = hunk_commit_key[hunk_index]
+        for unit_index in sorted(matches):
+            key = unit_commit_key[unit_index]
             if key not in commit_match:
-                commit_match[key] = (hunk_index, matches[hunk_index])
+                commit_match[key] = (unit_index, matches[unit_index])
         found = []
         for rank, key in enumerate(list(commit_match)[:req.top_k], start=1):
             rep_index, kws = commit_match[key]
@@ -1640,7 +1736,7 @@ def search_diff_hunks(req: SearchFunctionsSimpleRequest) -> dict:
             }))
         return {
             "results": found,
-            "num_functions": len(hunks),
+            "num_functions": len(units),
             "num_commits": len(commit_order),
             "num_files": prepared["num_files"],
             "search_mode": search_mode,
@@ -1649,23 +1745,24 @@ def search_diff_hunks(req: SearchFunctionsSimpleRequest) -> dict:
             **prepared,
         }
 
+    # Semantic score per file unit (the faiss index is built over file diffs).
     semantic_scores: dict[int, float] = {}
     semantic_distances: dict[int, float] = {}
     if search_mode in {"semantic", "hybrid"}:
         progress.raise_if_cancelled()
         query_emb = encode_code([req.query], batch_size=1, show_progress=False, input_type="query")
-        # Score every hunk so each commit's score can be aggregated from its hunks.
-        semantic_k = len(hunks)
+        # Score every file unit so each commit's score can be taken as the max.
+        semantic_k = len(units)
         D, I = diff_search_state.faiss_index.search(query_emb, semantic_k)
         valid_distances = [
             float(distance)
             for distance, idx in zip(D[0], I[0])
-            if 0 <= idx < len(hunks) and np.isfinite(distance)
+            if 0 <= idx < len(units) and np.isfinite(distance)
         ]
         min_distance = min(valid_distances) if valid_distances else 0.0
         max_distance = max(valid_distances) if valid_distances else 0.0
         for distance, idx in zip(D[0], I[0]):
-            if 0 <= idx < len(hunks):
+            if 0 <= idx < len(units):
                 distance_value = float(distance)
                 if max_distance > min_distance and np.isfinite(distance_value):
                     score = max(0.0, min(1.0, 1.0 - ((distance_value - min_distance) / (max_distance - min_distance))))
@@ -1674,14 +1771,14 @@ def search_diff_hunks(req: SearchFunctionsSimpleRequest) -> dict:
                 semantic_scores[int(idx)] = score
                 semantic_distances[int(idx)] = distance_value
 
-    # A commit's semantic score is the max over its hunks (its best-matching
-    # change), and that hunk represents the commit in the results.
+    # A commit's semantic score is the max over its files (its best-matching file),
+    # and that file represents the commit in the results.
     commit_semantic: dict[str, float] = {}
     commit_rep: dict[str, int] = {}
     for key in commit_order:
-        best_index = commit_to_hunks[key][0]
+        best_index = commit_to_units[key][0]
         best_score = semantic_scores.get(best_index, 0.0)
-        for i in commit_to_hunks[key]:
+        for i in commit_to_units[key]:
             score = semantic_scores.get(i, 0.0)
             if score >= best_score:
                 best_score = score
@@ -1691,7 +1788,7 @@ def search_diff_hunks(req: SearchFunctionsSimpleRequest) -> dict:
 
     # BM25 runs against the commit message (one document per commit).
     if search_mode in {"bm25", "hybrid"}:
-        commit_messages = [hunks[commit_to_hunks[key][0]].get("commit_message") or "" for key in commit_order]
+        commit_messages = [units[commit_to_units[key][0]].get("commit_message") or "" for key in commit_order]
         raw_bm25 = _bm25_scores([tokenize_for_bm25(message) for message in commit_messages], req.query)
         commit_bm25 = {commit_order[ci]: score for ci, score in raw_bm25.items()}
     else:
@@ -1721,7 +1818,7 @@ def search_diff_hunks(req: SearchFunctionsSimpleRequest) -> dict:
 
     found = []
     for rank, (hybrid_score, semantic_score, bm25_score, key) in enumerate(ranked[:req.top_k], start=1):
-        rep_index = commit_rep.get(key, commit_to_hunks[key][0])
+        rep_index = commit_rep.get(key, commit_to_units[key][0])
         found.append(build_commit_result(
             rank, key, hybrid_score, semantic_score, bm25_score, rep_index,
             extra={"distance": semantic_distances.get(rep_index)},
@@ -1729,7 +1826,7 @@ def search_diff_hunks(req: SearchFunctionsSimpleRequest) -> dict:
         ))
     return {
         "results": found,
-        "num_functions": len(hunks),
+        "num_functions": len(units),
         "num_commits": len(commit_order),
         "num_files": prepared["num_files"],
         "search_mode": search_mode,
