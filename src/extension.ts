@@ -1592,6 +1592,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 	private _agentSearchPoll?: NodeJS.Timeout;
 	private _indexProgressPoll?: NodeJS.Timeout;
 	private _lastAgentSearchEventId = 0;
+	private readonly _webviewSessionId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 
 	constructor(
 		private readonly _context: vscode.ExtensionContext,
@@ -1699,7 +1700,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 			webviewView.webview.postMessage({ type: 'serverStatus', online: false, message: 'Checking setup...' });
 			if (!fs.existsSync(pythonBin)) {
 				webviewView.webview.postMessage({ type: 'status', message: 'Setting up Python environment...' });
-				const setupResult = await vscode.commands.executeCommand<boolean | undefined>('owlspotlight.setupEnv');
+				const setupResult = await vscode.commands.executeCommand<boolean | undefined>('owlspotlight.setupEnv', { startServerAfterSetup: false });
 				if (setupResult === false || !fs.existsSync(pythonBin)) {
 					webviewView.webview.postMessage({ type: 'error', message: 'Environment setup did not complete. Check the OwlSpotlight OUTPUT panel.' });
 					return false;
@@ -2648,6 +2649,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
   <script nonce="${nonce}">
     window.HELP_HTML_URI = "${helpUri}";
     window.OWL_REPO_URL = "https://github.com/Shun0212/owlspotlight";
+    window.OWL_WEBVIEW_SESSION_ID = "${this._webviewSessionId}";
   </script>
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
@@ -3030,6 +3032,7 @@ export function activate(context: vscode.ExtensionContext) {
 		// サーバーが既に起動中かチェック
 		const existingServerPort = await resolveActiveServerPort();
 		if (existingServerPort !== undefined) {
+			sidebarProvider.notifyServerStatus(true, existingServerPort);
 			vscode.window.showInformationMessage(`Server is already running on port ${existingServerPort}.`);
 			return;
 		}
@@ -3096,6 +3099,8 @@ export function activate(context: vscode.ExtensionContext) {
 			const launchTarget = await findLaunchServerPort();
 			if (launchTarget.reusedExisting) {
 				isServerStarting = false;
+				activeServerPort = launchTarget.port;
+				sidebarProvider.notifyServerStatus(true, launchTarget.port);
 				vscode.window.showInformationMessage(`Server is already running on port ${launchTarget.port}.`);
 				return;
 			}
@@ -3216,6 +3221,7 @@ export function activate(context: vscode.ExtensionContext) {
 					clearServerStartupPoll();
 					activeServerPort = startupPort;
 					isServerStarting = false;
+					sidebarProvider.notifyServerStatus(true, startupPort);
 					vscode.window.showInformationMessage(`OwlSpotlight server is ready on port ${startupPort}.`);
 				}
 			} catch {
@@ -3274,12 +3280,13 @@ export function activate(context: vscode.ExtensionContext) {
 	// --- 環境セットアップコマンドを追加 ---
 	let isSetupRunning = false;
 	let setupProcess: cp.ChildProcess | undefined;
-	const setupEnvDisposable = vscode.commands.registerCommand('owlspotlight.setupEnv', async () => {
+	const setupEnvDisposable = vscode.commands.registerCommand('owlspotlight.setupEnv', async (options?: { startServerAfterSetup?: boolean }) => {
 		if (isSetupRunning) {
 			vscode.window.showInformationMessage('Environment setup is already running. Please wait for it to finish.');
 			owlOutputChannel.show(true);
 			return;
 		}
+		const startServerAfterSetup = options?.startServerAfterSetup !== false;
 		const config = vscode.workspace.getConfiguration('owlspotlight');
 		const envSettings = config.get<any>('environmentSettings', {});
 		const autoRemoveVenv = envSettings.autoRemoveVenv || false;
@@ -3391,7 +3398,10 @@ export function activate(context: vscode.ExtensionContext) {
 				isSetupRunning = false;
 				setupProcess = undefined;
 				if (code === 0) {
-					vscode.window.showInformationMessage('OwlSpotlight Python environment setup completed. You can now start the server.');
+					const message = startServerAfterSetup
+						? 'OwlSpotlight Python environment setup completed. Starting the server...'
+						: 'OwlSpotlight Python environment setup completed.';
+					vscode.window.showInformationMessage(message);
 					resolve(true);
 				} else {
 					vscode.window.showErrorMessage(`OwlSpotlight environment setup failed (exit code: ${code}). Check the OUTPUT panel for details.`);
@@ -3410,7 +3420,19 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.window.showInformationMessage(
 			`OwlSpotlight uv environment setup started with ${torchChoice.label}. Progress is shown in the OUTPUT panel.`
 		);
-		return setupCompleted;
+		const setupSucceeded = await setupCompleted;
+		if (setupSucceeded && startServerAfterSetup) {
+			const serverPort = await resolveActiveServerPort();
+			if (serverPort !== undefined) {
+				activeServerPort = serverPort;
+				sidebarProvider.notifyServerStatus(true, serverPort);
+				vscode.window.showInformationMessage(`OwlSpotlight server is already running on port ${serverPort}.`);
+			} else {
+				owlOutputChannel.appendLine('[OwlSpotlight] Setup completed; starting server automatically...');
+				await vscode.commands.executeCommand('owlspotlight.startServer');
+			}
+		}
+		return setupSucceeded;
 		});
 	context.subscriptions.push(setupEnvDisposable);
 

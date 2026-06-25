@@ -1,6 +1,9 @@
 // main.js
 window.onload = function() {
     const vscode = acquireVsCodeApi();
+    const webviewSessionId = typeof window.OWL_WEBVIEW_SESSION_ID === 'string'
+        ? window.OWL_WEBVIEW_SESSION_ID
+        : '';
 
     // グローバル変数で現在の検索クエリと統計データ・結果を保持
     let currentSearchQuery = '';
@@ -38,6 +41,7 @@ window.onload = function() {
         const geminiModel = geminiModelSelect ? geminiModelSelect.value : 'gemini-3.5-flash';
 
         return {
+            sessionId: webviewSessionId,
             activeTab,
             searchInput,
             language,
@@ -73,9 +77,24 @@ window.onload = function() {
         }
     }
 
+    function isCurrentSessionState(state) {
+        return !!state && state.sessionId === webviewSessionId;
+    }
+
+    function hasSessionScopedState(state) {
+        return !!state && (
+            (Array.isArray(state.currentResults) && state.currentResults.length > 0) ||
+            !!state.currentStatsData ||
+            (Array.isArray(state.agentSearchEvents) && state.agentSearchEvents.length > 0) ||
+            !!state.statusText ||
+            !!state.statsStatusText
+        );
+    }
+
     function restoreFromState() {
         try {
             const state = vscode.getState() || {};
+            const currentSession = isCurrentSessionState(state);
             if (state.searchInput) {
                 const si = document.getElementById('searchInput');
                 if (si) si.value = state.searchInput;
@@ -125,10 +144,10 @@ window.onload = function() {
                 const sf = document.getElementById('statsFilter');
                 if (sf) sf.value = state.statsFilter;
             }
-            if (state.statusText && document.getElementById('status')) {
+            if (currentSession && state.statusText && document.getElementById('status')) {
                 document.getElementById('status').textContent = state.statusText;
             }
-            if (state.statsStatusText && document.getElementById('stats-status')) {
+            if (currentSession && state.statsStatusText && document.getElementById('stats-status')) {
                 document.getElementById('stats-status').textContent = state.statsStatusText;
             }
 
@@ -138,21 +157,26 @@ window.onload = function() {
             if (btn) btn.click();
 
             // データ復元
-            currentFolderPath = state.currentFolderPath || currentFolderPath;
-            if (Array.isArray(state.currentResults) && state.currentResults.length > 0) {
+            if (currentSession) {
+                currentFolderPath = state.currentFolderPath || currentFolderPath;
+            }
+            if (currentSession && Array.isArray(state.currentResults) && state.currentResults.length > 0) {
                 currentResults = state.currentResults;
                 renderResults(currentResults, currentFolderPath || '');
             }
-            if (state.currentStatsData) {
+            if (currentSession && state.currentStatsData) {
                 currentStatsData = state.currentStatsData;
                 applyStatsFilter();
             }
-            if (Array.isArray(state.agentSearchEvents) && state.agentSearchEvents.length > 0) {
+            if (currentSession && Array.isArray(state.agentSearchEvents) && state.agentSearchEvents.length > 0) {
                 agentSearchEvents = state.agentSearchEvents;
                 renderAgentSearchEvents();
             }
             syncSegmentedControls();
             updateDiffControlsVisibility();
+            if (!currentSession && hasSessionScopedState(state)) {
+                saveState();
+            }
         } catch (e) {
             console.warn('Failed to restore state', e);
         }
@@ -161,7 +185,10 @@ window.onload = function() {
     function restoreFromExternalState(external) {
         if (!external) return;
         try {
-            const hasLocal = vscode.getState() && (vscode.getState().searchInput || (Array.isArray(vscode.getState().currentResults) && vscode.getState().currentResults.length));
+            const externalCurrentSession = isCurrentSessionState(external);
+            const localState = vscode.getState();
+            const localHasResults = isCurrentSessionState(localState) && Array.isArray(localState.currentResults) && localState.currentResults.length;
+            const hasLocal = localState && (localState.searchInput || localHasResults);
             if (hasLocal) return; // 既にローカル状態があれば上書きしない
 
             // 入力/トグル等
@@ -214,10 +241,10 @@ window.onload = function() {
                 const sf = document.getElementById('statsFilter');
                 if (sf) sf.value = external.statsFilter;
             }
-            if (external.statusText && document.getElementById('status')) {
+            if (externalCurrentSession && external.statusText && document.getElementById('status')) {
                 document.getElementById('status').textContent = external.statusText;
             }
-            if (external.statsStatusText && document.getElementById('stats-status')) {
+            if (externalCurrentSession && external.statsStatusText && document.getElementById('stats-status')) {
                 document.getElementById('stats-status').textContent = external.statsStatusText;
             }
 
@@ -226,16 +253,18 @@ window.onload = function() {
             const btn = document.querySelector(`.tab-btn[data-tab="${activeTab}"]`);
             if (btn) btn.click();
 
-            currentFolderPath = external.currentFolderPath || currentFolderPath;
-            if (Array.isArray(external.currentResults) && external.currentResults.length > 0) {
+            if (externalCurrentSession) {
+                currentFolderPath = external.currentFolderPath || currentFolderPath;
+            }
+            if (externalCurrentSession && Array.isArray(external.currentResults) && external.currentResults.length > 0) {
                 currentResults = external.currentResults;
                 renderResults(currentResults, currentFolderPath || '');
             }
-            if (external.currentStatsData) {
+            if (externalCurrentSession && external.currentStatsData) {
                 currentStatsData = external.currentStatsData;
                 applyStatsFilter();
             }
-            if (Array.isArray(external.agentSearchEvents) && external.agentSearchEvents.length > 0) {
+            if (externalCurrentSession && Array.isArray(external.agentSearchEvents) && external.agentSearchEvents.length > 0) {
                 agentSearchEvents = external.agentSearchEvents;
                 renderAgentSearchEvents();
             }
@@ -1778,4 +1807,5 @@ window.onload = function() {
     restoreFromState();
     // 拡張側の永続ストレージからの復元要求
     vscode.postMessage({ command: 'requestInitState' });
+    vscode.postMessage({ command: 'checkServerStatus' });
 };

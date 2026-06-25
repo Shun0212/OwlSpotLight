@@ -58,13 +58,13 @@ body {
   background: #888;
   transition: background 0.3s ease;
 }
-.server-status.online { 
-  background: rgba(0, 180, 80, 0.15); 
-  color: #2ea043; 
+.server-status.online {
+  background: rgba(0, 120, 212, 0.16);
+  color: var(--vscode-charts-blue, #3794ff);
 }
-.server-status.online .status-dot { 
-  background: #2ea043;
-  box-shadow: 0 0 4px rgba(46, 160, 67, 0.5);
+.server-status.online .status-dot {
+  background: var(--vscode-charts-blue, #3794ff);
+  box-shadow: 0 0 4px rgba(55, 148, 255, 0.5);
 }
 .server-status.offline { 
   background: rgba(200, 80, 60, 0.15); 
