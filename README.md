@@ -3,7 +3,7 @@
 <div align="center">
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.5.2-blue.svg)](https://github.com/Shun0212/owlspotlight)
+[![Version](https://img.shields.io/badge/version-0.5.3-blue.svg)](https://github.com/Shun0212/owlspotlight)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://www.python.org/)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.100+-blue.svg)](https://code.visualstudio.com/)
 [![Marketplace](https://img.shields.io/badge/VS%20Code-Marketplace-brightgreen.svg)](https://marketplace.visualstudio.com/items?itemName=Shun0212.owlspotlight)
@@ -15,6 +15,18 @@
 Find functions, methods, classes, Python CodeBlocks, routes, tests, and call-heavy logic by describing intent instead of remembering names.
 
 [English](#english) | [日本語](#japanese)
+
+</div>
+
+<div align="center">
+
+### See it in action
+
+![OwlSpotlight semantic search demo](media/demo/search.gif)
+
+*Describe what code does in English or Japanese — OwlSpotlight jumps straight to the highlighted definition.*
+
+▶ More clips (startup · search · Git Diff search): **[DEMO.md](DEMO.md)**
 
 </div>
 
