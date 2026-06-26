@@ -113,6 +113,21 @@ The sidebar keeps the main search bar compact. Click **Options** to choose:
 - `Functions` — only the functions changed by the selected diff.
 - `Unified diff` — the changed lines shown as unified diff hunks.
 
+#### Code Diff Search
+
+Use `Git Diff` when you want to review a working-tree change, branch comparison, or PR-sized patch by intent instead of reading a raw diff from top to bottom. OwlSpotlight builds the search corpus from only the selected diff range, so queries like `where is the new retry logic added?` or `why did MaxSim aggregation change?` rank the changed code that matches the intent.
+
+- Leave base/head blank to compare `HEAD` with the working tree, or set `main`, `origin/main`, a tag, or a commit SHA for branch/commit comparisons.
+- `Functions` maps changed line ranges back to changed function-level code units, then searches those code units.
+- `Unified diff` searches the actual patch hunks with added, removed, and context lines, and results can open in VS Code's native side-by-side diff editor.
+- The normal ranking modes still apply: use `Hybrid` / `Semantic` for intent-based review, `BM25` for lexical terms, or `Keyword` for exact identifiers.
+
+Agents can use the same feature through `owlspotlight.search_code`: set `search_target` to `changed_functions` or `diff_hunks`, and pass `diff_base_ref` / `diff_head_ref` when you want a specific comparison.
+
+<img src="screenshot/owlspotlight-code-diff-search-screen.png" alt="OwlSpotlight Code Diff search with unified diff results in VS Code" width="900">
+
+*Code Diff search keeps the query, changed hunks, and VS Code's side-by-side diff view in one workflow.*
+
 ### Python Static Analysis
 
 For Python, OwlSpotlight uses `ast` first and falls back to Tree-sitter when AST parsing fails, for example while a file is temporarily syntactically broken during editing.
@@ -161,7 +176,7 @@ Example `.mcp.json` for Cursor and other MCP clients:
 }
 ```
 
-The MCP tool is `owlspotlight.search_code`. It can be called with only `query` when `OWLSPOTLIGHT_WORKSPACE` is set. It also accepts optional `directory`, `file_ext` (`auto` by default, respecting `.owlignore` plus git ignore/exclude rules), `top_k` (`30` by default), `scope`, `search_mode` (`semantic` by default), `search_target` (`functions`, `changed_functions`, or `diff_hunks`), `diff_base_ref`, `diff_head_ref`, and `server_url`.
+The MCP tool is `owlspotlight.search_code`. It can be called with only `query` when `OWLSPOTLIGHT_WORKSPACE` is set. It also accepts optional `directory`, `file_ext` (`auto` by default, respecting `.owlignore` plus git ignore/exclude rules), `top_k` (`30` by default), `scope`, `search_mode` (`semantic` by default), `search_target` (`functions`, `changed_functions`, or `diff_hunks`), `diff_base_ref`, `diff_head_ref`, `force_diff_refresh`, and `server_url`.
 Agent searches are mirrored into the OwlSpotlight sidebar as compact activity. Use `owlspotlight.search_code` for semantic discovery, `owlspotlight.grep_repo` for repository-wide exact reference checks, `owlspotlight.cancel_embedding` to stop a running indexing/embedding job, and `owlspotlight.mark_results_used` to record only the ranks or grep locations the agent actually used as evidence. Human feedback is optional; the companion MCP tool `owlspotlight.get_human_feedback` is only needed when you explicitly enter query-improvement suggestions in the sidebar.
 If an agent cannot see `owlspotlight.search_code` in its available tools, reload or restart the MCP client after updating `.mcp.json`; the agent should not need to inspect `mcp_server.py` or reverse-engineer the HTTP API when the MCP tool is loaded.
 
@@ -329,6 +344,21 @@ OwlSpotlight: Start Server
 - `Functions` — 選択した差分で変更された関数のみ。
 - `Unified diff` — 変更行を unified diff の hunk として表示。
 
+#### コード差分検索
+
+`Git Diff` は、作業ツリーの変更、ブランチ比較、PR サイズのパッチを、生の diff を上から読むのではなく「どんな意図の変更か」でレビューしたいときに使います。選択した diff 範囲だけを検索対象にするため、`リトライ処理を追加した箇所` や `MaxSim の集計を変えた差分` のようなクエリで、意図に合う変更済みコードだけを順位付けできます。
+
+- base/head を空にすると `HEAD` とワーキングツリーを比較します。`main`、`origin/main`、タグ、commit SHA を指定するとブランチ / コミット間の比較になります。
+- `Functions` は変更行を含む関数レベルのコード単位へ写像し、そのコード単位を検索します。
+- `Unified diff` は追加行・削除行・前後の context を含む実際の patch hunk を検索し、結果から VS Code の左右 diff エディタを開けます。
+- 通常の検索モードもそのまま使えます。意図ベースのレビューは `Hybrid` / `Semantic`、用語一致は `BM25`、識別子の完全一致は `Keyword` が向いています。
+
+エージェントからも同じ機能を使えます。`owlspotlight.search_code` で `search_target` に `changed_functions` または `diff_hunks` を指定し、特定の比較をしたい場合は `diff_base_ref` / `diff_head_ref` を渡します。
+
+<img src="screenshot/owlspotlight-code-diff-search-screen.png" alt="OwlSpotlight のコード差分検索と VS Code の左右 diff 表示" width="900">
+
+*クエリ、差分 hunk の検索結果、VS Code の左右 diff 表示を同じ流れで確認できます。*
+
 ### MCP サーバーモード
 
 先に VS Code 側の OwlSpotlight サーバーを起動してから、MCP の stdio ブリッジを起動します。
@@ -355,7 +385,7 @@ Cursor などの MCP クライアント向けの `.mcp.json` の例:
 }
 ```
 
-MCP ツールは `owlspotlight.search_code` です。`OWLSPOTLIGHT_WORKSPACE` を設定していれば、`query` だけで呼び出せます。このほか、任意の引数として `directory`、`file_ext`（デフォルトは `auto` で、`.owlignore` と Git の ignore / exclude ルールに従います）、`top_k`（デフォルト `30`）、`scope`、`search_mode`（デフォルト `semantic`）、`search_target`（`functions`、`changed_functions`、`diff_hunks`）、`diff_base_ref`、`diff_head_ref`、`server_url` も受け取ります。
+MCP ツールは `owlspotlight.search_code` です。`OWLSPOTLIGHT_WORKSPACE` を設定していれば、`query` だけで呼び出せます。このほか、任意の引数として `directory`、`file_ext`（デフォルトは `auto` で、`.owlignore` と Git の ignore / exclude ルールに従います）、`top_k`（デフォルト `30`）、`scope`、`search_mode`（デフォルト `semantic`）、`search_target`（`functions`、`changed_functions`、`diff_hunks`）、`diff_base_ref`、`diff_head_ref`、`force_diff_refresh`、`server_url` も受け取ります。
 エージェント経由の検索は、OwlSpotlight サイドバーにコンパクトなアクティビティとして表示されます。意味的な検索には `owlspotlight.search_code`、リポジトリ全体での厳密な参照確認には `owlspotlight.grep_repo`、実行中のインデックス作成・埋め込み処理の停止には `owlspotlight.cancel_embedding`、実際に根拠として使った順位や grep の該当箇所の記録には `owlspotlight.mark_results_used` を使います。人間からのフィードバックは任意です。サイドバーで改善案を明示的に入力した場合にのみ、追加の MCP ツール `owlspotlight.get_human_feedback` を通じてエージェントが取得できます。
 エージェントの利用可能なツール一覧に `owlspotlight.search_code` が表示されない場合は、`.mcp.json` を更新したあとに MCP クライアントを再読み込み（リロード）または再起動してください。MCP ツールさえ読み込まれていれば、エージェントが `mcp_server.py` を読んだり HTTP API を解析したりする必要はありません。
 
