@@ -59,6 +59,11 @@ function normalizeGeminiTranslationModel(model?: string): string {
 		: DEFAULT_GEMINI_TRANSLATION_MODEL;
 }
 
+type TranslationRuntimeOptions = {
+	enabled?: boolean;
+	geminiModel?: string;
+};
+
 type TorchMode = 'auto' | 'cpu' | 'cuda' | 'skip';
 type TorchPlatformKey = 'linux' | 'win32';
 
@@ -692,12 +697,15 @@ async function findLaunchServerPort(): Promise<{ port: number; reusedExisting: b
 }
 
 // Translate Japanese query to English using Gemini API
-async function translateJapaneseToEnglish(text: string): Promise<string> {
+async function translateJapaneseToEnglish(text: string, options: TranslationRuntimeOptions = {}): Promise<string> {
     const config = vscode.workspace.getConfiguration('owlspotlight');
     // フラットな設定取得に対応
-    const enabled = config.get<boolean>('enableJapaneseTranslation', false);
+    const enabled = typeof options.enabled === 'boolean'
+        ? options.enabled
+        : config.get<boolean>('enableJapaneseTranslation', false);
     const geminiApiKey = config.get<string>('geminiApiKey', '');
-    const geminiModel = normalizeGeminiTranslationModel(config.get<string>('geminiModel', DEFAULT_GEMINI_TRANSLATION_MODEL));
+    const configuredModel = config.get<string>('geminiModel', DEFAULT_GEMINI_TRANSLATION_MODEL);
+    const geminiModel = normalizeGeminiTranslationModel(options.geminiModel || configuredModel);
     
     if (!enabled) {
         return text;
@@ -1850,24 +1858,35 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                 return;
                         }
                         if (msg.command === 'updateTranslationSettings') {
-                                const config = vscode.workspace.getConfiguration('owlspotlight');
-                                if (typeof msg.enable === 'boolean') {
-                                        await config.update('enableJapaneseTranslation', !!msg.enable, vscode.ConfigurationTarget.Global);
+                                const requestId = typeof msg.requestId === 'number' ? msg.requestId : undefined;
+                                try {
+                                        const config = vscode.workspace.getConfiguration('owlspotlight');
+                                        if (typeof msg.enable === 'boolean') {
+                                                await config.update('enableJapaneseTranslation', !!msg.enable, vscode.ConfigurationTarget.Global);
+                                        }
+                                        if (typeof msg.apiKey === 'string') {
+                                                await config.update('geminiApiKey', msg.apiKey, vscode.ConfigurationTarget.Global);
+                                        }
+                                        if (typeof msg.model === 'string') {
+                                                await config.update('geminiModel', normalizeGeminiTranslationModel(msg.model), vscode.ConfigurationTarget.Global);
+                                        }
+                                        const updatedConfig = vscode.workspace.getConfiguration('owlspotlight');
+                                        const enable = updatedConfig.get<boolean>('enableJapaneseTranslation', false);
+                                        const geminiModel = normalizeGeminiTranslationModel(updatedConfig.get<string>('geminiModel', DEFAULT_GEMINI_TRANSLATION_MODEL));
+                                        webviewView.webview.postMessage({
+                                                type: 'translationSettings',
+                                                enable,
+                                                model: geminiModel,
+                                                models: GEMINI_TRANSLATION_MODELS,
+                                                requestId
+                                        });
+                                } catch (error: any) {
+                                        webviewView.webview.postMessage({
+                                                type: 'translationSettingsError',
+                                                requestId,
+                                                message: error?.message || 'Failed to update translation settings.'
+                                        });
                                 }
-                                if (typeof msg.apiKey === 'string') {
-                                        await config.update('geminiApiKey', msg.apiKey, vscode.ConfigurationTarget.Global);
-                                }
-                                if (typeof msg.model === 'string') {
-                                        await config.update('geminiModel', normalizeGeminiTranslationModel(msg.model), vscode.ConfigurationTarget.Global);
-                                }
-                                const enable = config.get<boolean>('enableJapaneseTranslation', false);
-                                const geminiModel = normalizeGeminiTranslationModel(config.get<string>('geminiModel', DEFAULT_GEMINI_TRANSLATION_MODEL));
-                                webviewView.webview.postMessage({
-                                        type: 'translationSettings',
-                                        enable,
-                                        model: geminiModel,
-                                        models: GEMINI_TRANSLATION_MODELS
-                                });
                         }
                         if (msg.command === 'agentSearchFeedback') {
                                 const serverPort = await resolveActiveServerPort();
@@ -2022,9 +2041,13 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				const searchTarget = normalizeSearchTarget(msg.searchTarget);
 				const diffBaseRef = typeof msg.diffBaseRef === 'string' ? msg.diffBaseRef.trim() : '';
 				const diffHeadRef = typeof msg.diffHeadRef === 'string' ? msg.diffHeadRef.trim() : '';
+				const translationOptions: TranslationRuntimeOptions = {
+					enabled: typeof msg.translateEnabled === 'boolean' ? msg.translateEnabled : undefined,
+					geminiModel: typeof msg.geminiModel === 'string' ? msg.geminiModel : undefined
+				};
 				const originalQuery = query;
 				if (searchMode !== 'keyword') {
-					query = await translateJapaneseToEnglish(query);
+					query = await translateJapaneseToEnglish(query, translationOptions);
 				}
 				// Always send both original and translated query to Webview for debugging
 				webviewView.webview.postMessage({ type: 'translatedQuery', original: originalQuery, translated: query });
@@ -2073,18 +2096,22 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					webviewView.webview.postMessage({ type: 'error', message: 'No workspace folder found' });
 					return;
 				}
-                const workspaceFolder = workspaceFolders[0];
-                const folderPath = workspaceFolder.uri.fsPath;
-                let query = msg.query || '';
-                const fileExt = msg.lang || '.py';
-                const scope = (msg.scope === 'source' || msg.scope === 'changed') ? msg.scope as SearchScope : 'all';
-                const searchMode = ['semantic', 'bm25', 'hybrid', 'keyword'].includes(msg.searchMode) ? msg.searchMode : 'semantic';
-                const originalQuery = query;
-                if (searchMode !== 'keyword') {
-                        query = await translateJapaneseToEnglish(query);
-                }
-                webviewView.webview.postMessage({ type: 'translatedQuery', original: originalQuery, translated: query });
-                const includeFiles = await resolveSearchScopeFiles(workspaceFolder, fileExt, scope);
+				const workspaceFolder = workspaceFolders[0];
+				const folderPath = workspaceFolder.uri.fsPath;
+				let query = msg.query || '';
+				const fileExt = msg.lang || '.py';
+				const scope = (msg.scope === 'source' || msg.scope === 'changed') ? msg.scope as SearchScope : 'all';
+				const searchMode = ['semantic', 'bm25', 'hybrid', 'keyword'].includes(msg.searchMode) ? msg.searchMode : 'semantic';
+				const translationOptions: TranslationRuntimeOptions = {
+					enabled: typeof msg.translateEnabled === 'boolean' ? msg.translateEnabled : undefined,
+					geminiModel: typeof msg.geminiModel === 'string' ? msg.geminiModel : undefined
+				};
+				const originalQuery = query;
+				if (searchMode !== 'keyword') {
+					query = await translateJapaneseToEnglish(query, translationOptions);
+				}
+				webviewView.webview.postMessage({ type: 'translatedQuery', original: originalQuery, translated: query });
+				const includeFiles = await resolveSearchScopeFiles(workspaceFolder, fileExt, scope);
 				webviewView.webview.postMessage({ type: 'status', message: 'Loading class statistics...' });
 				try {
 					const serverPort = await resolveActiveServerPort();

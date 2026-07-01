@@ -18,6 +18,10 @@ window.onload = function() {
     let commitGraphLoaded = false;
     let indexProgressWasActive = false;
     let statusBeforeIndexProgress = '';
+    let translationSettingsRequestId = 0;
+    let pendingTranslationSettingsRequestId = 0;
+    let pendingTranslationSettings = null;
+    let translationSettingsSaving = false;
 
     // 状態保存/復元
     function collectState() {
@@ -374,7 +378,9 @@ window.onload = function() {
           if (!select) return;
           const currentValue = select.value;
           control.querySelectorAll('.segment-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.getAttribute('data-value') === currentValue);
+            const active = btn.getAttribute('data-value') === currentValue;
+            btn.classList.toggle('active', active);
+            btn.setAttribute('aria-pressed', active ? 'true' : 'false');
           });
         }
         function syncSegmentedControls() {
@@ -400,12 +406,74 @@ window.onload = function() {
             'gemini-3.1-pro-preview': '3.1 Pro'
           }[model] || model;
         }
+        function getTranslationSettingsFromControls() {
+          return {
+            enable: !!document.getElementById('translateToggle')?.checked,
+            model: document.getElementById('geminiModelSelect')?.value || 'gemini-3.5-flash'
+          };
+        }
+        function setTranslationSaving(isSaving) {
+          translationSettingsSaving = !!isSaving;
+          const panel = document.getElementById('translationPanel');
+          if (panel) panel.classList.toggle('is-saving', translationSettingsSaving);
+          updateTranslationSummary();
+        }
+        function applyTranslationSettingsToControls(settings) {
+          const tToggle = document.getElementById('translateToggle');
+          if (tToggle && typeof settings.enable === 'boolean') {
+            tToggle.checked = !!settings.enable;
+          }
+          const modelSelect = document.getElementById('geminiModelSelect');
+          if (modelSelect && settings.model) {
+            modelSelect.value = settings.model;
+          }
+          syncSegmentedControls();
+          updateTranslationSummary();
+        }
+        function updateTranslationSettings(partial) {
+          const next = {
+            ...getTranslationSettingsFromControls(),
+            ...partial
+          };
+          applyTranslationSettingsToControls(next);
+          const requestId = ++translationSettingsRequestId;
+          pendingTranslationSettingsRequestId = requestId;
+          pendingTranslationSettings = next;
+          setTranslationSaving(true);
+          vscode.postMessage({
+            command: 'updateTranslationSettings',
+            enable: next.enable,
+            model: next.model,
+            requestId
+          });
+          saveState();
+        }
+        function handleTranslationSettingsMessage(msg) {
+          const requestId = Number.isFinite(msg.requestId) ? Number(msg.requestId) : 0;
+          if (pendingTranslationSettings && requestId === 0) {
+            return;
+          }
+          if (requestId > 0 && requestId < pendingTranslationSettingsRequestId) {
+            return;
+          }
+          const settings = {
+            enable: !!msg.enable,
+            model: msg.model || getTranslationSettingsFromControls().model
+          };
+          applyTranslationSettingsToControls(settings);
+          if (requestId > 0 && requestId === pendingTranslationSettingsRequestId) {
+            pendingTranslationSettings = null;
+            pendingTranslationSettingsRequestId = 0;
+            setTranslationSaving(false);
+          }
+          saveState();
+        }
         function updateTranslationSummary() {
           const summary = document.getElementById('translationSummary');
           if (!summary) return;
           const enabled = !!document.getElementById('translateToggle')?.checked;
           const model = document.getElementById('geminiModelSelect')?.value || 'gemini-3.5-flash';
-          summary.textContent = (enabled ? 'On' : 'Off') + ' · ' + getGeminiModelLabel(model);
+          summary.textContent = (enabled ? 'On' : 'Off') + ' · ' + getGeminiModelLabel(model) + (translationSettingsSaving ? ' · Saving' : '');
           summary.title = summary.textContent;
         }
         function updateSearchBehaviorSummary() {
@@ -918,22 +986,13 @@ window.onload = function() {
         const translateToggle = document.getElementById('translateToggle');
         if (translateToggle) {
           translateToggle.onchange = () => {
-            const enable = translateToggle.checked;
-            vscode.postMessage({ command: 'updateTranslationSettings', enable });
-            updateTranslationSummary();
-            saveState();
+            updateTranslationSettings({ enable: translateToggle.checked });
           };
         }
         const geminiModelSelect = document.getElementById('geminiModelSelect');
         if (geminiModelSelect) {
           geminiModelSelect.onchange = () => {
-            vscode.postMessage({
-              command: 'updateTranslationSettings',
-              model: geminiModelSelect.value
-            });
-            syncSegmentedControls();
-            updateTranslationSummary();
-            saveState();
+            updateTranslationSettings({ model: geminiModelSelect.value });
           };
         }
 
@@ -954,7 +1013,19 @@ window.onload = function() {
                         // 空状態を非表示
                         const empty = document.getElementById('emptyState');
                         if (empty) empty.style.display = 'none';
-                        vscode.postMessage({ command: 'search', text, lang, scope, searchMode, searchTarget, diffBaseRef, diffHeadRef });
+                        const translationSettings = getTranslationSettingsFromControls();
+                        vscode.postMessage({
+                          command: 'search',
+                          text,
+                          lang,
+                          scope,
+                          searchMode,
+                          searchTarget,
+                          diffBaseRef,
+                          diffHeadRef,
+                          translateEnabled: translationSettings.enable,
+                          geminiModel: translationSettings.model
+                        });
                         saveState();
                 }
         };
@@ -973,7 +1044,16 @@ window.onload = function() {
                 const scope = document.getElementById('scopeSelect')?.value || 'all';
                 const searchMode = document.getElementById('searchModeSelect')?.value || 'semantic';
                 showLoading('stats-status');
-                vscode.postMessage({ command: 'getClassStats', query: query, lang, scope, searchMode });
+                const translationSettings = getTranslationSettingsFromControls();
+                vscode.postMessage({
+                  command: 'getClassStats',
+                  query: query,
+                  lang,
+                  scope,
+                  searchMode,
+                  translateEnabled: translationSettings.enable,
+                  geminiModel: translationSettings.model
+                });
                 saveState();
         };
 	
@@ -1642,8 +1722,10 @@ window.onload = function() {
                         return;
                 }
                 if (msg.type === 'translationSettings') {
-                        const tToggle = document.getElementById('translateToggle');
-                        if (tToggle) { tToggle.checked = !!msg.enable; }
+                        const requestId = Number.isFinite(msg.requestId) ? Number(msg.requestId) : 0;
+                        if ((pendingTranslationSettings && requestId === 0) || (requestId > 0 && requestId < pendingTranslationSettingsRequestId)) {
+                                return;
+                        }
                         const modelSelect = document.getElementById('geminiModelSelect');
                         if (modelSelect) {
                                 if (Array.isArray(msg.models) && msg.models.length) {
@@ -1657,8 +1739,15 @@ window.onload = function() {
                                         modelSelect.value = msg.model;
                                 }
                         }
-                        syncSegmentedControls();
-                        updateTranslationSummary();
+                        handleTranslationSettingsMessage(msg);
+                }
+                if (msg.type === 'translationSettingsError') {
+                        const requestId = Number.isFinite(msg.requestId) ? Number(msg.requestId) : 0;
+                        if (requestId === 0 || requestId === pendingTranslationSettingsRequestId) {
+                                pendingTranslationSettings = null;
+                                pendingTranslationSettingsRequestId = 0;
+                                setTranslationSaving(false);
+                        }
                 }
                 if (msg.type === 'translatedQuery') {
                         const el = document.getElementById('translatedQuery');

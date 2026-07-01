@@ -154,6 +154,9 @@ body {
 .translation-settings summary {
   min-height: 1.8em;
 }
+.translation-settings.is-saving summary {
+  cursor: progress;
+}
 .translation-body {
   display: grid;
   gap: 0.55em;
@@ -162,13 +165,29 @@ body {
 .translation-toggle {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 0.35em;
+  min-height: 1.9em;
+  padding: 0.18em 0.38em;
+  border: 1px solid var(--vscode-input-border, rgba(128, 128, 128, 0.28));
+  border-radius: 6px;
+  background: var(--vscode-input-background, transparent);
   cursor: pointer;
   user-select: none;
   color: var(--vscode-foreground, #24292f);
 }
+.translation-toggle:hover {
+  border-color: var(--vscode-focusBorder, #0078d4);
+}
+.translation-toggle:focus-within {
+  outline: 1px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: 1px;
+}
 .translation-settings input[type="checkbox"] {
   accent-color: var(--vscode-button-background, #0078d4);
+  inline-size: 1em;
+  block-size: 1em;
+  cursor: pointer;
 }
 .translation-model {
   display: grid;
@@ -181,6 +200,8 @@ body {
 }
 .translation-model-buttons .segment-btn {
   flex: 1 1 4.7em;
+  min-height: 1.8em;
+  padding: 0.24em 0.42em;
   text-align: center;
 }
 
@@ -580,6 +601,7 @@ button:focus {
 
 .segment-btn {
   min-width: 0;
+  min-height: 2.05em;
   padding: 0.34em 0.56em;
   border-radius: 5px;
   border: 1px solid var(--vscode-button-secondaryBackground, #5f6a79);
@@ -587,12 +609,20 @@ button:focus {
   color: var(--vscode-button-secondaryForeground, #ffffff);
   font-size: 0.9em;
   line-height: 1.2;
+  cursor: pointer;
 }
 
 .segment-btn.active {
   border-color: var(--vscode-button-background, #0078d4);
   background: var(--vscode-button-background, #0078d4);
   color: var(--vscode-button-foreground, #ffffff);
+}
+.segment-btn:hover {
+  filter: brightness(1.08);
+}
+.segment-btn:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: 1px;
 }
 
 .hidden-select {
