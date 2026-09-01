@@ -1,0 +1,13 @@
+test/**
+backend/tests/**
+scripts/**
+.github/**
+.vscode/**
+**/__pycache__/**
+**/*.pyc
+node_modules/**
+.gitignore
+.vscodeignore
+package-lock.json
+*.vsix
+*.zip

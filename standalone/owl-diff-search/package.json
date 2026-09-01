@@ -1,0 +1,127 @@
+{
+  "name": "owl-diff-search",
+  "displayName": "Owl Diff Search",
+  "version": "0.1.0",
+  "publisher": "owl-diff-local",
+  "description": "Git の変更を自然言語で検索。OwlSpotLight のコード差分検索に絞ったローカル VS Code 拡張。",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "git",
+    "diff",
+    "semantic search",
+    "NightOwl",
+    "code review"
+  ],
+  "main": "./src/extension.cjs",
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "ローカルの Git と Python を使用するため、信頼済みワークスペースで動作します。"
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "ローカルまたは Remote Development 上の Git リポジトリが必要です。"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Shun0212/OwlSpotLight.git"
+  },
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "owlDiff",
+          "title": "Owl Diff Search",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "owlDiff": [
+        {
+          "id": "owlDiff.searchView",
+          "name": "差分検索",
+          "type": "webview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "owlDiff.show",
+        "title": "Owl Diff Search: 差分検索を開く"
+      },
+      {
+        "command": "owlDiff.setup",
+        "title": "Owl Diff Search: 検索エンジンを準備"
+      },
+      {
+        "command": "owlDiff.cancel",
+        "title": "Owl Diff Search: 検索・準備を中止"
+      },
+      {
+        "command": "owlDiff.searchSelection",
+        "title": "Owl Diff Search: 選択したコードで差分を検索"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "owlDiff.searchSelection",
+          "when": "editorHasSelection",
+          "group": "navigation@20"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Owl Diff Search",
+      "properties": {
+        "owlDiff.pythonPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "Python 3.11 / 3.12 実行ファイルのパス。未設定時は自動検出。準備済みの専用仮想環境を優先します。"
+        },
+        "owlDiff.modelName": {
+          "type": "string",
+          "default": "Shuu12121/NightOwl-CodeEmbedding",
+          "scope": "machine",
+          "description": "Sentence Transformers 互換モデル名またはローカルパス。変更後は検索エンジンを再度準備してください。"
+        },
+        "owlDiff.maxFiles": {
+          "type": "integer",
+          "default": 300,
+          "minimum": 1,
+          "maximum": 2000,
+          "description": "1回に読み込むファイル変更の上限。履歴検索では同じファイルもコミットごとに数えます。"
+        },
+        "owlDiff.maxCommits": {
+          "type": "integer",
+          "default": 100,
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "履歴検索で読み込むコミットの上限。"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "check": "node --check src/extension.cjs && node --check src/worker.cjs && node --check media/main.js",
+    "test": "node --test test/*.test.cjs",
+    "package": "vsce package --no-dependencies",
+    "test:extension": "node scripts/test-extension.cjs"
+  },
+  "devDependencies": {
+    "@vscode/test-electron": "2.5.2",
+    "@vscode/vsce": "3.6.0"
+  }
+}
