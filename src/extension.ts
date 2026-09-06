@@ -1,6 +1,7 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
+import { withUtf8PythonEnvironment } from './pythonEnvironment';
 import * as path from 'path';
 import * as os from 'os';
 import * as cp from 'child_process';
@@ -1270,6 +1271,8 @@ function buildAgentSetupPayload(
 				command: mcpPythonCommand,
 				args: [mcpServerPath],
 				env: {
+					PYTHONUTF8: '1',
+					PYTHONIOENCODING: 'utf-8',
 					OWLSPOTLIGHT_SERVER_URL: serverUrl,
 					OWLSPOTLIGHT_WORKSPACE: workspaceRoot
 				}
@@ -1281,6 +1284,10 @@ function buildAgentSetupPayload(
 		'mcp',
 		'add',
 		'owlspotlight',
+		'--env',
+		'PYTHONUTF8=1',
+		'--env',
+		'PYTHONIOENCODING=utf-8',
 		'--env',
 		`OWLSPOTLIGHT_SERVER_URL=${serverUrl}`,
 		'--env',
@@ -1342,6 +1349,10 @@ async function registerCodexMcp(
 			'mcp',
 			'add',
 			'owlspotlight',
+			'--env',
+			'PYTHONUTF8=1',
+			'--env',
+			'PYTHONIOENCODING=utf-8',
 			'--env',
 			`OWLSPOTLIGHT_SERVER_URL=${serverUrl}`,
 			'--env',
@@ -3164,7 +3175,7 @@ export function activate(context: vscode.ExtensionContext) {
 				{
 					cwd: serverDir,
 					env: {
-						...process.env,
+						...withUtf8PythonEnvironment(process.env),
 						VIRTUAL_ENV: venvDir,
 						PATH: (platform === 'win32'
 							? path.join(venvDir, 'Scripts')
@@ -3403,7 +3414,7 @@ export function activate(context: vscode.ExtensionContext) {
 		try {
 			setupProcess = cp.spawn(setupCommand, setupArgs, {
 				cwd: serverDir,
-				env: { ...process.env, PYTHONUNBUFFERED: '1' },
+				env: withUtf8PythonEnvironment(process.env),
 				shell: false
 			});
 		} catch (err: any) {

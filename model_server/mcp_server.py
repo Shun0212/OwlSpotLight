@@ -129,6 +129,8 @@ def git_visible_files(directory: str) -> list[Path]:
             ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
             cwd=root,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             stderr=subprocess.DEVNULL,
         )
     except Exception:
@@ -266,7 +268,14 @@ def changed_files(directory: str, file_ext: str) -> list[str]:
         ["git", "ls-files", "--others", "--exclude-standard"],
     ):
         try:
-            output = subprocess.check_output(args, cwd=root, text=True, stderr=subprocess.DEVNULL)
+            output = subprocess.check_output(
+                args,
+                cwd=root,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                stderr=subprocess.DEVNULL,
+            )
         except Exception:
             output = ""
         rel_paths.extend(line.strip() for line in output.splitlines() if line.strip())
@@ -976,6 +985,13 @@ def handle_request(message: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def main() -> None:
+    # MCP uses UTF-8 JSON over stdio. Windows otherwise commonly selects CP932
+    # for redirected streams, which cannot safely decode all JSON input.
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
+
     for line in sys.stdin:
         line = line.strip()
         if not line:

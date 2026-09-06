@@ -752,6 +752,8 @@ def repo_visible_files(root_dir: str, spec: Optional[PathSpec]) -> list[str]:
             ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
             cwd=str(root),
             text=True,
+            encoding="utf-8",
+            errors="replace",
             stderr=subprocess.DEVNULL,
         )
         for line in output.splitlines():
@@ -835,13 +837,22 @@ def git_diff_text(directory: str, base_ref: str, head_ref: str) -> str:
     else:
         args.append("HEAD")
     args.append("--")
-    proc = subprocess.run(args, cwd=directory, capture_output=True, text=True)
+    proc = subprocess.run(
+        args,
+        cwd=directory,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
     if proc.returncode != 0 and not base:
         fallback = subprocess.run(
             ["git", "diff", "--no-color", "--no-ext-diff", "--unified=3", "--"],
             cwd=directory,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         proc = fallback
     if proc.returncode != 0:
@@ -859,6 +870,8 @@ def untracked_files_as_diff(directory: str) -> str:
             ["git", "ls-files", "--others", "--exclude-standard"],
             cwd=directory,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             stderr=subprocess.DEVNULL,
         )
     except Exception:
@@ -952,7 +965,14 @@ def iter_commit_patches(directory: str, base_ref: str, head_ref: str) -> list[tu
         "git", "log", "-p", "--no-color", "--no-ext-diff", "--unified=3",
         f"--format={fmt}", rev_range, "--",
     ]
-    proc = subprocess.run(args, cwd=directory, capture_output=True, text=True)
+    proc = subprocess.run(
+        args,
+        cwd=directory,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "git log failed").strip()
         raise RuntimeError(detail)

@@ -3,6 +3,7 @@ import * as assert from 'assert';
 // You can import and use all API from the 'vscode' module
 // as well as import your extension to test it
 import * as vscode from 'vscode';
+import { withUtf8PythonEnvironment } from '../pythonEnvironment';
 // import * as myExtension from '../../extension';
 
 suite('Extension Test Suite', () => {
@@ -11,6 +12,19 @@ suite('Extension Test Suite', () => {
     test('Sample test', () => {
         assert.strictEqual(-1, [1, 2, 3].indexOf(5));
         assert.strictEqual(-1, [1, 2, 3].indexOf(0));
+    });
+
+    test('Python child processes always use UTF-8', () => {
+        const env = withUtf8PythonEnvironment({
+            PYTHONUTF8: '0',
+            PYTHONIOENCODING: 'cp932',
+            EXISTING_VALUE: 'preserved'
+        });
+
+        assert.strictEqual(env.PYTHONUTF8, '1');
+        assert.strictEqual(env.PYTHONIOENCODING, 'utf-8');
+        assert.strictEqual(env.PYTHONUNBUFFERED, '1');
+        assert.strictEqual(env.EXISTING_VALUE, 'preserved');
     });
 
     test('Extension should activate', async () => {

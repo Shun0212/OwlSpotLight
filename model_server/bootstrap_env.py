@@ -429,6 +429,8 @@ def validate_torch_import(python_env_path: Path) -> tuple[bool, str]:
         [str(python_env_path), "-c", "import torch; print(torch.__version__)"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
     )
 
@@ -466,6 +468,8 @@ print(json.dumps(payload))
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
     )
 
@@ -527,6 +531,8 @@ def detect_nvidia_driver_version() -> tuple[str | None, str | None, str | None]:
             [nvidia_smi, "--query-gpu=name,driver_version", "--format=csv,noheader"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=True,
         )
     except (FileNotFoundError, subprocess.CalledProcessError):
