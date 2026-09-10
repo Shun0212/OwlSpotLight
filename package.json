@@ -282,6 +282,7 @@
     "test:unit": "npm run compile && node --test src/test/*.test.cjs"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "20.x",
     "@types/vscode": "^1.100.0",
@@ -292,12 +293,17 @@
     "eslint": "^9.25.1",
     "typescript": "^5.8.3"
   },
+  "overrides": {
+    "mocha": {
+      "serialize-javascript": "^7.0.5"
+    }
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/Shun0212/owlspotlight.git"
   },
   "dependencies": {
-    "@google/genai": "^1.4.0",
+    "@google/genai": "^1.52.0",
     "@iarna/toml": "^2.2.5"
   }
 }
