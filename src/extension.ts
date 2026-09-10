@@ -7,6 +7,10 @@ import * as os from 'os';
 import * as cp from 'child_process';
 import * as net from 'net';
 import * as fs from 'fs';
+import { createCodeReader } from './agentCode';
+import { runAgenticSearch, normalizeAgentSearchLimit, GenerateAgent } from './agenticSearch';
+import { DEFAULT_GEMINI_MODEL, GEMINI_MODELS, normalizeGeminiModel, geminiModelLabel } from './queryExpansion';
+import type { DiffSearchMode } from './searchTypes';
 
 const DEFAULT_SERVER_HOST = '127.0.0.1';
 const DEFAULT_SERVER_PORT = 8000;
@@ -45,12 +49,8 @@ function terminateServerProcess(
 }
 const SERVER_PORT_SCAN_LIMIT = 20;
 const TORCH_BUILD_MATRIX_PATH = path.resolve(__dirname, '..', 'model_server', 'torch_build_matrix.json');
-const DEFAULT_GEMINI_TRANSLATION_MODEL = 'gemini-3.5-flash';
-const GEMINI_TRANSLATION_MODELS = [
-	'gemini-3.5-flash',
-	'gemini-3.1-flash-lite',
-	'gemini-3.1-pro-preview',
-];
+const DEFAULT_GEMINI_TRANSLATION_MODEL = DEFAULT_GEMINI_MODEL;
+const GEMINI_TRANSLATION_MODELS = GEMINI_MODELS;
 
 let activeServerPort = DEFAULT_SERVER_PORT;
 
@@ -1609,7 +1609,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = 'owlspotlight.sidebar';
 	private _view?: vscode.WebviewView;
 	private _operation: string | undefined;
-	private _operationCancellation: { cancelled: boolean; serverStarted: boolean } | undefined;
+	private _operationCancellation: { cancelled: boolean; serverStarted: boolean; controller: AbortController } | undefined;
 	private _agentSearchPoll?: NodeJS.Timeout;
 	private _indexProgressPoll?: NodeJS.Timeout;
 	private _lastAgentSearchEventId = 0;
@@ -1779,6 +1779,8 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                 const geminiModel = normalizeGeminiTranslationModel(config.get<string>('geminiModel', DEFAULT_GEMINI_TRANSLATION_MODEL));
                 webviewView.webview.postMessage({
                         type: 'translationSettings',
+                        hasApiKey: !!vscode.workspace.getConfiguration('owlspotlight').get<string>('geminiApiKey', '').trim(),
+                        agentic: vscode.workspace.getConfiguration('owlspotlight').get<boolean>('enableAgenticSearch', false),
                         enable: enable,
                         model: geminiModel,
                         models: GEMINI_TRANSLATION_MODELS
@@ -1809,7 +1811,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                 webviewView.webview.postMessage({ type: 'operationState', operation: this._operation });
                                 return;
                         }
-                        const cancellation = guarded ? { cancelled: false, serverStarted: false } : undefined;
+                        const cancellation = guarded ? { cancelled: false, serverStarted: false, controller: new AbortController() } : undefined;
                         if (guarded) {
                                 this._operationCancellation = cancellation;
                                 this._operation = msg.command;
@@ -1850,6 +1852,8 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                 const geminiModel = normalizeGeminiTranslationModel(config.get<string>('geminiModel', DEFAULT_GEMINI_TRANSLATION_MODEL));
                                 webviewView.webview.postMessage({
                                         type: 'translationSettings',
+                        hasApiKey: !!vscode.workspace.getConfiguration('owlspotlight').get<string>('geminiApiKey', '').trim(),
+                        agentic: vscode.workspace.getConfiguration('owlspotlight').get<boolean>('enableAgenticSearch', false),
                                         enable,
                                         model: geminiModel,
                                         models: GEMINI_TRANSLATION_MODELS
@@ -1905,8 +1909,11 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                         if (typeof msg.enable === 'boolean') {
                                                 await config.update('enableJapaneseTranslation', !!msg.enable, vscode.ConfigurationTarget.Global);
                                         }
+                                        if (typeof msg.agentic === 'boolean') {
+                                                await config.update('enableAgenticSearch', msg.agentic, vscode.ConfigurationTarget.Global);
+                                        }
                                         if (typeof msg.apiKey === 'string') {
-                                                await config.update('geminiApiKey', msg.apiKey, vscode.ConfigurationTarget.Global);
+                                                await config.update('geminiApiKey', msg.apiKey.trim(), vscode.ConfigurationTarget.Global);
                                         }
                                         if (typeof msg.model === 'string') {
                                                 await config.update('geminiModel', normalizeGeminiTranslationModel(msg.model), vscode.ConfigurationTarget.Global);
@@ -1916,6 +1923,8 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                         const geminiModel = normalizeGeminiTranslationModel(updatedConfig.get<string>('geminiModel', DEFAULT_GEMINI_TRANSLATION_MODEL));
                                         webviewView.webview.postMessage({
                                                 type: 'translationSettings',
+                        hasApiKey: !!vscode.workspace.getConfiguration('owlspotlight').get<string>('geminiApiKey', '').trim(),
+                        agentic: vscode.workspace.getConfiguration('owlspotlight').get<boolean>('enableAgenticSearch', false),
                                                 enable,
                                                 model: geminiModel,
                                                 models: GEMINI_TRANSLATION_MODELS,
@@ -2094,6 +2103,8 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 						return;
 					}
 				}
+                                const queryConfig = vscode.workspace.getConfiguration('owlspotlight');
+                                const agenticEnabled = typeof msg.agenticEnabled === 'boolean' ? msg.agenticEnabled : queryConfig.get<boolean>('enableAgenticSearch', false);
                                 let query = msg.text;
                                 const fileExt = msg.lang || '.py';
 				const workspaceFolders = vscode.workspace.workspaceFolders;
@@ -2113,7 +2124,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					geminiModel: typeof msg.geminiModel === 'string' ? msg.geminiModel : undefined
 				};
 				const originalQuery = query;
-				if (searchMode !== 'keyword') {
+				if (searchMode !== 'keyword' && !agenticEnabled) {
 					query = await translateJapaneseToEnglish(query, translationOptions);
                                 if (cancellation?.cancelled) { return; }
 				}
@@ -2128,19 +2139,21 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					webviewView.webview.postMessage({ type: 'error', message: 'Failed to search. Make sure the server is running.' });
 					return;
 				}
-				try {
-					if (cancellation?.cancelled) { return; }
-                                        if (cancellation) { cancellation.serverStarted = true; }
-                                        const res = await fetch(getServerUrl('/search_functions_simple', serverPort), {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({
+                try {
+                    const searchOnce = async (nextQuery: string, mode: DiffSearchMode) => {
+                        cancellation?.controller.signal.throwIfAborted();
+                        if (cancellation) { cancellation.serverStarted = true; }
+                        try {
+                            // Await the actual worker response so Stop never unlocks an active index.
+                            const res = await fetch(getServerUrl('/search_functions_simple', serverPort), {
+                                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
 							directory: folderPath,
-							query,
+                            query: nextQuery,
 							top_k: 30,
 							file_ext: fileExt,
 							include_files: includeFiles,
-							search_mode: searchMode,
+							search_mode: mode,
 							scope,
 							search_target: searchTarget,
 							diff_range_mode: ['branch', 'custom', 'working_tree'].includes(msg.diffRangeMode) ? msg.diffRangeMode : 'branch',
@@ -2148,14 +2161,57 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                                         diff_base_ref: diffBaseRef,
 							diff_head_ref: diffHeadRef
 						})
-					});
-					if (res.status === 409) {
-                                                webviewView.webview.postMessage({ type: 'status', message: 'OwlSpotlight is busy. Wait for the current operation or cancel it.' });
-                                                return;
-                                        }
-                                        if (!res.ok) { throw new Error(`HTTP ${res.status}`); }
-                                        const data: any = await res.json();
-                                if (cancellation?.cancelled) { return; }
+                            });
+                            if (!res.ok) { throw new Error(`HTTP ${res.status}`); }
+                            const response: any = await res.json();
+                            if (response.cancelled && cancellation) {
+                                cancellation.cancelled = true;
+                                cancellation.controller.abort();
+                            }
+                            cancellation?.controller.signal.throwIfAborted();
+                            return response;
+                        } finally {
+                            if (cancellation) { cancellation.serverStarted = false; }
+                        }
+                    };
+                    let data: any;
+                    if (agenticEnabled) {
+                        let generate: GenerateAgent | undefined;
+                        const agent = await runAgenticSearch({
+                            query: originalQuery,
+                            rewriteOptions: { expand: false, translate: translationOptions.enabled ?? queryConfig.get<boolean>('enableJapaneseTranslation', false),
+                                searchMode, searchTarget: searchTarget === 'diff_hunks' ? 'diff_commits' : searchTarget,
+                                embeddingModel: queryConfig.get<string>('modelName', 'Shuu12121/NightOwl-CodeEmbedding') },
+                            model: normalizeGeminiModel(msg.geminiModel || queryConfig.get<string>('geminiModel')),
+                            maxSearches: normalizeAgentSearchLimit(queryConfig.get<number>('agenticMaxSearches', 3)),
+                            signal: cancellation?.controller.signal,
+                            generate: async request => {
+                                if (!generate) {
+                                    const apiKey = queryConfig.get<string>('geminiApiKey', '');
+                                    if (!apiKey) { throw new Error('Gemini API key is not configured.'); }
+                                    const { GoogleGenAI } = await import('@google/genai');
+                                    const ai = new GoogleGenAI({ apiKey });
+                                    generate = params => ai.models.generateContent(params);
+                                }
+                                cancellation?.controller.signal.throwIfAborted();
+                                return generate(request);
+                            },
+                            readCode: createCodeReader(folderPath),
+                            search: async (nextQuery, mode) => (await searchOnce(nextQuery, mode)).results || [],
+                            onProgress: update => {
+                                webviewView.webview.postMessage({ type: 'agentTrace', ...update });
+                                if (!cancellation?.cancelled) {
+                                    webviewView.webview.postMessage({ type: 'status', message: update.status });
+                                }
+                            },
+                            onDiagnostic: diagnostic => this._outputChannel?.appendLine(`[Agentic search] ${diagnostic.phase}/${diagnostic.code}: ${diagnostic.message}`)
+                        });
+                        webviewView.webview.postMessage({ type: 'agentTrace', ...agent, results: undefined });
+                        data = { results: agent.results };
+                    } else {
+                        data = await searchOnce(query, searchMode);
+                    }
+                    if (cancellation?.cancelled) { return; }
 					if (data?.cancelled) {
 						webviewView.webview.postMessage({ type: 'status', message: data.message || 'Indexing / embedding cancelled.' });
 						webviewView.webview.postMessage({ type: 'results', results: [], folderPath });
@@ -2167,6 +2223,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 						webviewView.webview.postMessage({ type: 'results', results: [], folderPath });
 					}
 				} catch {
+                    if (cancellation?.cancelled) { return; }
 					webviewView.webview.postMessage({ type: 'error', message: 'Failed to search. Make sure the server is running.' });
 				}
 			}
@@ -2438,12 +2495,17 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				await this.setupAndStartServer(webviewView);
 			}
 			if (msg.command === 'stopServer') {
+                if (this._operationCancellation) {
+                    this._operationCancellation.cancelled = true;
+                    this._operationCancellation.controller.abort();
+                }
 				console.log('[OwlSpotlight] stopServer command received from Webview');
 				void vscode.commands.executeCommand('owlspotlight.stopServer');
 			}
 			if (msg.command === 'cancelEmbedding') {
 				if (this._operationCancellation) {
 					this._operationCancellation.cancelled = true;
+                    this._operationCancellation.controller.abort();
 					if (!this._operationCancellation.serverStarted) {
 						webviewView.webview.postMessage({ type: 'status', message: 'Stopping…' });
 						return;
@@ -2581,6 +2643,25 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
     <button id="setupAndStartBtn">Setup / Start</button>
     <button id="stopServerBtn" class="secondary-action">Stop Server</button>
   </div>
+  <dialog id="geminiSetupDialog" aria-labelledby="geminiSetupTitle" aria-describedby="geminiSetupIntro">
+    <form id="geminiSetupForm">
+      <h2 id="geminiSetupTitle">Use Gemini</h2>
+      <p id="geminiSetupIntro"></p>
+      <div class="gemini-sharing-details">
+        <p id="geminiTranslationDisclosure"></p>
+        <p id="geminiAgentDisclosure"></p>
+      </div>
+      <button type="button" id="getGeminiApiKeyBtn" class="secondary-action"></button>
+      <label for="geminiApiKeyInput" id="geminiApiKeyLabel">Gemini API key</label>
+      <input id="geminiApiKeyInput" type="password" autocomplete="off" spellcheck="false" />
+      <p id="geminiKeyStatus" class="agent-search-help"></p>
+      <p id="geminiSetupError" role="alert" hidden></p>
+      <div class="gemini-dialog-actions">
+        <button type="button" id="geminiSetupCancelBtn" class="secondary-action"></button>
+        <button type="submit" id="geminiSetupContinueBtn"></button>
+      </div>
+    </form>
+  </dialog>
   <!-- ヘルプモーダル -->
   <div id="helpModal">
     <div class="modal-content">
@@ -2603,6 +2684,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
       <button id="searchBtn">Search</button>
       <button id="cancelOperationBtn" class="secondary-action stop-operation" title="Stop the current operation" aria-label="Stop the current operation" hidden><span aria-hidden="true">■</span> Stop</button>
     </div>
+    <details id="agentTrace" class="agent-trace" hidden><summary>Agent search</summary><div id="agentTraceContent" aria-live="polite"></div></details>
     <div id="diffRangeBar" class="diff-range-bar" style="display:none;" title="Diff range currently being searched"></div>
           <div class="commit-graph-wrap" id="commitGraphWrap" style="display:none;">
             <div class="commit-range-legend"><span class="legend-from">From</span><span class="legend-range">In range</span><span class="legend-to">To</span><span id="commitHistorySummary"></span></div>
@@ -2711,25 +2793,25 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
       </details>
   <details class="translation-settings option-panel" id="translationPanel">
     <summary>
-      <span>Translation</span>
-      <span class="option-summary" id="translationSummary">Off · 3.5 Flash</span>
+      <span>Gemini Search</span>
+      <span class="option-summary" id="translationSummary">Off · 3.8 Flash</span>
     </summary>
     <div class="translation-body">
+      <label class="translation-toggle"><input type="checkbox" id="agenticSearchToggle"><span>Agentic search</span></label>
+      <p class="agent-search-help" id="geminiDisclosureHint">Uses Google’s Gemini API. Your query and, for agentic search, retrieved code excerpts and any full source files read by the agent are sent externally.</p>
+      <button type="button" id="geminiSetupBtn" class="secondary-action">API key &amp; data sharing</button>
+      <p class="agent-search-help"><span id="otherAiHint">If you would like to use another AI provider, please open an issue.</span> <button type="button" id="otherAiIssueBtn" class="secondary-action">Open issue ↗</button></p>
       <label class="translation-toggle">
         <input type="checkbox" id="translateToggle">
         <span>JP → EN</span>
       </label>
       <div class="translation-model">
         <span>Model</span>
-        <select id="geminiModelSelect" class="hidden-select" title="Gemini translation model">
-          <option value="gemini-3.5-flash">3.5 Flash</option>
-          <option value="gemini-3.1-flash-lite">3.1 Flash-Lite</option>
-          <option value="gemini-3.1-pro-preview">3.1 Pro Preview</option>
+        <select id="geminiModelSelect" class="hidden-select" title="Gemini search model">
+          ${GEMINI_TRANSLATION_MODELS.map(model => `<option value="${model}">${geminiModelLabel(model)}</option>`).join('')}
         </select>
-        <div class="segmented-control translation-model-buttons" data-select="geminiModelSelect" role="group" aria-label="Gemini translation model">
-          <button type="button" class="segment-btn active" data-value="gemini-3.5-flash">3.5 Flash</button>
-          <button type="button" class="segment-btn" data-value="gemini-3.1-flash-lite">3.1 Lite</button>
-          <button type="button" class="segment-btn" data-value="gemini-3.1-pro-preview">3.1 Pro</button>
+        <div class="segmented-control translation-model-buttons" data-select="geminiModelSelect" role="group" aria-label="Gemini search model">
+          ${GEMINI_TRANSLATION_MODELS.map((model, index) => `<button type="button" class="segment-btn${index === 0 ? ' active' : ''}" data-value="${model}">${geminiModelLabel(model)}</button>`).join('')}
         </div>
       </div>
     </div>

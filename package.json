@@ -159,22 +159,22 @@
         "owlspotlight.geminiApiKey": {
           "type": "string",
           "default": "",
-          "description": "Google Gemini API key for translation"
+          "description": "Google Gemini API key for agentic search and translation"
         },
         "owlspotlight.geminiModel": {
           "type": "string",
-          "default": "gemini-3.5-flash",
+          "default": "gemini-3.8-flash",
           "enum": [
-            "gemini-3.5-flash",
-            "gemini-3.1-flash-lite",
-            "gemini-3.1-pro-preview"
+            "gemini-3.8-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.5-flash"
           ],
           "enumDescriptions": [
-            "Stable default model for translation.",
-            "Stable, lighter Gemini 3.1 option.",
-            "Preview Gemini 3.1 Pro option."
+            "Default for agentic search and translation.",
+            "Lighter Flash-Lite model.",
+            "Previous Flash model."
           ],
-          "description": "Gemini model used for Japanese query translation"
+          "description": "Gemini model used for agentic search and Japanese query translation"
         },
         "owlspotlight.serverHost": {
           "type": "string",
@@ -230,6 +230,18 @@
             }
           },
           "additionalProperties": false
+        },
+        "owlspotlight.enableAgenticSearch": {
+          "type": "boolean",
+          "default": false,
+          "description": "Let Gemini refine code searches and assess retrieved results. Sends the query and retrieved code excerpts to Gemini using your API key."
+        },
+        "owlspotlight.agenticMaxSearches": {
+          "type": "number",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 6,
+          "description": "Maximum local searches per agentic search, including keyword verification."
         }
       }
     }
@@ -256,7 +268,8 @@
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
-    "test": "vscode-test"
+    "test": "vscode-test",
+    "test:unit": "npm run compile && node --test src/test/*.test.cjs"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",

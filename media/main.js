@@ -27,8 +27,19 @@ window.onload = function() {
         if (search) search.hidden = canStop;
     }
     function postMessage(message) {
+        if (['search', 'getClassStats'].includes(message.command) && !localOperation && !serverOperation &&
+            (message.agenticEnabled || (message.translateEnabled && message.searchMode !== 'keyword')) &&
+            (!geminiNoticeAccepted || !geminiHasApiKey)) {
+            openGeminiSetup(getTranslationSettingsFromControls(), () => postMessage(message));
+            return;
+        }
         if (guardedCommands.has(message.command)) {
             if (localOperation || serverOperation) return;
+            if (message.command === 'search') {
+                const trace = document.getElementById('agentTrace');
+                if (trace) trace.hidden = true;
+                lastAgentTrace = null;
+            }
             localOperation = message.command;
             renderOperationState();
         }
@@ -65,6 +76,10 @@ window.onload = function() {
     let pendingTranslationSettingsRequestId = 0;
     let pendingTranslationSettings = null;
     let translationSettingsSaving = false;
+    let geminiHasApiKey = false;
+    let geminiNoticeAccepted = false;
+    let geminiSetup = null;
+    let lastAgentTrace = null;
 
     // 状態保存/復元
     function collectState() {
@@ -85,7 +100,7 @@ window.onload = function() {
         const translateToggle = document.getElementById('translateToggle');
         const translateEnabled = translateToggle ? !!translateToggle.checked : false;
         const geminiModelSelect = document.getElementById('geminiModelSelect');
-        const geminiModel = geminiModelSelect ? geminiModelSelect.value : 'gemini-3.5-flash';
+        const geminiModel = geminiModelSelect ? geminiModelSelect.value : 'gemini-3.8-flash';
 
         return {
             sessionId: webviewSessionId,
@@ -450,6 +465,7 @@ window.onload = function() {
           };
           const labels = [selectedLabel('scopeSelect'), selectedLabel('searchModeSelect')];
           if (document.getElementById('translateToggle')?.checked) labels.push('JP → EN');
+          if (document.getElementById('agenticSearchToggle')?.checked) labels.push('Agentic');
           summary.textContent = labels.filter(Boolean).join(' · ');
           summary.title = summary.textContent;
         }
@@ -466,15 +482,16 @@ window.onload = function() {
         }
         function getGeminiModelLabel(model) {
           return {
-            'gemini-3.5-flash': '3.5 Flash',
-            'gemini-3.1-flash-lite': '3.1 Lite',
-            'gemini-3.1-pro-preview': '3.1 Pro'
+            'gemini-3.8-flash': '3.8 Flash',
+            'gemini-3.5-flash-lite': '3.5 Lite',
+            'gemini-3.5-flash': '3.5 Flash'
           }[model] || model;
         }
         function getTranslationSettingsFromControls() {
           return {
             enable: !!document.getElementById('translateToggle')?.checked,
-            model: document.getElementById('geminiModelSelect')?.value || 'gemini-3.5-flash'
+            agentic: !!document.getElementById('agenticSearchToggle')?.checked,
+            model: document.getElementById('geminiModelSelect')?.value || 'gemini-3.8-flash'
           };
         }
         function setTranslationSaving(isSaving) {
@@ -488,14 +505,17 @@ window.onload = function() {
           if (tToggle && typeof settings.enable === 'boolean') {
             tToggle.checked = !!settings.enable;
           }
+          const agenticToggle = document.getElementById('agenticSearchToggle');
+          if (agenticToggle && typeof settings.agentic === 'boolean') agenticToggle.checked = settings.agentic;
           const modelSelect = document.getElementById('geminiModelSelect');
           if (modelSelect && settings.model) {
             modelSelect.value = settings.model;
           }
           syncSegmentedControls();
           updateTranslationSummary();
+          updateSettingsSummary();
         }
-        function updateTranslationSettings(partial) {
+        function updateTranslationSettings(partial, apiKey) {
           const next = {
             ...getTranslationSettingsFromControls(),
             ...partial
@@ -508,10 +528,13 @@ window.onload = function() {
           postMessage({
             command: 'updateTranslationSettings',
             enable: next.enable,
+            agentic: next.agentic,
             model: next.model,
+            ...(apiKey ? { apiKey } : {}),
             requestId
           });
           saveState();
+          return requestId;
         }
         function handleTranslationSettingsMessage(msg) {
           const requestId = Number.isFinite(msg.requestId) ? Number(msg.requestId) : 0;
@@ -521,8 +544,10 @@ window.onload = function() {
           if (requestId > 0 && requestId < pendingTranslationSettingsRequestId) {
             return;
           }
+          if (typeof msg.hasApiKey === 'boolean') geminiHasApiKey = msg.hasApiKey;
           const settings = {
             enable: !!msg.enable,
+            agentic: !!msg.agentic,
             model: msg.model || getTranslationSettingsFromControls().model
           };
           applyTranslationSettingsToControls(settings);
@@ -531,16 +556,108 @@ window.onload = function() {
             pendingTranslationSettingsRequestId = 0;
             setTranslationSaving(false);
           }
+          updateGeminiLabels();
+          if (geminiSetup?.requestId === requestId && requestId > 0) {
+            geminiNoticeAccepted = true;
+            const action = geminiSetup.action;
+            closeGeminiSetup(true);
+            if (action) action();
+          } else if (geminiSetup) {
+            renderGeminiSetup();
+          }
           saveState();
         }
         function updateTranslationSummary() {
           const summary = document.getElementById('translationSummary');
           if (!summary) return;
           const enabled = !!document.getElementById('translateToggle')?.checked;
-          const model = document.getElementById('geminiModelSelect')?.value || 'gemini-3.5-flash';
-          summary.textContent = (enabled ? 'On' : 'Off') + ' · ' + getGeminiModelLabel(model) + (translationSettingsSaving ? ' · Saving' : '');
+          const model = document.getElementById('geminiModelSelect')?.value || 'gemini-3.8-flash';
+          summary.textContent = (document.getElementById('agenticSearchToggle')?.checked ? 'Agentic' : enabled ? 'JP → EN' : 'Off') + ' · ' + getGeminiModelLabel(model) + (translationSettingsSaving ? ' · Saving' : '');
           summary.title = summary.textContent;
         }
+        function geminiJapanese() {
+          return !!document.getElementById('translateToggle')?.checked;
+        }
+        function updateGeminiLabels() {
+          const ja = geminiJapanese();
+          document.getElementById('otherAiHint').textContent = ja ? '他のAIを使いたい場合は、Issueを作成してください。' : 'If you would like to use another AI provider, please open an issue.';
+          document.getElementById('otherAiIssueBtn').textContent = ja ? 'Issueを作成 ↗' : 'Open issue ↗';
+          document.getElementById('geminiSetupBtn').textContent = ja ? 'APIキー・外部送信について' : 'API key & data sharing';
+          document.getElementById('geminiDisclosureHint').textContent = ja
+            ? 'GoogleのGemini APIを使用します。検索文と、エージェンティックサーチでは取得したコードの抜粋や、AIが追加取得したファイル全体が外部に送信されます。'
+            : 'Uses Google’s Gemini API. Your query and, for agentic search, retrieved code excerpts and any full source files read by the agent are sent externally.';
+          if (lastAgentTrace) renderAgentTrace(lastAgentTrace);
+          if (currentResults.length) renderResults(currentResults, currentFolderPath || '');
+        }
+        function renderGeminiSetup() {
+          if (!geminiSetup) return;
+          const ja = !!geminiSetup.settings.enable;
+          const text = (id, en, jp) => { document.getElementById(id).textContent = ja ? jp : en; };
+          text('geminiSetupTitle', 'Use Gemini', 'Geminiの利用について');
+          text('geminiSetupIntro', 'These features use Google’s Gemini API. The following data is sent to Google when you search:', 'この機能はGoogleのGemini APIを使用します。検索時に次のデータがGoogleへ送信されます。');
+          text('geminiTranslationDisclosure', 'Translation: your search query.', '翻訳：入力した検索文。');
+          text('geminiAgentDisclosure', 'Agentic search: your query, retrieved code or diff excerpts, file paths, search results, and full source files when the agent requests more context.', 'エージェンティックサーチ：検索文、取得したコードや差分の抜粋、ファイルパス、検索結果、必要に応じてAIが追加取得するファイル全体。');
+          text('getGeminiApiKeyBtn', 'Get an API key ↗ Google AI Studio', 'APIキーを取得 ↗ Google AI Studio');
+          text('geminiApiKeyLabel', 'Gemini API key', 'Gemini APIキー');
+          text('geminiKeyStatus', geminiHasApiKey ? 'An API key is already configured. Leave blank to keep it.' : 'Create a key in Google AI Studio, then paste it here.', geminiHasApiKey ? 'APIキーは設定済みです。空欄なら現在のキーを使用します。' : 'Google AI Studioでキーを作成し、ここに貼り付けてください。');
+          text('geminiSetupCancelBtn', 'Cancel', 'キャンセル');
+          text('geminiSetupContinueBtn', geminiSetup.requestId ? 'Saving…' : 'Save and continue', geminiSetup.requestId ? '保存中…' : '保存して続ける');
+          document.getElementById('geminiSetupContinueBtn').disabled = !!geminiSetup.requestId || (!geminiHasApiKey && !document.getElementById('geminiApiKeyInput').value.trim());
+          document.getElementById('geminiSetupCancelBtn').disabled = !!geminiSetup.requestId;
+          document.getElementById('geminiApiKeyInput').disabled = !!geminiSetup.requestId;
+        }
+        function openGeminiSetup(settings, action) {
+          if (geminiSetup) return;
+          geminiSetup = { settings, action, previous: getTranslationSettingsFromControls(), focus: document.activeElement, requestId: 0 };
+          document.getElementById('geminiApiKeyInput').value = '';
+          document.getElementById('geminiSetupError').hidden = true;
+          renderGeminiSetup();
+          document.getElementById('geminiSetupDialog').showModal();
+        }
+        function closeGeminiSetup(accepted = false) {
+          if (!accepted && geminiSetup?.previous) {
+            applyTranslationSettingsToControls(geminiSetup.previous);
+            updateGeminiLabels();
+            if (geminiSetup.action && !localOperation && !serverOperation) {
+              document.getElementById('status').textContent = geminiSetup.settings.enable ? '検索を開始しませんでした。' : 'Search was not started.';
+            }
+          }
+          const focus = geminiSetup?.focus;
+          document.getElementById('geminiApiKeyInput').value = '';
+          document.getElementById('geminiSetupDialog').close();
+          geminiSetup = null;
+          focus?.focus();
+        }
+        function changeGeminiSetting(key, checked) {
+          const next = { ...getTranslationSettingsFromControls(), [key]: checked };
+          if (checked) {
+            // Keep the feature off until the disclosure has been acknowledged.
+            document.getElementById(key === 'enable' ? 'translateToggle' : 'agenticSearchToggle').checked = false;
+            openGeminiSetup(next);
+          } else {
+            updateTranslationSettings(next);
+          }
+        }
+        document.getElementById('otherAiIssueBtn').onclick = () => postMessage({ command: 'openExternal', url: 'https://github.com/Shun0212/owlspotlight/issues/new' });
+        document.getElementById('geminiSetupBtn').onclick = () => openGeminiSetup(getTranslationSettingsFromControls());
+        document.getElementById('getGeminiApiKeyBtn').onclick = () => postMessage({ command: 'openExternal', url: 'https://aistudio.google.com/apikey' });
+        document.getElementById('geminiApiKeyInput').oninput = renderGeminiSetup;
+        document.getElementById('geminiSetupCancelBtn').onclick = () => closeGeminiSetup();
+        document.getElementById('geminiSetupDialog').addEventListener('cancel', event => {
+          event.preventDefault();
+          if (!geminiSetup?.requestId) closeGeminiSetup();
+        });
+        document.getElementById('geminiSetupForm').onsubmit = event => {
+          event.preventDefault();
+          if (!geminiSetup || geminiSetup.requestId) return;
+          const key = document.getElementById('geminiApiKeyInput').value.trim();
+          if (!geminiHasApiKey && !key) return;
+          document.getElementById('geminiSetupError').hidden = true;
+          geminiSetup.requestId = updateTranslationSettings(geminiSetup.settings, key);
+          document.getElementById('geminiApiKeyInput').value = '';
+          renderGeminiSetup();
+        };
+
         function updateSearchBehaviorSummary() {
           const summary = document.querySelector('#searchBehaviorPanel .option-summary');
           if (!summary) return;
@@ -1134,11 +1251,14 @@ window.onload = function() {
             }
         }
 
+        const agenticSearchToggle = document.getElementById('agenticSearchToggle');
+        if (agenticSearchToggle) agenticSearchToggle.onchange = () => changeGeminiSetting('agentic', agenticSearchToggle.checked);
+
         // 翻訳設定のトグル
         const translateToggle = document.getElementById('translateToggle');
         if (translateToggle) {
           translateToggle.onchange = () => {
-            updateTranslationSettings({ enable: translateToggle.checked });
+            changeGeminiSetting('enable', translateToggle.checked);
           };
         }
         const geminiModelSelect = document.getElementById('geminiModelSelect');
@@ -1178,6 +1298,7 @@ window.onload = function() {
                           diffBaseRef,
                           diffHeadRef,
                           translateEnabled: translationSettings.enable,
+                          agenticEnabled: translationSettings.agentic,
                           geminiModel: translationSettings.model
                         });
                         saveState();
@@ -1591,6 +1712,106 @@ window.onload = function() {
         }).join('');
     }
 
+    function createAgentGuide(result) {
+        const pages = Array.isArray(result.agent_code_pages) ? result.agent_code_pages : [];
+        if (!pages.length) return null;
+        const guide = document.createElement('div');
+        guide.className = 'agent-guide';
+        guide.onclick = event => event.stopPropagation();
+        const heading = document.createElement('div');
+        heading.className = 'agent-guide-title';
+        heading.textContent = result.agent_card_title || (geminiJapanese() ? 'ここを確認' : 'Look here');
+        guide.appendChild(heading);
+        const location = document.createElement('div');
+        location.className = 'agent-code-location';
+        location.textContent = pages[0].path + ' · ' + (pages[0].version === 'working-tree'
+            ? (geminiJapanese() ? '取得時のコード' : 'Captured source') : pages[0].version);
+        guide.appendChild(location);
+        const highlights = (Array.isArray(result.agent_highlights) ? result.agent_highlights : []).filter(h =>
+            ['blue', 'green', 'amber', 'purple'].includes(h.color) && Number.isInteger(h.startLine) && Number.isInteger(h.endLine)
+            && h.startLine > 0 && h.endLine >= h.startLine && h.endLine - h.startLine < 20
+            && pages.some(p => h.startLine >= p.startLine && h.endLine <= p.endLine)).slice(0, 4);
+        const lineNodes = new Map();
+        function codeLines(page, start, end, highlight) {
+            const pre = document.createElement('pre');
+            pre.className = 'agent-code';
+            for (let number = start; number <= end; number++) {
+                const line = document.createElement('span');
+                const focus = highlight || highlights.find(h => number >= h.startLine && number <= h.endLine);
+                line.className = 'agent-code-line' + (focus ? ' agent-color-' + focus.color : '');
+                const gutter = document.createElement('span');
+                gutter.className = 'agent-line-number';
+                gutter.textContent = String(number);
+                line.appendChild(gutter);
+                line.appendChild(document.createTextNode(page.lines[number - page.startLine] || ' '));
+                pre.appendChild(line);
+                if (!highlight) lineNodes.set(number, line);
+            }
+            return pre;
+        }
+        const details = document.createElement('details');
+        details.className = 'agent-code-details';
+        const summary = document.createElement('summary');
+        summary.textContent = geminiJapanese() ? '取得したコードを表示' : 'Show retrieved code';
+        details.appendChild(summary);
+        for (const h of highlights) {
+            const page = pages.find(p => h.startLine >= p.startLine && h.endLine <= p.endLine);
+            const focus = document.createElement('div');
+            focus.className = 'agent-focus agent-color-' + h.color;
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'agent-focus-heading';
+            button.textContent = 'L' + h.startLine + (h.endLine !== h.startLine ? '–' + h.endLine : '') + ' · ' + h.label;
+            button.title = geminiJapanese() ? '取得したコード内のこの行を表示' : 'Show this range in the retrieved code';
+            button.onclick = () => {
+                details.open = true;
+                lineNodes.get(h.startLine)?.scrollIntoView({ block: 'nearest' });
+            };
+            focus.appendChild(button);
+            focus.appendChild(codeLines(page, h.startLine, h.endLine, h));
+            guide.appendChild(focus);
+        }
+        pages.slice().sort((a, b) => a.startLine - b.startLine).forEach(page => {
+            const caption = document.createElement('div');
+            caption.className = 'agent-code-location';
+            caption.textContent = 'L' + page.startLine + '–' + page.endLine + ' / ' + page.totalLines + (geminiJapanese() ? ' 行' : ' lines');
+            details.appendChild(caption);
+            details.appendChild(codeLines(page, page.startLine, page.endLine));
+        });
+        guide.appendChild(details);
+        return guide;
+    }
+
+    function renderAgentTrace(message) {
+        lastAgentTrace = message;
+        const ja = geminiJapanese();
+        const trace = document.getElementById('agentTrace');
+        const content = document.getElementById('agentTraceContent');
+        if (!trace || !content) return;
+        trace.hidden = false;
+        trace.querySelector('summary').textContent = ja ? 'エージェントの検索過程' : 'Agent search';
+        const steps = Array.isArray(message.steps) ? message.steps : [];
+        content.innerHTML = (steps.length ? '<ol>' + steps.map(step =>
+            '<li><strong>' + escapeHtml(step.mode || '') + ': ' + escapeHtml(step.query || '') + '</strong> · ' +
+            (step.status === 'complete' ? (Number(step.resultCount) || 0) + (ja ? ' 件' : ' results') : escapeHtml(ja ? ({ running: '検索中', failed: '失敗', cancelled: '停止' }[step.status] || step.status || '') : step.status || '')) +
+            '<br>' + escapeHtml(step.reason || '') + '</li>'
+        ).join('') + '</ol>' : '') + '<p>' + escapeHtml(message.summary || message.status || '') + '</p>';
+        if (Array.isArray(message.reads) && message.reads.length) {
+            content.innerHTML += '<ul>' + message.reads.map(read => '<li>' +
+                escapeHtml((ja ? 'コード取得 ' : 'Read code ') + read.resultId + ' · L' + read.startLine + (read.endLine ? '–' + read.endLine : '')) +
+                ' · ' + escapeHtml(ja ? ({ complete: '取得済み', failed: '取得失敗', running: '取得中', cancelled: '停止' }[read.status] || read.status) : read.status) +
+                '<br>' + escapeHtml(read.reason) + '</li>').join('') + '</ul>';
+        }
+        if (Array.isArray(message.warnings)) {
+            content.innerHTML += message.warnings.map(warning => '<p>' + escapeHtml(warning) + '</p>').join('');
+        }
+        if (Array.isArray(message.diagnostics) && message.diagnostics.length) {
+            content.innerHTML += '<details><summary>' + (ja ? '診断情報' : 'Diagnostics') + '</summary>' + message.diagnostics.map(item =>
+                '<p>' + escapeHtml(item.code) + ': ' + escapeHtml(item.message) + '</p>'
+            ).join('') + '</details>';
+        }
+    }
+
     // 結果描画を関数化（復元時にも利用）
     function renderResults(results, folderPath) {
         const resultsContainer = document.getElementById('results');
@@ -1695,8 +1916,9 @@ window.onload = function() {
             resultDiv.className = itemClass;
 
             // スコアバッジ。hybrid は順位用、semantic/BM25 は内訳として表示する。
-            const hasScore = typeof r.score === 'number' || typeof r.similarity === 'number';
-            const rankScore = typeof r.hybrid_score === 'number' ? r.hybrid_score : (typeof r.score === 'number' ? r.score : r.similarity || 0);
+            const assessed = Number.isInteger(r.agent_relevance) && r.agent_relevance >= 0 && r.agent_relevance <= 100;
+            const hasScore = !r.agent_result_id && (typeof r.score === 'number' || typeof r.similarity === 'number');
+            const rankScore = r.agent_result_id ? (assessed ? r.agent_relevance / 100 : 0) : typeof r.hybrid_score === 'number' ? r.hybrid_score : (typeof r.score === 'number' ? r.score : r.similarity || 0);
             const semanticScore = formatScore(r.semantic_similarity);
             const bm25Score = formatScore(r.bm25_score);
             const rankScoreText = formatScore(rankScore);
@@ -1704,12 +1926,16 @@ window.onload = function() {
             let barClass = 'bar-low';
             if (rankScore >= 0.7) { scoreClass = 'score-high'; barClass = 'bar-high'; }
             else if (rankScore >= 0.4) { scoreClass = 'score-mid'; barClass = 'bar-mid'; }
-            const scoreBadge = hasScore
+            const relevanceTitle = geminiJapanese() ? 'Geminiによる関連度の推定（確率ではありません）' : 'Gemini relevance estimate; not a probability';
+            const scoreBadge = r.agent_result_id
+                ? '<span class="score-badge ' + scoreClass + '" title="' + relevanceTitle + '">' + (assessed ? (geminiJapanese() ? '関連度 ' : '') + r.agent_relevance : (geminiJapanese() ? '未評価' : '—')) + '</span>'
+                : hasScore
                 ? '<span class="score-badge ' + scoreClass + '" title="Relative score used for ordering within this result set">' + rankScoreText + '</span>'
                 : '';
             const staticInfo = r.python_static || {};
             const metaBadges = [];
             metaBadges.push('<span class="meta-badge type-badge">' + symbolLabel(r) + '</span>');
+            if (r.agent_result_id) metaBadges.push('<span class="meta-badge score-meta" title="' + relevanceTitle + '">' + (geminiJapanese() ? 'AI関連度' : 'AI relevance') + '</span>');
             if (Array.isArray(staticInfo.framework_tags)) {
                 staticInfo.framework_tags.slice(0, 2).forEach(tag => metaBadges.push('<span class="meta-badge">' + escapeHtml(tag) + '</span>'));
             }
@@ -1744,8 +1970,8 @@ window.onload = function() {
             const rankBadge = '<span class="' + rankClass + '">' + (index + 1) + '</span>';
 
             // 類似度バー
-            const barWidth = maxScore > 0 ? ((rankScore / maxScore) * 100).toFixed(1) : '0';
-            const scoreBar = hasScore
+            const barWidth = r.agent_result_id ? (assessed ? String(r.agent_relevance) : '0') : maxScore > 0 ? ((rankScore / maxScore) * 100).toFixed(1) : '0';
+            const scoreBar = hasScore || (r.agent_result_id && assessed)
                 ? '<div class="score-bar-wrapper"><div class="score-bar ' + barClass + '" style="width:' + barWidth + '%;"></div></div>'
                 : '';
             const snippetSource = r.raw_code || r.code || '';
@@ -1764,8 +1990,13 @@ window.onload = function() {
                 '</div>' +
                 '<div class="result-path">' + escapeHtml(relPath) + ':' + (r.lineno || r.line_number || 1) + '</div>' +
                 metaLine +
+                (r.agent_change_summary ? '<div class="agent-result-summary">' + escapeHtml(r.agent_change_summary) + '</div>' : '') +
+                (r.agent_relevance_reason ? '<div class="agent-result-reason">' + escapeHtml(r.agent_relevance_reason) + '</div>' : '') +
                 '<div class="result-snippet' + (isDiffResult ? ' diff-snippet' : '') + '">' + snippet + '</div>' +
                 scoreBar;
+
+            const guide = createAgentGuide(r);
+            if (guide) resultDiv.appendChild(guide);
 
             const fileAttr = r.file_path || r.file;
             const lineAttr = r.lineno || r.line_number || 1;
@@ -1901,7 +2132,17 @@ window.onload = function() {
                                 pendingTranslationSettings = null;
                                 pendingTranslationSettingsRequestId = 0;
                                 setTranslationSaving(false);
+                                if (geminiSetup?.requestId === requestId) {
+                                  geminiSetup.requestId = 0;
+                                  const error = document.getElementById('geminiSetupError');
+                                  error.textContent = geminiSetup.settings.enable ? '保存できませんでした。もう一度お試しください。' : 'Could not save settings. Please try again.';
+                                  error.hidden = false;
+                                  renderGeminiSetup();
+                                }
                         }
+                }
+                if (msg.type === 'agentTrace') {
+                    renderAgentTrace(msg);
                 }
                 if (msg.type === 'translatedQuery') {
                         const el = document.getElementById('translatedQuery');
@@ -1979,7 +2220,7 @@ window.onload = function() {
                         const statusEl = document.getElementById('status');
                         if (statusEl) {
                                 const lower = (msg.message || '').toLowerCase();
-                                const busy = !/cancelled|stopped|completed|failed/.test(lower) && /search|index|building|embedding|setting up|starting|checking|stopping/.test(lower);
+                                const busy = !/cancelled|stopped|completed|failed|停止しました|完了|失敗/.test(lower) && /search|index|building|embedding|setting up|starting|checking|stopping|agent reviewing|agent retry|reading full code|reviewing retrieved code|検索|確認しています|再試行/.test(lower);
                                 if (busy) {
                                         statusEl.innerHTML = loadingHTML(msg.message);
                                 } else {

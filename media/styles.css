@@ -1707,3 +1707,41 @@ summary:focus-visible, button:focus-visible { outline: 1px solid var(--vscode-fo
 }
 .searchbar .stop-operation:hover:not(:disabled) { background: #991b1b; }
 .stop-operation span { font-size: 0.8em; margin-right: 4px; }
+
+.agent-trace { margin: 0.3em 0.8em 0.7em; padding: 0.6em; border: 1px solid var(--vscode-sideBarSectionHeader-border, #ccc); border-radius: 5px; font-size: 0.85em; overflow-wrap: anywhere; }
+.agent-trace[hidden] { display: none; }
+.agent-trace > summary { cursor: pointer; }
+.agent-trace ol { padding-left: 1.5em; }
+.agent-trace li + li { margin-top: 0.6em; }
+.agent-search-help, .agent-result-reason { color: var(--vscode-descriptionForeground, #666); font-size: 0.85em; line-height: 1.5; }
+.agent-result-summary, .agent-result-reason { margin: 0.4em 0; overflow-wrap: anywhere; }
+
+/* Gemini setup uses the same theme colors and compact controls as the sidebar. */
+#geminiSetupDialog { box-sizing: border-box; width: calc(100% - 24px); max-width: 440px; max-height: calc(100vh - 32px); padding: 18px; border: 1px solid var(--vscode-widget-border, #ccc); border-radius: 8px; background: var(--vscode-editor-background, #fff); color: var(--vscode-editor-foreground, #222); box-shadow: 0 8px 32px #0004; overflow-y: auto; }
+#geminiSetupDialog::backdrop { background: #0006; }
+#geminiSetupForm { display: flex; flex-direction: column; gap: 12px; }
+#geminiSetupForm h2 { font-size: 1.15em; margin: 0; }
+#geminiSetupForm p { margin: 0; font-size: 0.9em; line-height: 1.55; overflow-wrap: anywhere; }
+.gemini-sharing-details { padding: 10px; border-radius: 5px; background: var(--vscode-textBlockQuote-background, #f3f3f3); border-left: 3px solid var(--vscode-focusBorder, #0078d4); }
+.gemini-sharing-details p + p { margin-top: 8px !important; }
+#geminiApiKeyInput { box-sizing: border-box; width: 100%; min-width: 0; }
+#geminiSetupForm button { white-space: normal; }
+.gemini-dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+#geminiSetupError { color: var(--vscode-errorForeground, #b91c1c); }
+.agent-result-summary { font-size: 0.88em; line-height: 1.5; }
+.agent-result-reason { padding-left: 8px; border-left: 2px solid var(--vscode-sideBarSectionHeader-border, #ccc); }
+
+.agent-guide { margin-top: 0.65em; cursor: default; border-top: 1px solid var(--vscode-sideBarSectionHeader-border, #ddd); padding-top: 0.6em; }
+.agent-guide-title { font-size: 0.9em; font-weight: 600; }
+.agent-code-location { margin: 0.3em 0; color: var(--vscode-descriptionForeground, #777); font-size: 0.75em; overflow-wrap: anywhere; }
+.agent-color-blue { --agent-accent: #4f9cff; --agent-tint: rgba(79,156,255,0.13); }
+.agent-color-green { --agent-accent: #22b07d; --agent-tint: rgba(34,176,125,0.13); }
+.agent-color-amber { --agent-accent: #e0a23a; --agent-tint: rgba(224,162,58,0.13); }
+.agent-color-purple { --agent-accent: #a879df; --agent-tint: rgba(168,121,223,0.13); }
+.agent-focus { margin: 0.5em 0; border-left: 3px solid var(--agent-accent); background: var(--agent-tint); border-radius: 3px; }
+.agent-focus-heading { display: block; width: 100%; padding: 0.45em 0.55em; text-align: left; white-space: normal; overflow-wrap: anywhere; background: transparent; color: var(--vscode-foreground, #333); box-shadow: none; }
+.agent-focus-heading:hover { background: var(--agent-tint); box-shadow: none; }
+.agent-code { margin: 0.3em 0; padding: 0.3em 0; max-height: 260px; overflow: auto; font-family: var(--vscode-editor-font-family, monospace); font-size: 0.8em; line-height: 1.6; color: var(--vscode-editor-foreground, #333); background: var(--vscode-textCodeBlock-background, #f3f3f3); }
+.agent-code-line { display: block; width: max-content; min-width: 100%; background: var(--agent-tint, transparent); }
+.agent-line-number { display: inline-block; min-width: 3em; padding: 0 0.6em; box-sizing: border-box; color: var(--vscode-descriptionForeground, #777); user-select: none; text-align: right; }
+.agent-code-details > summary { cursor: pointer; font-size: 0.8em; padding: 0.4em 0; color: var(--vscode-descriptionForeground, #777); }
