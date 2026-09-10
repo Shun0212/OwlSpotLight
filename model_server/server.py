@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
 import torch
@@ -42,8 +42,10 @@ from indexer import CodeIndexer
 import progress
 from git_history import resolve_history, history_log_args
 from operation_lock import OperationLock
+from agent_cards import AgentCards
 
 operations = OperationLock()
+agent_cards = AgentCards()
 
 # モデル管理を model.py から import
 from model import get_model, get_current_device, cleanup_memory, encode_code, DEFAULT_MODEL, get_device
@@ -100,6 +102,7 @@ settings.batch_size = normalize_batch_size(settings.batch_size)
 
 # リクエスト用の Pydantic モデル
 class EmbedRequest(BaseModel):
+    operation_id: Optional[str] = None
     texts: list[str]
 
 class IndexStatus(BaseModel):
@@ -109,10 +112,12 @@ class IndexStatus(BaseModel):
     up_to_date: bool
 
 class BuildIndexRequest(BaseModel):
+    operation_id: Optional[str] = None
     directory: str
     file_ext: str = ".py"
 
 class SearchFunctionsSimpleRequest(BaseModel):
+    operation_id: Optional[str] = None
     directory: str
     query: str
     top_k: int = 5
@@ -136,6 +141,7 @@ class SearchFunctionsSimpleRequest(BaseModel):
     force_diff_refresh: bool = False
 
 class PrepareDiffSearchRequest(BaseModel):
+    operation_id: Optional[str] = None
     directory: str
     file_ext: str = ".py"
     include_files: Optional[List[str]] = None
@@ -149,6 +155,17 @@ class PrepareDiffSearchRequest(BaseModel):
     diff_range_mode: str = "legacy"
     first_parent: bool = False
     force: bool = False
+
+class AgentCodeRequest(BaseModel):
+    event_id: int
+    result_id: str
+    directory: str
+    start_line: int = 1
+
+class AgentAnnotationRequest(AgentCodeRequest):
+    title: str = ""
+    reason: str = ""
+    highlights: list[dict] = []
 
 class AgentSearchFeedbackRequest(BaseModel):
     event_id: int
@@ -184,6 +201,7 @@ class FunctionRangeRequest(BaseModel):
 
 # クラス統計表示用のリクエストモデル
 class ClassStatsRequest(BaseModel):
+    operation_id: Optional[str] = None
     directory: str
     query: str  # 検索クエリ
     top_k: int = 50  # 上位何件の関数を取得するか
@@ -1904,6 +1922,8 @@ def record_diff_agent_event(req: SearchFunctionsSimpleRequest, response: dict, m
         "file_ext": req.file_ext,
         "top_k": req.top_k,
         "scope": req.scope or "diff",
+        "diff_range_mode": req.diff_range_mode,
+        "first_parent": req.first_parent,
         "search_target": response.get("search_target"),
         "diff_compare": response.get("diff_compare"),
         "diff_base_ref": response.get("diff_base_ref"),
@@ -2158,13 +2178,15 @@ def embed(req: EmbedRequest):
         progress.finish()
 
 @app.post("/cancel_embedding")
-async def cancel_embedding():
-    progress.request_cancel()
-    return {"message": "Cancellation requested for the current indexing/embedding operation.", "cancel_requested": True}
+async def cancel_embedding(req: dict = Body(default={})):
+    operation_id = req.get("operation_id")
+    if operation_id is not None and (not isinstance(operation_id, str) or not operation_id or len(operation_id) > 200):
+        raise HTTPException(status_code=400, detail="Invalid operation_id")
+    return operations.cancel(operation_id)
 
 @app.post("/cancel_indexing")
-async def cancel_indexing():
-    return await cancel_embedding()
+async def cancel_indexing(req: dict = Body(default={})):
+    return await cancel_embedding(req)
 
 @app.post("/build_index")
 @operations.exclusive
@@ -2295,6 +2317,11 @@ def _search_functions_simple(req: SearchFunctionsSimpleRequest):
                 "file_ext": req.file_ext,
                 "top_k": req.top_k,
                 "scope": effective_scope,
+                "search_target": req.search_target,
+                "diff_range_mode": req.diff_range_mode,
+                "first_parent": req.first_parent,
+                "diff_base_ref": req.diff_base_ref,
+                "diff_head_ref": req.diff_head_ref,
                 "include_globs": normalize_glob_patterns(req.include_globs),
                 "exclude_globs": normalize_glob_patterns(req.exclude_globs),
                 "search_mode": search_mode_value,
@@ -2502,10 +2529,39 @@ def _search_functions_simple(req: SearchFunctionsSimpleRequest):
         }
 
 
+def scoped_agent_event(event_id: int, directory: str):
+    event = find_agent_search_event(event_id)
+    if not event or os.path.realpath(event.get("directory", "")) != os.path.realpath(directory):
+        raise HTTPException(status_code=404, detail="Search event not found in this workspace.")
+    return event
+
+
+@app.post("/agent_read_code")
+def agent_read_code_api(req: AgentCodeRequest):
+    event = scoped_agent_event(req.event_id, req.directory)
+    try:
+        return {"event_id": req.event_id, "result_id": req.result_id,
+                "page": agent_cards.read(event, req.result_id, req.start_line)}
+    except (ValueError, OSError, subprocess.SubprocessError) as error:
+        raise HTTPException(status_code=400, detail=str(error))
+
+
+@app.post("/agent_result_annotations")
+def agent_result_annotations_api(req: AgentAnnotationRequest):
+    event = scoped_agent_event(req.event_id, req.directory)
+    try:
+        result = agent_cards.annotate(event, req.result_id, req.title, req.reason, req.highlights)
+        return {"ok": True, "event_id": req.event_id, "result_id": req.result_id,
+                "title": result.get("agent_card_title")}
+    except (ValueError, OSError, subprocess.SubprocessError) as error:
+        raise HTTPException(status_code=400, detail=str(error))
+
+
 @app.get("/agent_search_events")
-async def agent_search_events_api(since_id: int = 0, limit: int = 20):
+async def agent_search_events_api(since_id: int = 0, limit: int = 20, directory: Optional[str] = None):
     with agent_event_lock:
-        events = [event for event in agent_search_events if event["id"] > since_id]
+        events = [event for event in agent_search_events if event["id"] > since_id
+                  and (directory is None or os.path.realpath(event.get("directory", "")) == os.path.realpath(directory))]
         return {"events": events[-max(1, min(limit, 100)) :]}
 
 @app.post("/agent_search_feedback")

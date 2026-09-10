@@ -3,7 +3,7 @@
   "displayName": "owlspotlight",
   "description": "Highlight similar code snippets using semantic search.",
   "publisher": "Shun0212",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "keywords": [
     "semantic search",
     "code search",
@@ -159,7 +159,7 @@
         "owlspotlight.geminiApiKey": {
           "type": "string",
           "default": "",
-          "description": "Google Gemini API key for agentic search and translation"
+          "description": "Legacy Gemini API key. Use Gemini Search → API key & data sharing; existing values migrate to VS Code SecretStorage."
         },
         "owlspotlight.geminiModel": {
           "type": "string",
@@ -234,7 +234,7 @@
         "owlspotlight.enableAgenticSearch": {
           "type": "boolean",
           "default": false,
-          "description": "Let Gemini refine code searches and assess retrieved results. Sends the query and retrieved code excerpts to Gemini using your API key."
+          "description": "Let Gemini refine searches and assess results. Sends queries, retrieved excerpts and requested source files to Google using your API key."
         },
         "owlspotlight.agenticMaxSearches": {
           "type": "number",
@@ -287,6 +287,7 @@
     "url": "https://github.com/Shun0212/owlspotlight.git"
   },
   "dependencies": {
-    "@google/genai": "^1.4.0"
+    "@google/genai": "^1.4.0",
+    "@iarna/toml": "^2.2.5"
   }
 }

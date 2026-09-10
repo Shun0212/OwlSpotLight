@@ -9,7 +9,7 @@ import unittest
 from typing import List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Body
 from pydantic import BaseModel
 import progress
 from operation_lock import OperationLock
@@ -33,7 +33,7 @@ class OperationTests(unittest.IsolatedAsyncioTestCase):
 
         self.app = FastAPI()
         namespace = dict(app=self.app, operations=self.gate, progress=progress,
-                         BaseModel=BaseModel, List=List, Optional=Optional, index_lock=Lock(), build_index=build,
+                         BaseModel=BaseModel, Body=Body, HTTPException=HTTPException, List=List, Optional=Optional, index_lock=Lock(), build_index=build,
                          print=lambda *args: None)
         tree = ast.parse((Path(__file__).resolve().parents[1] / 'server.py').read_text())
         names = {'BuildIndexRequest', 'build_index_api', 'cancel_embedding', 'index_progress',
@@ -101,6 +101,29 @@ class OperationTests(unittest.IsolatedAsyncioTestCase):
         def next_search():
             return {"results": ["new result"]}
         self.assertEqual(next_search()["results"], ["new result"])
+
+    async def test_scoped_cancel_does_not_stop_other_operation(self):
+        running = asyncio.create_task(self.request_api('/build_index', {'directory': '/test', 'operation_id': 'sidebar'}))
+        try:
+            self.assertTrue(await asyncio.to_thread(self.started.wait, 2))
+            _, data = await self.request_api('/cancel_embedding', {'operation_id': 'old-codex-request'})
+            self.assertFalse(data['cancel_requested'])
+            self.assertFalse(progress.is_cancelled())
+            _, data = await self.request_api('/cancel_embedding', {'operation_id': 'sidebar'})
+            self.assertTrue(data['cancel_requested'])
+            self.assertTrue(progress.is_cancelled())
+        finally:
+            self.release.set()
+            await running
+
+    async def test_cancel_before_search_arrives_is_not_lost(self):
+        await self.request_api('/cancel_embedding', {'operation_id': 'early'})
+        self.release.set()
+        _, result = await self.request_api('/build_index', {'directory': '/test', 'operation_id': 'early'})
+        self.assertTrue(result['cancelled'])
+        self.assertFalse(self.started.is_set())
+        _, result = await self.request_api('/build_index', {'directory': '/test', 'operation_id': 'next'})
+        self.assertNotIn('cancelled', result)
 
     async def test_failure_releases_lock(self):
         self.release.set()

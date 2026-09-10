@@ -1,3 +1,7 @@
+import * as TOML from '@iarna/toml';
+import { CODEX_TOOL_TIMEOUT, shellQuote, updateProjectCodexConfig, writeMcpRuntime } from './codexSetup';
+import * as crypto from 'crypto';
+import { GeminiCredentials } from './geminiCredentials';
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
@@ -60,7 +64,10 @@ function normalizeGeminiTranslationModel(model?: string): string {
 		: DEFAULT_GEMINI_TRANSLATION_MODEL;
 }
 
+let geminiCredentials: GeminiCredentials;
+
 type TranslationRuntimeOptions = {
+    signal?: AbortSignal;
 	enabled?: boolean;
 	geminiModel?: string;
 };
@@ -704,7 +711,6 @@ async function translateJapaneseToEnglish(text: string, options: TranslationRunt
     const enabled = typeof options.enabled === 'boolean'
         ? options.enabled
         : config.get<boolean>('enableJapaneseTranslation', false);
-    const geminiApiKey = config.get<string>('geminiApiKey', '');
     const configuredModel = config.get<string>('geminiModel', DEFAULT_GEMINI_TRANSLATION_MODEL);
     const geminiModel = normalizeGeminiTranslationModel(options.geminiModel || configuredModel);
     
@@ -717,11 +723,13 @@ async function translateJapaneseToEnglish(text: string, options: TranslationRunt
         return text;
     }
     
-    return await translateWithGemini(text, geminiApiKey, geminiModel);
+    options.signal?.throwIfAborted();
+    const geminiApiKey = await geminiCredentials.get();
+    return await translateWithGemini(text, geminiApiKey, geminiModel, options.signal);
 }
 
 // Gemini APIを使用した翻訳
-async function translateWithGemini(text: string, geminiApiKey: string, geminiModel: string = DEFAULT_GEMINI_TRANSLATION_MODEL): Promise<string> {
+async function translateWithGemini(text: string, geminiApiKey: string, geminiModel: string = DEFAULT_GEMINI_TRANSLATION_MODEL, signal?: AbortSignal): Promise<string> {
     try {
         
         if (!geminiApiKey) {
@@ -758,6 +766,8 @@ async function translateWithGemini(text: string, geminiApiKey: string, geminiMod
             contents: prompt,
             config: {
                 temperature: 0,
+                abortSignal: signal,
+                httpOptions: { timeout: 60000 },
             },
         });
         
@@ -780,6 +790,7 @@ async function translateWithGemini(text: string, geminiApiKey: string, geminiMod
         return translatedText || text;
         
     } catch (e: any) {
+        signal?.throwIfAborted();
         console.error('Gemini translation error:', e);
         vscode.window.showWarningMessage('Gemini translation failed: ' + e.message);
         return text;
@@ -1279,40 +1290,30 @@ function buildAgentSetupPayload(
 			}
 		}
 	};
-	const codexCommand = [
-		'codex',
-		'mcp',
-		'add',
-		'owlspotlight',
-		'--env',
-		'PYTHONUTF8=1',
-		'--env',
-		'PYTHONIOENCODING=utf-8',
-		'--env',
-		`OWLSPOTLIGHT_SERVER_URL=${serverUrl}`,
-		'--env',
-		`OWLSPOTLIGHT_WORKSPACE=${workspaceRoot}`,
-		'--',
-		mcpPythonCommand,
-		mcpServerPath
-	].map(part => part.includes(' ') ? `"${part.replace(/"/g, '\\"')}"` : part).join(' ');
+    const launcher = writeMcpRuntime(context.globalStorageUri.fsPath, workspaceRoot, mcpPythonCommand, mcpServerPath, serverUrl, vscode.workspace.getConfiguration('owlspotlight').get<boolean>('enableJapaneseTranslation', false) ? 'ja' : 'en');
+    const codexServer = { command: process.execPath, args: [launcher], cwd: workspaceRoot,
+        env: { ELECTRON_RUN_AS_NODE: '1' }, startup_timeout_sec: 30, tool_timeout_sec: CODEX_TOOL_TIMEOUT };
+    const codexCommand = (process.platform === 'win32' ? '& ' : '') + ['codex', '-c', `mcp_servers.owlspotlight=${TOML.stringify.value(codexServer)}`].map(part => shellQuote(part)).join(' ');
 	const instructions = [
 		'Use OwlSpotlight before grep/ripgrep for local code search when looking for functions, methods, routes, handlers, storage logic, auth/session logic, or code blocks.',
 		`Workspace: ${workspaceRoot}`,
 		`OwlSpotlight server: ${serverUrl}`,
 		'Codex CLI setup:',
 		`- ${codexCommand}`,
-		'- Restart Codex after adding the MCP server. /mcp should show owlspotlight; project .mcp.json alone is not enough for Codex CLI.',
-		'- Claude Code support is planned in the next few days.',
-		'Available MCP tools:',
+		'- Use Agent Setup to write project .codex/config.toml, then restart Codex in this trusted workspace and check /mcp. The CLI command below starts a single session with the same settings. .mcp.json is for other MCP clients.',
+
+		'MCP uses the connected agent model, not Gemini. Code returned by MCP is available to that agent and its provider. Gemini keys are not needed.',
+        'Available MCP tools:',
+        '- owlspotlight.read_code: read a captured source or commit page using event_id and result_id. Follow nextLine for more code.',
+        '- owlspotlight.publish_result_annotations: attach an explanation, title and verified colored line highlights to results already read. Write explanations in the user’s language.',
 		'- owlspotlight.search_code: semantic/BM25/hybrid/keyword search over this workspace. You can call it with only query; directory defaults to this workspace, file_ext defaults to auto, search_mode defaults to semantic, and top_k defaults to 30. Use include_globs/exclude_globs to scope noisy repos, for example {"include_globs":["src/**/*.ts"],"exclude_globs":["tests/**"]}.',
 		'- owlspotlight.grep_repo: repository-wide grep for exact identifiers, call sites, tests, and docs after semantic discovery. Use it for OR patterns like "ClassA|ClassB|torch.multinomial"; patterns containing | are treated as regex alternation when regex is omitted. Pass the same include_globs/exclude_globs when you want the same scope as search_code.',
-		'- owlspotlight.cancel_embedding: request cancellation of the currently running indexing/embedding operation.',
+		'- owlspotlight.cancel_embedding: cancel only the operation_id received in progress. Never cancel another client’s work.',
 		'- owlspotlight.mark_results_used: optional; record only the search results or grep locations you actually used as evidence when that is easy to do.',
 		'- owlspotlight.get_human_feedback: optional; read suggestions only when the user explicitly says they reviewed the sidebar.',
 		'Tool-use rule:',
 		'- If owlspotlight.search_code is available in your tool list, call it directly. Do not run command -v owlspotlight, inspect .mcp.json, read mcp_server.py, or reverse-engineer the HTTP API first.',
-		'- If owlspotlight.search_code is not available in your tool list, say the MCP client needs to reload/restart with the generated .mcp.json. Only use direct HTTP fallback after saying the MCP tool is unavailable.',
+		'- If owlspotlight.search_code is not available in your tool list, reload Codex with project .codex/config.toml (other clients use .mcp.json). Only use direct HTTP fallback after saying the MCP tool is unavailable.',
 		'Example first call:',
 		'- owlspotlight.search_code({"query":"where is login session refreshed"})',
 		'Search workflow:',
@@ -1322,7 +1323,7 @@ function buildAgentSetupPayload(
 		'4. Call owlspotlight.mark_results_used for the ranks or grep locations you actually referenced so OwlSpotlight preserves the evidence trail.',
 		'5. Do not wait for human fallback. Use the mirrored sidebar only as observability unless the user explicitly asks for review.'
 	].join('\n');
-	return { mcpConfig, instructions, codexCommand, mcpPythonCommand, mcpServerPath };
+	return { mcpConfig, instructions, codexCommand, mcpPythonCommand, mcpServerPath, codexServer };
 }
 
 function mergeOwlspotlightMcpConfig(existing: any, owlspotlightEntry: any): any {
@@ -1336,49 +1337,6 @@ function mergeOwlspotlightMcpConfig(existing: any, owlspotlightEntry: any): any 
 	};
 }
 
-async function registerCodexMcp(
-	workspaceRoot: string,
-	serverUrl: string,
-	mcpPythonCommand: string,
-	mcpServerPath: string
-): Promise<boolean> {
-	await execFileResult('codex', ['mcp', 'remove', 'owlspotlight'], workspaceRoot);
-	const result = await execFileResult(
-		'codex',
-		[
-			'mcp',
-			'add',
-			'owlspotlight',
-			'--env',
-			'PYTHONUTF8=1',
-			'--env',
-			'PYTHONIOENCODING=utf-8',
-			'--env',
-			`OWLSPOTLIGHT_SERVER_URL=${serverUrl}`,
-			'--env',
-			`OWLSPOTLIGHT_WORKSPACE=${workspaceRoot}`,
-			'--',
-			mcpPythonCommand,
-			mcpServerPath
-		],
-		workspaceRoot
-	);
-	if (!result.ok) {
-		vscode.window.showErrorMessage(result.output || 'Failed to register OwlSpotlight MCP with Codex CLI.');
-		return false;
-	}
-	return true;
-}
-
-async function removeCodexMcp(workspaceRoot: string): Promise<boolean> {
-	const result = await execFileResult('codex', ['mcp', 'remove', 'owlspotlight'], workspaceRoot);
-	if (!result.ok) {
-		vscode.window.showErrorMessage(result.output || 'Failed to remove OwlSpotlight MCP from Codex CLI.');
-		return false;
-	}
-	return true;
-}
-
 async function generateAgentSetup(context: vscode.ExtensionContext): Promise<void> {
 	const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 	if (!workspaceRoot) {
@@ -1387,7 +1345,7 @@ async function generateAgentSetup(context: vscode.ExtensionContext): Promise<voi
 	}
 	const serverPort = await resolveActiveServerPort();
 	const serverUrl = getServerBaseUrl(serverPort ?? activeServerPort);
-	const { mcpConfig, instructions, codexCommand, mcpPythonCommand, mcpServerPath } = buildAgentSetupPayload(context, workspaceRoot, serverUrl);
+	const { mcpConfig, instructions, codexCommand, mcpPythonCommand, mcpServerPath, codexServer } = buildAgentSetupPayload(context, workspaceRoot, serverUrl);
 	const mcpJson = JSON.stringify(mcpConfig, null, 2);
 	const combined = [
 		'Agent instructions:',
@@ -1401,8 +1359,8 @@ async function generateAgentSetup(context: vscode.ExtensionContext): Promise<voi
 	].join('\n');
 	const pick = await vscode.window.showQuickPick(
 		[
-			{ label: 'Register Codex MCP globally', value: 'registerCodex' },
-			{ label: 'Remove Codex MCP registration', value: 'removeCodex' },
+			{ label: 'Create/update project Codex configuration', value: 'registerCodex' },
+			{ label: 'Remove project Codex configuration', value: 'removeCodex' },
 			{ label: 'Create/update workspace .mcp.json', value: 'write' },
 			{ label: 'Copy Codex CLI command to clipboard', value: 'copyCodex' },
 			{ label: 'Copy .mcp.json to clipboard', value: 'copyMcp' },
@@ -1414,21 +1372,21 @@ async function generateAgentSetup(context: vscode.ExtensionContext): Promise<voi
 	if (!pick) {
 		return;
 	}
-	if (pick.value === 'registerCodex') {
-		const registered = await registerCodexMcp(workspaceRoot, serverUrl, mcpPythonCommand, mcpServerPath);
-		if (registered) {
-			await vscode.env.clipboard.writeText(instructions);
-			vscode.window.showInformationMessage('Registered OwlSpotlight MCP with Codex CLI. Restart Codex and run /mcp to verify.');
-		}
-		return;
-	}
-	if (pick.value === 'removeCodex') {
-		const removed = await removeCodexMcp(workspaceRoot);
-		if (removed) {
-			vscode.window.showInformationMessage('Removed OwlSpotlight MCP from Codex CLI. Restart Codex if a session is already open.');
-		}
-		return;
-	}
+    if (pick.value === 'registerCodex' || pick.value === 'removeCodex') {
+        try {
+            if (pick.value === 'registerCodex') {
+                if (serverPort === undefined) { throw new Error('Start the OwlSpotlight server before registering Codex.'); }
+                const check = await execFileResult(mcpPythonCommand, ['-c', 'import pathspec'], workspaceRoot);
+                if (!check.ok || !fs.existsSync(mcpServerPath)) { throw new Error('Run Setup Environment before registering Codex.'); }
+            }
+            const filename = updateProjectCodexConfig(workspaceRoot, pick.value === 'registerCodex' ? codexServer : undefined);
+            await vscode.env.clipboard.writeText(instructions);
+            vscode.window.showInformationMessage(`Updated ${filename}. Workspace: ${workspaceRoot}; server: ${serverUrl}. Restart Codex in this trusted project and check /mcp. Existing global registrations are preserved.`);
+        } catch (error) {
+            vscode.window.showErrorMessage(`Could not update Codex configuration: ${error}`);
+        }
+        return;
+    }
 	if (pick.value === 'write') {
 		const mcpPath = path.join(workspaceRoot, '.mcp.json');
 		let existing: any = {};
@@ -1609,16 +1567,16 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = 'owlspotlight.sidebar';
 	private _view?: vscode.WebviewView;
 	private _operation: string | undefined;
-	private _operationCancellation: { cancelled: boolean; serverStarted: boolean; controller: AbortController } | undefined;
+	private _operationCancellation: { cancelled: boolean; serverStarted: boolean; operationId: string; serverPort?: number; controller: AbortController } | undefined;
 	private _agentSearchPoll?: NodeJS.Timeout;
 	private _indexProgressPoll?: NodeJS.Timeout;
-	private _lastAgentSearchEventId = 0;
 	private readonly _webviewSessionId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 
 	constructor(
 		private readonly _context: vscode.ExtensionContext,
 		private readonly _outputChannel?: vscode.OutputChannel
 	) {
+        this.refreshMcpRuntime();
 		this._context.subscriptions.push({
 			dispose: () => {
 				this.stopAgentSearchPolling();
@@ -1627,8 +1585,46 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 		});
 	}
 
+    public refreshMcpRuntime(port?: number) {
+        const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (!workspace) { return; }
+        try { buildAgentSetupPayload(this._context, workspace, getServerBaseUrl(port ?? activeServerPort)); }
+        catch (error) { this._outputChannel?.appendLine(`MCP runtime update failed: ${error}`); }
+    }
+
+    public async cancelOperation(): Promise<void> {
+        const active = this._operationCancellation;
+        if (active) {
+            active.cancelled = true;
+            active.controller.abort();
+            this._view?.webview.postMessage({ type: 'status', message: 'Stopping…' });
+            if (!active.serverStarted) { return; }
+        }
+        const serverPort = active?.serverPort ?? await resolveActiveServerPort();
+        if (serverPort === undefined) { return; }
+        try {
+            // Manual Stop outside a sidebar task targets the operation observed
+            // in progress. Never issue an unscoped cancel after a network delay.
+            let operationId = active?.operationId;
+            if (!operationId) {
+                const response = await fetch(getServerUrl('/index_progress', serverPort), { signal: AbortSignal.timeout(5000) });
+                if (!response.ok) { throw new Error(`HTTP ${response.status}`); }
+                operationId = ((await response.json()) as any).operation_id;
+            }
+            if (!operationId) { return; }
+            const response = await fetch(getServerUrl('/cancel_embedding', serverPort), {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ operation_id: operationId }), signal: AbortSignal.timeout(10000)
+            });
+            if (!response.ok) { throw new Error(`HTTP ${response.status}`); }
+        } catch (error) {
+            this.notifyError(`Failed to stop OwlSpotlight: ${error}`);
+        }
+    }
+
 	public notifyServerStatus(online: boolean, port?: number) {
 		this._view?.webview.postMessage({ type: 'serverStatus', online, port });
+        this.refreshMcpRuntime(port);
 	}
 
 	public notifyError(message: string) {
@@ -1665,17 +1661,14 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				return;
 			}
 			try {
-				const res = await fetch(getServerUrl('/agent_search_events?since_id=0&limit=20', serverPort), { signal: AbortSignal.timeout(5000) });
+				const res = await fetch(getServerUrl('/agent_search_events?since_id=0&limit=20&directory=' + encodeURIComponent(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || ''), serverPort), { signal: AbortSignal.timeout(5000) });
 				if (!res.ok) {
 					return;
 				}
 				const data: any = await res.json();
 				const events: AgentSearchEvent[] = Array.isArray(data?.events) ? data.events : [];
-				if (events.length === 0) {
-					return;
-				}
-				this._lastAgentSearchEventId = Math.max(this._lastAgentSearchEventId, ...events.map((event) => Number(event.id) || 0));
-				webviewView.webview.postMessage({ type: 'agentSearchEvents', events });
+
+				webviewView.webview.postMessage({ type: 'agentSearchEvents', events, replace: true });
 			} catch {
 				// The server can be started/stopped independently; ignore transient polling failures.
 			}
@@ -1779,7 +1772,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                 const geminiModel = normalizeGeminiTranslationModel(config.get<string>('geminiModel', DEFAULT_GEMINI_TRANSLATION_MODEL));
                 webviewView.webview.postMessage({
                         type: 'translationSettings',
-                        hasApiKey: !!vscode.workspace.getConfiguration('owlspotlight').get<string>('geminiApiKey', '').trim(),
+                        hasApiKey: await geminiCredentials.has(),
                         agentic: vscode.workspace.getConfiguration('owlspotlight').get<boolean>('enableAgenticSearch', false),
                         enable: enable,
                         model: geminiModel,
@@ -1811,7 +1804,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                 webviewView.webview.postMessage({ type: 'operationState', operation: this._operation });
                                 return;
                         }
-                        const cancellation = guarded ? { cancelled: false, serverStarted: false, controller: new AbortController() } : undefined;
+                        const cancellation = guarded ? { cancelled: false, serverStarted: false, operationId: crypto.randomUUID(), serverPort: undefined as number | undefined, controller: new AbortController() } : undefined;
                         if (guarded) {
                                 this._operationCancellation = cancellation;
                                 this._operation = msg.command;
@@ -1852,7 +1845,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                 const geminiModel = normalizeGeminiTranslationModel(config.get<string>('geminiModel', DEFAULT_GEMINI_TRANSLATION_MODEL));
                                 webviewView.webview.postMessage({
                                         type: 'translationSettings',
-                        hasApiKey: !!vscode.workspace.getConfiguration('owlspotlight').get<string>('geminiApiKey', '').trim(),
+                        hasApiKey: await geminiCredentials.has(),
                         agentic: vscode.workspace.getConfiguration('owlspotlight').get<boolean>('enableAgenticSearch', false),
                                         enable,
                                         model: geminiModel,
@@ -1913,7 +1906,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                                 await config.update('enableAgenticSearch', msg.agentic, vscode.ConfigurationTarget.Global);
                                         }
                                         if (typeof msg.apiKey === 'string') {
-                                                await config.update('geminiApiKey', msg.apiKey.trim(), vscode.ConfigurationTarget.Global);
+                                                await geminiCredentials.set(msg.apiKey);
                                         }
                                         if (typeof msg.model === 'string') {
                                                 await config.update('geminiModel', normalizeGeminiTranslationModel(msg.model), vscode.ConfigurationTarget.Global);
@@ -1923,7 +1916,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                         const geminiModel = normalizeGeminiTranslationModel(updatedConfig.get<string>('geminiModel', DEFAULT_GEMINI_TRANSLATION_MODEL));
                                         webviewView.webview.postMessage({
                                                 type: 'translationSettings',
-                        hasApiKey: !!vscode.workspace.getConfiguration('owlspotlight').get<string>('geminiApiKey', '').trim(),
+                        hasApiKey: await geminiCredentials.has(),
                         agentic: vscode.workspace.getConfiguration('owlspotlight').get<boolean>('enableAgenticSearch', false),
                                                 enable,
                                                 model: geminiModel,
@@ -1986,12 +1979,12 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                 if (cancellation?.cancelled) { return; }
                                 try {
                                         if (cancellation?.cancelled) { return; }
-                                        if (cancellation) { cancellation.serverStarted = true; }
+                                        if (cancellation) { cancellation.serverStarted = true; cancellation.serverPort = serverPort; }
                                         const res = await fetch(getServerUrl('/prepare_diff_search', serverPort), {
                                                 method: 'POST',
                                                 headers: { 'Content-Type': 'application/json' },
                                                 body: JSON.stringify({
-                                                        directory: folderPath,
+                                                operation_id: cancellation?.operationId,                                                        directory: folderPath,
                                                         file_ext: fileExt,
                                                         include_files: includeFiles,
                                                         search_mode: searchMode,
@@ -2121,7 +2114,8 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				const diffHeadRef = typeof msg.diffHeadRef === 'string' ? msg.diffHeadRef.trim() : '';
 				const translationOptions: TranslationRuntimeOptions = {
 					enabled: typeof msg.translateEnabled === 'boolean' ? msg.translateEnabled : undefined,
-					geminiModel: typeof msg.geminiModel === 'string' ? msg.geminiModel : undefined
+					signal: cancellation?.controller.signal,
+                        geminiModel: typeof msg.geminiModel === 'string' ? msg.geminiModel : undefined
 				};
 				const originalQuery = query;
 				if (searchMode !== 'keyword' && !agenticEnabled) {
@@ -2142,13 +2136,13 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                 try {
                     const searchOnce = async (nextQuery: string, mode: DiffSearchMode) => {
                         cancellation?.controller.signal.throwIfAborted();
-                        if (cancellation) { cancellation.serverStarted = true; }
+                        if (cancellation) { cancellation.serverStarted = true; cancellation.serverPort = serverPort; }
                         try {
                             // Await the actual worker response so Stop never unlocks an active index.
                             const res = await fetch(getServerUrl('/search_functions_simple', serverPort), {
                                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({
-							directory: folderPath,
+                                                operation_id: cancellation?.operationId,							directory: folderPath,
                             query: nextQuery,
 							top_k: 30,
 							file_ext: fileExt,
@@ -2187,7 +2181,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                             signal: cancellation?.controller.signal,
                             generate: async request => {
                                 if (!generate) {
-                                    const apiKey = queryConfig.get<string>('geminiApiKey', '');
+                                    const apiKey = await geminiCredentials.get();
                                     if (!apiKey) { throw new Error('Gemini API key is not configured.'); }
                                     const { GoogleGenAI } = await import('@google/genai');
                                     const ai = new GoogleGenAI({ apiKey });
@@ -2241,7 +2235,8 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				const searchMode = ['semantic', 'bm25', 'hybrid', 'keyword'].includes(msg.searchMode) ? msg.searchMode : 'semantic';
 				const translationOptions: TranslationRuntimeOptions = {
 					enabled: typeof msg.translateEnabled === 'boolean' ? msg.translateEnabled : undefined,
-					geminiModel: typeof msg.geminiModel === 'string' ? msg.geminiModel : undefined
+					signal: cancellation?.controller.signal,
+                        geminiModel: typeof msg.geminiModel === 'string' ? msg.geminiModel : undefined
 				};
 				const originalQuery = query;
 				if (searchMode !== 'keyword') {
@@ -2260,11 +2255,11 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 						return;
 					}
 					if (cancellation?.cancelled) { return; }
-                                        if (cancellation) { cancellation.serverStarted = true; }
+                                        if (cancellation) { cancellation.serverStarted = true; cancellation.serverPort = serverPort; }
                                         const res = await fetch(getServerUrl('/get_class_stats', serverPort), {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify({ directory: folderPath, query: query, top_k: 50, file_ext: fileExt, include_files: includeFiles, search_mode: searchMode })
+                                                body: JSON.stringify({ operation_id: cancellation?.operationId, directory: folderPath, query: query, top_k: 50, file_ext: fileExt, include_files: includeFiles, search_mode: searchMode })
 					});
 					if (res.status === 409) {
                                                 webviewView.webview.postMessage({ type: 'status', message: 'OwlSpotlight is busy. Wait for the current operation or cancel it.' });
@@ -2503,31 +2498,8 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				void vscode.commands.executeCommand('owlspotlight.stopServer');
 			}
 			if (msg.command === 'cancelEmbedding') {
-				if (this._operationCancellation) {
-					this._operationCancellation.cancelled = true;
-                    this._operationCancellation.controller.abort();
-					if (!this._operationCancellation.serverStarted) {
-						webviewView.webview.postMessage({ type: 'status', message: 'Stopping…' });
-						return;
-					}
-				}
-				webviewView.webview.postMessage({ type: 'status', message: 'Cancelling indexing / embedding...' });
-				const serverPort = await resolveActiveServerPort();
-				if (serverPort === undefined) {
-					webviewView.webview.postMessage({ type: 'error', message: 'Failed to cancel. Make sure the server is running.' });
-					return;
-				}
-				try {
-					const res = await fetch(getServerUrl('/cancel_embedding', serverPort), { method: 'POST' });
-					if (res.ok) {
-						webviewView.webview.postMessage({ type: 'status', message: 'Cancellation requested.' });
-					} else {
-						webviewView.webview.postMessage({ type: 'error', message: `Failed to cancel: HTTP ${res.status}` });
-					}
-				} catch (error) {
-					webviewView.webview.postMessage({ type: 'error', message: 'Failed to cancel. Make sure the server is running.' });
-				}
-			}
+                await this.cancelOperation();
+            }
 			if (msg.command === 'checkServerStatus') {
 				const serverPort = await resolveActiveServerPort();
 				webviewView.webview.postMessage({ type: 'serverStatus', online: serverPort !== undefined, port: serverPort });
@@ -2549,11 +2521,11 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					}
 					let data: any;
 					if (cancellation?.cancelled) { return; }
-                                        if (cancellation) { cancellation.serverStarted = true; }
+                                        if (cancellation) { cancellation.serverStarted = true; cancellation.serverPort = serverPort; }
                                         const res = await fetch(getServerUrl('/force_rebuild_index', serverPort), {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({ directory: folderPath, file_ext: fileExt })
+						body: JSON.stringify({ operation_id: cancellation?.operationId, directory: folderPath, file_ext: fileExt })
 					});
 					if (!res.ok) {
                                                 webviewView.webview.postMessage({ type: 'error', message: res.status === 409 ? 'OwlSpotlight is busy. Wait for the current operation or cancel it.' : `HTTP ${res.status}` });
@@ -2841,6 +2813,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
           <span>Codex / MCP</span>
           <button id="agentSetupBtn" class="secondary-action" title="Register or copy agent setup">Agent Setup</button>
         </div>
+        <p class="agent-search-help" id="mcpDisclosureHint">MCP shares retrieved code with your connected agent and its provider. It uses that agent’s model and does not require a Gemini key. Setup applies to this project.</p>
       </details>
       <div class="settings-footer">
         <button id="helpBtn" class="secondary-action">Help</button>
@@ -3033,6 +3006,7 @@ function updatePythonServerConfig() {
 }
 
 export function activate(context: vscode.ExtensionContext) {
+    geminiCredentials = new GeminiCredentials(context.secrets);
 	console.log('Congratulations, your extension "owlspotlight" is now active!');
 
 	// 設定で指定されたポートを基準にする
@@ -3243,23 +3217,7 @@ export function activate(context: vscode.ExtensionContext) {
 	);
 
 	context.subscriptions.push(
-		vscode.commands.registerCommand('owlspotlight.cancelEmbedding', async () => {
-			const serverPort = await resolveActiveServerPort();
-			if (serverPort === undefined) {
-				vscode.window.showWarningMessage('OwlSpotlight server is not running.');
-				return;
-			}
-			try {
-				const res = await fetch(getServerUrl('/cancel_embedding', serverPort), { method: 'POST' });
-				if (res.ok) {
-					vscode.window.showInformationMessage('OwlSpotlight indexing / embedding cancellation requested.');
-				} else {
-					vscode.window.showWarningMessage(`Failed to cancel OwlSpotlight indexing / embedding: HTTP ${res.status}`);
-				}
-			} catch (error) {
-				vscode.window.showWarningMessage(`Failed to cancel OwlSpotlight indexing / embedding: ${error}`);
-			}
-		})
+		vscode.commands.registerCommand('owlspotlight.cancelEmbedding', () => sidebarProvider.cancelOperation())
 	);
 
 	// サーバー起動コマンド（child_processで直接起動 - ターミナル干渉を完全回避）
@@ -3395,6 +3353,7 @@ export function activate(context: vscode.ExtensionContext) {
 					env: {
 						...withUtf8PythonEnvironment(process.env),
 						VIRTUAL_ENV: venvDir,
+                        OWLSPOTLIGHT_NODE: process.execPath,
 						PATH: (platform === 'win32'
 							? path.join(venvDir, 'Scripts')
 							: path.join(venvDir, 'bin'))
@@ -3806,6 +3765,7 @@ export function activate(context: vscode.ExtensionContext) {
 	// 設定変更時にPythonサーバーの設定を更新
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeConfiguration(e => {
+            if (e.affectsConfiguration('owlspotlight')) { sidebarProvider.refreshMcpRuntime(); }
 			if (
 				e.affectsConfiguration('owlspotlight.batchSize') ||
 				e.affectsConfiguration('owlspotlight.cacheSettings') ||

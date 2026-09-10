@@ -594,6 +594,7 @@ window.onload = function() {
           const ja = !!geminiSetup.settings.enable;
           const text = (id, en, jp) => { document.getElementById(id).textContent = ja ? jp : en; };
           text('geminiSetupTitle', 'Use Gemini', 'Geminiの利用について');
+          text('mcpDisclosureHint', 'MCP shares retrieved code with your connected agent and its provider. It uses that agent’s model and does not require a Gemini key. Setup applies to this project.', 'MCPで取得したコードは、接続先のエージェントとそのAIサービスに共有されます。接続先のモデルを使うためGeminiのキーは不要です。設定はこのプロジェクトに適用されます。');
           text('geminiSetupIntro', 'These features use Google’s Gemini API. The following data is sent to Google when you search:', 'この機能はGoogleのGemini APIを使用します。検索時に次のデータがGoogleへ送信されます。');
           text('geminiTranslationDisclosure', 'Translation: your search query.', '翻訳：入力した検索文。');
           text('geminiAgentDisclosure', 'Agentic search: your query, retrieved code or diff excerpts, file paths, search results, and full source files when the agent requests more context.', 'エージェンティックサーチ：検索文、取得したコードや差分の抜粋、ファイルパス、検索結果、必要に応じてAIが追加取得するファイル全体。');
@@ -1521,6 +1522,9 @@ window.onload = function() {
 
     function applyAgentSearchEvent(event) {
         if (!event) return;
+        lastAgentTrace = null;
+        const trace = document.getElementById('agentTrace');
+        if (trace) trace.hidden = true;
         if (event.kind === 'grep') {
             const statusEl = document.getElementById('status');
             if (statusEl) {
@@ -1552,6 +1556,14 @@ window.onload = function() {
                 document.getElementById('searchTargetSelect').value = rawTarget;
             }
         }
+        if (['branch', 'custom', 'working_tree'].includes(event.diff_range_mode)) {
+            document.getElementById('diffRangeModeSelect').value = event.diff_range_mode;
+        }
+        if (typeof event.first_parent === 'boolean') {
+            document.getElementById('diffTraversalSelect').value = event.first_parent ? 'first_parent' : 'full';
+        }
+        if (typeof event.diff_base_ref === 'string') document.getElementById('diffBaseRefInput').value = event.diff_base_ref;
+        if (typeof event.diff_head_ref === 'string') document.getElementById('diffHeadRefInput').value = event.diff_head_ref;
         currentFolderPath = event.directory || currentFolderPath;
         currentResults = Array.isArray(event.results) ? event.results : [];
         syncSegmentedControls();
@@ -1559,7 +1571,7 @@ window.onload = function() {
         renderResults(currentResults, currentFolderPath || '');
         const statusEl = document.getElementById('status');
         if (statusEl) {
-            statusEl.textContent = `Agent search: ${currentResults.length} results`;
+            statusEl.textContent = geminiJapanese() ? `エージェントの検索結果: ${currentResults.length} 件` : `Agent search: ${currentResults.length} results`;
         }
         saveState();
     }
@@ -1604,6 +1616,8 @@ window.onload = function() {
             if (event.agent_model) modelBits.push('Agent ' + event.agent_model);
             if (event.embedding_model) modelBits.push('Embedding ' + event.embedding_model.split('/').pop());
             if (event.search_target && event.search_target !== 'functions') modelBits.push('Target ' + event.search_target);
+            if (event.scope) modelBits.push('Scope ' + event.scope);
+            if (event.directory) modelBits.push(event.directory);
             if (event.diff_compare) modelBits.push('Diff ' + event.diff_compare);
             if (event.parent_event_id) modelBits.push('From #' + event.parent_event_id);
             if (Array.isArray(event.child_event_ids) && event.child_event_ids.length) {
@@ -2158,7 +2172,9 @@ window.onload = function() {
                         if (!msg.online) { serverOperation = null; cancelPending = false; renderOperationState(); }
                 }
                 if (msg.type === 'agentSearchEvents') {
+                        if (msg.replace) { agentSearchEvents = []; }
                         addAgentSearchEvents(msg.events);
+                        if (msg.replace && !msg.events?.length) { renderAgentSearchEvents(); saveState(); }
                 }
                 if (msg.type === 'operationState') {
                         localOperation = msg.operation || null;

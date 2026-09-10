@@ -3,14 +3,14 @@
 <div align="center">
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.5.4-blue.svg)](https://github.com/Shun0212/owlspotlight)
+[![Version](https://img.shields.io/badge/version-0.5.5-blue.svg)](https://github.com/Shun0212/owlspotlight)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://www.python.org/)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.100+-blue.svg)](https://code.visualstudio.com/)
 [![Marketplace](https://img.shields.io/badge/VS%20Code-Marketplace-brightgreen.svg)](https://marketplace.visualstudio.com/items?itemName=Shun0212.owlspotlight)
 
 **Local-first semantic code search for VS Code — optimized for Python structure and natural-language queries in English and Japanese.**
 
-**Codex-ready MCP integration:** register OwlSpotlight from the sidebar and call `owlspotlight.search_code` directly from Codex. Claude Code support is coming in the next few days.
+**Codex-ready MCP integration:** register OwlSpotlight from the sidebar and call `owlspotlight.search_code` directly from Codex.
 
 Find functions, methods, classes, Python CodeBlocks, routes, tests, and call-heavy logic by describing intent — no need to remember names.
 
@@ -39,7 +39,7 @@ Find functions, methods, classes, Python CodeBlocks, routes, tests, and call-hea
 
 OwlSpotlight lets you search your codebase by **describing what the code does** — no need to remember names or guess keywords. Type a natural-language query (in English or Japanese) into the VS Code sidebar, and OwlSpotlight finds the matching functions, methods, classes, top-level code blocks, FastAPI routes, and tests, then jumps straight to the definition and highlights it. You can also select a block of code in the editor and search for similar code, limit the search to files you've changed in git, and switch between hybrid, semantic, BM25, and literal keyword modes.
 
-Everything runs locally on `127.0.0.1` — your code never leaves your machine — and the index refreshes automatically as you edit. AI agents can use the same search through the built-in Codex MCP bridge.
+Indexing and retrieval run locally on `127.0.0.1`, and the index refreshes as you edit. Optional Gemini features send queries and inspected code to Google. MCP returns code to your connected agent and its provider; it does not invoke Gemini.
 
 Under the hood, OwlSpotlight is more than generic chunk search. Its retrieval engine is **NightOwl-CodeEmbedding**, a ~150M-parameter code-embedding model I built myself: a bi-encoder on the ModernBERT architecture, fine-tuned for code retrieval from NightOwl, a base model I trained from scratch. OwlSpotlight builds a local semantic index from your code's structure, then combines the model's dense retrieval with lightweight BM25 lexical ranking and literal keyword matching.
 
@@ -184,28 +184,17 @@ The MCP tool is `owlspotlight.search_code`. If `OWLSPOTLIGHT_WORKSPACE` is set, 
 
 Agent searches are mirrored in the OwlSpotlight sidebar as compact activity entries. Use `owlspotlight.search_code` for semantic discovery, `owlspotlight.grep_repo` for exact, repository-wide reference checks, `owlspotlight.cancel_embedding` to stop a running indexing/embedding job, and `owlspotlight.mark_results_used` to record which ranks or grep hits the agent actually used as evidence. Human feedback is optional: the companion tool `owlspotlight.get_human_feedback` only comes into play when you explicitly enter query-improvement suggestions in the sidebar.
 
-If an agent can't see `owlspotlight.search_code` in its available tools, reload or restart the MCP client after updating `.mcp.json`. As long as the MCP tool is loaded, the agent never needs to inspect `mcp_server.py` or reverse-engineer the HTTP API.
+Use **Agent Setup → Create/update project Codex configuration** after starting the server. This writes `.codex/config.toml`, preserves other configuration values, and saves the previous file as `config.toml.owlspotlight.bak`. Restart Codex in this trusted project and check `/mcp`. Existing global registrations are left intact; project setup does not delete and re-add them. The remove option removes only the project entry. If you previously registered globally, `codex mcp remove owlspotlight` removes that older global entry separately.
 
-To avoid hand-editing paths, run **OwlSpotlight: Generate Agent Setup** from the Command Palette, or click **Agent Setup** in the sidebar. It can register OwlSpotlight directly with the Codex CLI, create or update the workspace `.mcp.json`, and copy agent instructions with the current server URL.
+The generated setup uses a stable launcher whose runtime path and server URL are refreshed by VS Code. Search HTTP timeout is 1,800 seconds; Codex tool timeout is 1,860 seconds, with progress notifications when the client supplies a progress token. Timeouts are ceilings, not target response times. A cancelled request does not trigger an empty-result retry. Reopen the workspace in VS Code after an extension update to refresh its runtime. See [OpenAI Docs: MCP configuration](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
 
-- Codex CLI: register the MCP server with `codex mcp add`, then restart Codex:
+Other clients can use the generated `.mcp.json`; Codex uses `.codex/config.toml`. The copied Codex command starts one session with equivalent settings (use PowerShell on Windows).
 
-```bash
-codex mcp add owlspotlight \
-  --env OWLSPOTLIGHT_SERVER_URL=http://127.0.0.1:8000 \
-  --env OWLSPOTLIGHT_WORKSPACE=/absolute/path/to/your/workspace \
-  -- /absolute/path/to/owlspotlight/model_server/.venv/bin/python /absolute/path/to/owlspotlight/model_server/mcp_server.py
-```
+MCP search defaults to all files and function search; the sidebar remembers its selected scope. Both use branch history / first parent by default when searching history. Set `scope`, `search_target`, `diff_range_mode`, `first_parent`, and From/To explicitly to reproduce a sidebar query. Resolved arguments and the directory are included in MCP results. Agent Activity shows only the current workspace; **Show** restores the event's search conditions.
 
-To remove the Codex registration later, use Agent Setup's remove option or run:
+To create an agent card, call `owlspotlight.read_code` with `event_id` and `result_id` (the result rank as a string), then `owlspotlight.publish_result_annotations` with `title`, `reason`, and `highlights`. Follow `page.nextLine` as `start_line` to read more. Cards reuse Gemini's source snapshot, pagination and highlight validator. They accept only read lines, up to four highlights of twenty lines each, in blue/green/amber/purple. They need no Gemini key. The sidebar's Agent Activity → **Show** displays the cards. With JP → EN enabled, tool responses ask the agent to write explanations in Japanese.
 
-```bash
-codex mcp remove owlspotlight
-```
-
-- Cursor: use the project-level `.cursor/mcp.json` or the global `~/.cursor/mcp.json`.
-- Claude Code: support is coming in the next few days.
-- Cline: add the same `mcpServers.owlspotlight` entry to your MCP settings, and include `"disabled": false` if your config requires it.
+`owlspotlight.cancel_embedding` requires an `operation_id` from progress. MCP cancellation notifications target only their active request; stale notifications cannot cancel another task.
 
 ### Build From Source
 
@@ -258,7 +247,7 @@ FastAPI background server
 | `owlspotlight.autoStartServer` | `false` | Start the server when VS Code opens |
 | `owlspotlight.autoIndexOnFileChange` | `true` | Refresh the incremental index when supported files change |
 | `owlspotlight.enableJapaneseTranslation` | `false` | Enable Japanese-to-English query translation |
-| `owlspotlight.geminiApiKey` | `""` | Gemini API key for translation |
+| `owlspotlight.geminiApiKey` | `""` | Legacy setting; migrated to SecretStorage. Use Gemini Search → API key & data sharing. |
 | `owlspotlight.cacheSettings.autoClearCache` | `false` | Clear the index cache on server start |
 | `owlspotlight.environmentSettings.pythonVersion` | `3.11` | Python version used by `uv` |
 
@@ -300,11 +289,11 @@ For questions, bug reports, feedback, or collaboration, reach out at [owlspotlig
 
 OwlSpotlight は、関数やクラスの名前を覚えていなくても「**そのコードが何をするものか**」を説明するだけで目的のコードを見つけられる VS Code 拡張機能です。サイドバーから自然言語(日本語・英語)で入力すると、該当する関数・メソッド・クラス・トップレベルのコードブロック・FastAPI のルート・テストを見つけ出し、その場所へジャンプして定義をハイライト表示します。エディタで選択したコードに似たコードを探したり、検索範囲を Git の変更ファイルだけに絞り込んだり、Hybrid / Semantic / BM25 / 完全一致キーワードの各モードを切り替えたりすることもできます。
 
-検索もインデックス作成もすべて `127.0.0.1` のローカルサーバー上で動くため、コードが外部に送信されることはありません。ファイルを編集すればインデックスも自動で更新されます。さらに、組み込みの Codex MCP ブリッジを介して、AI エージェントからも同じ検索機能を利用できます。
+検索とインデックス作成は `127.0.0.1` のローカルサーバーで動き、ファイル編集時に索引を更新します。任意のGemini機能を使う場合はクエリや取得したコードがGoogleへ送信されます。MCPで返したコードは接続先エージェントとそのAIサービスに共有されます。MCP自体はGeminiを呼び出しません。
 
 内部の仕組みも、単なるチャンク検索ではありません。検索エンジンには、私が独自に開発したコード埋め込みモデル **NightOwl-CodeEmbedding**(約 150M パラメータ、ModernBERT アーキテクチャの Bi-Encoder。ゼロから学習させた自作のベースモデル「NightOwl」をコード検索向けにファインチューニングしたもの)を採用しています。Python の構造・呼び出し・import・FastAPI のルート・pytest といった静的解析メタデータに、このモデルによる密ベクトル検索(dense retrieval)・BM25・完全一致キーワード検索を組み合わせて検索します。
 
-**Codex MCP 対応**: サイドバーから OwlSpotlight を Codex に登録すれば、Codex 内で `owlspotlight.search_code` を直接呼び出せます。Claude Code への対応も数日中に追加予定です。
+**Codex MCP 対応**: サイドバーから OwlSpotlight を Codex に登録すれば、Codex 内で `owlspotlight.search_code` を直接呼び出せます。
 
 ### 主な機能
 
@@ -401,24 +390,17 @@ MCP ツールは `owlspotlight.search_code` です。`OWLSPOTLIGHT_WORKSPACE` �
 
 エージェント経由の検索は、OwlSpotlight サイドバーにコンパクトなアクティビティとして表示されます。意味的な検索には `owlspotlight.search_code`、リポジトリ全体での厳密な参照確認には `owlspotlight.grep_repo`、実行中のインデックス作成・埋め込み処理の停止には `owlspotlight.cancel_embedding`、実際に根拠として使った順位や grep の該当箇所の記録には `owlspotlight.mark_results_used` を使います。人間によるフィードバックは任意です。サイドバーで改善案を明示的に入力した場合にのみ、追加の MCP ツール `owlspotlight.get_human_feedback` を通じてエージェントが取得できます。
 
-エージェントの利用可能なツール一覧に `owlspotlight.search_code` が表示されない場合は、`.mcp.json` を更新したあとに MCP クライアントを再読み込みまたは再起動してください。MCP ツールさえ読み込まれていれば、エージェントが `mcp_server.py` を読んだり HTTP API を解析したりする必要はありません。
+サーバー起動後に **Agent Setup → Create/update project Codex configuration** を選ぶと、プロジェクトの `.codex/config.toml` を作成・更新します。他の設定値は維持し、更新前の内容を `config.toml.owlspotlight.bak` に保存します。Codexをこの信頼済みプロジェクトで再起動し、`/mcp` で確認してください。既存のグローバル登録は変更しません。削除メニューはプロジェクトの登録だけを削除します。古いグローバル登録を解除する場合は、別途 `codex mcp remove owlspotlight` を使います。
 
-パスを手作業で書き換えたくない場合は、コマンドパレットの **OwlSpotlight: Generate Agent Setup**、またはサイドバーの **Agent Setup** を使ってください。Codex CLI への直接登録、現在のサーバー URL と絶対パスを埋め込んだワークスペースの `.mcp.json` の作成・更新、エージェント向け指示のコピーが行えます。
+ランチャーはVS Codeの保存領域に置き、拡張機能のパスやサーバーURLを更新できるようにしています。拡張機能更新後はVS Codeで対象ワークスペースを開き直してください。HTTP検索の上限は1,800秒、Codexのツール待機上限は1,860秒です。対応クライアントには進捗を通知します。停止は「候補なし」と区別し、再検索を促しません。[OpenAI DocsのMCP設定](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)に合わせています。
 
-- Codex CLI: `codex mcp add` で MCP サーバーを登録してから、Codex を再起動してください:
+Codexは `.codex/config.toml`、他のMCPクライアントは生成した `.mcp.json` を使います。コピー用Codexコマンドは、そのセッションだけ同じ設定で起動します（WindowsではPowerShell用）。
 
-```bash
-codex mcp add owlspotlight \
-  --env OWLSPOTLIGHT_SERVER_URL=http://127.0.0.1:8000 \
-  --env OWLSPOTLIGHT_WORKSPACE=/absolute/path/to/your/workspace \
-  -- /absolute/path/to/owlspotlight/model_server/.venv/bin/python /absolute/path/to/owlspotlight/model_server/mcp_server.py
-```
+MCPは既定で全ファイルの関数検索、サイドバーは選択中の範囲を使います。履歴検索の既定はどちらもbranch / first parentです。同じ対象を検索する場合は `scope`、`search_target`、`diff_range_mode`、`first_parent`、From/Toを明示してください。MCP結果には解決済み条件とディレクトリを返します。Agent Activityは現在のワークスペースだけを表示し、**Show**で検索条件も復元します。
 
-あとで Codex への登録を解除する場合は、Agent Setup の削除オプションを使うか、次を実行します:
+Codexなどからカードを作る場合は、検索後に `owlspotlight.read_code` へ `event_id` と `result_id`（検索結果の順位を文字列で指定）を渡します。続きは `page.nextLine` を `start_line` に指定します。その後 `owlspotlight.publish_result_annotations` で `title`、`reason`、`highlights` を指定すると、Agent Activity → **Show**で説明と色付きコードが表示されます。コード取得・ページ分割・ハイライト検証はGeminiと共通です。取得済みの行だけを最大4箇所・各20行、青・緑・黄・紫で指定できます。Geminiキーは不要です。JP → ENがオンなら、ツール結果で説明を日本語にするようエージェントに指示します。
 
-```bash
-codex mcp remove owlspotlight
-```
+`owlspotlight.cancel_embedding` は進捗通知の `operation_id` が必須です。MCPのキャンセル通知は対応する実行中リクエストだけを対象とし、終了済みの通知で別の処理を停止しません。
 
 ### 連絡先
 
@@ -443,10 +425,10 @@ MIT
 
 Settings → **Gemini Search** → **Agentic search** を有効にすると、OwlDiffSearch と同じく Gemini が検索結果を確認し、クエリの修正とキーワード検索による確認を繰り返します。検索範囲・言語・差分の From/To は、検索開始時の指定を維持します。
 
-- 既存の Gemini API キーを使用します。クエリと取得したコードの抜粋が Gemini に送信されます。
+- APIキーはVS Code SecretStorageへ保存し、従来の設定値は保存成功後に移行・削除します。グローバル／ワークスペース／フォルダーの設定優先順位を維持します。クエリ、コードの抜粋、追加取得したソースがGeminiへ送信されます。
 - `owlspotlight.agenticMaxSearches` は既定で 3 回、最大 6 回です。
 - **Agent search** を開くと検索クエリ・件数・終了理由を確認できます。結果には関連度の推定と短い説明を表示します。関連度は確率ではありません。
-- **■ Stop** で Gemini のリクエストを中断し、後続検索を停止します。サーバーの埋め込み処理中は現在のバッチの完了を待ちます。
+- **■ Stop**、コマンドパレット、ステータスバーの停止は共通処理です。Geminiの翻訳・エージェントリクエストを中断し、後続検索を停止します。サーバーの埋め込み処理中は現在のバッチの完了を待ちます。
 - API キー未設定や Gemini エラー時は、元のクエリによる通常検索、または取得済みの結果を表示し、理由を Agent search に示します。
 - Gemini の既定モデルは **3.8 Flash**、軽量モデルは **3.5 Flash-Lite** です。3.5 Flash を明示的に選択している場合、その選択は維持されます。旧3.1モデルの設定は3.8 Flashとして扱います。
 
