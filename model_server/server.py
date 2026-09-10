@@ -2165,6 +2165,37 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
         indexer.add_functions_without_embedding(results)  # 埋め込み計算なしで関数リストのみ追加
     return results, len(file_paths), indexer
 
+class DependencyGraphRequest(BaseModel):
+    directory: str
+    file: str
+    line: int = 1
+    file_ext: str = ".py"
+    query: str = ""
+    similar: bool = False
+
+
+@app.post("/dependency_graph")
+@operations.exclusive
+def dependency_graph_api(req: DependencyGraphRequest):
+    from dependency_graph import graph_neighborhood
+    directory = os.path.realpath(req.directory)
+    file = os.path.realpath(req.file)
+    if not os.path.isdir(directory) or os.path.commonpath([directory, file]) != directory:
+        raise HTTPException(status_code=400, detail="Graph source must be inside the selected directory.")
+    with index_lock:
+        functions, _, _ = build_index(directory, req.file_ext, 8, False)
+        # Only reuse vectors when their exact ordered metadata snapshot was returned.
+        cached = global_index_state.indexer
+        embeddings = global_index_state.embeddings if cached is not None and functions is cached.functions else None
+        query_vector = None
+        if embeddings is not None and req.query.strip():
+            query_vector = encode_code([req.query], settings.batch_size, show_progress=False, input_type="query")[0]
+        try:
+            return graph_neighborhood(functions, file, req.line, embeddings, query_vector, req.similar)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+
 @app.post("/embed")
 @operations.exclusive
 def embed(req: EmbedRequest):

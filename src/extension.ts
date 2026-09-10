@@ -1,3 +1,6 @@
+import { getHighlightColors, deriveBorderColor } from './highlightColors';
+import { graphOnResultClick, updateGraphOnResultClick } from './graphSettings';
+import { openDependencyGraph, closeDependencyGraph } from './dependencyGraph';
 import * as TOML from '@iarna/toml';
 import { CODEX_TOOL_TIMEOUT, shellQuote, updateProjectCodexConfig, writeMcpRuntime } from './codexSetup';
 import * as crypto from 'crypto';
@@ -1002,27 +1005,6 @@ function getNonce() {
         return text;
 }
 
-// ハイライト色設定を取得する
-function getHighlightColors() {
-	const config = vscode.workspace.getConfiguration('owlspotlight');
-	const c = config.get<Record<string, string>>('highlightColors', {});
-	return {
-		jumpLine:           c['jumpLine']           ?? 'rgba(255,200,0,0.35)',
-		standaloneFunction: c['standaloneFunction'] ?? 'rgba(255,140,0,0.18)',
-		classMethod:        c['classMethod']        ?? 'rgba(0,140,255,0.18)',
-		classBody:          c['classBody']          ?? 'rgba(0,200,100,0.08)',
-		classHeader:        c['classHeader']        ?? 'rgba(0,200,100,0.20)',
-	};
-}
-
-// rgba文字列のアルファ値を変倍してボーダー色を自動導出する
-function deriveBorderColor(rgba: string): string {
-	const m = rgba.match(/rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)\s*\)/);
-	if (!m) { return rgba; }
-	const newAlpha = Math.min(1.0, parseFloat(m[4]) * 2.5).toFixed(2);
-	return `rgba(${m[1]},${m[2]},${m[3]},${newAlpha})`;
-}
-
 // ワークスペース内の言語を自動検出
 async function detectLanguages(): Promise<string[]> {
         const patterns = [
@@ -1794,6 +1776,13 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                         }
                 } catch {}
 
+        const graphPreferenceListener = vscode.workspace.onDidChangeConfiguration(event => {
+            if (event.affectsConfiguration('owlspotlight.graph.openOnResultClick')) {
+                void webviewView.webview.postMessage({ type: 'graphPreference', enabled: graphOnResultClick() });
+                if (!graphOnResultClick()) { closeDependencyGraph(); }
+            }
+        });
+        webviewView.onDidDispose(() => graphPreferenceListener.dispose());
 		// Webviewからのメッセージ受信
                 webviewView.webview.onDidReceiveMessage(async (msg) => {
                         const guarded = ['search', 'getClassStats', 'prepareDiffSearch', 'clearCache', 'setupAndStart', 'startServer', 'removeVenv'].includes(msg?.command);
@@ -1811,6 +1800,16 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                 webviewView.webview.postMessage({ type: 'operationState', operation: this._operation });
                         }
                         try {
+
+                        if (msg?.command === 'setGraphOnResultClick' && typeof msg.enabled === 'boolean') {
+                                await updateGraphOnResultClick(msg.enabled);
+                                return;
+                        }
+                        if (msg?.command === 'openDependencyGraph') {
+                                clearAllDecorations();
+                                await openDependencyGraph(this._context, msg, getServerUrl('/dependency_graph'));
+                                return;
+                        }
 
                         if (msg && msg.command === 'persistState') {
                                 try {
@@ -2273,6 +2272,12 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					webviewView.webview.postMessage({ type: 'error', message: 'Failed to load statistics. Make sure the server is running.' });
 				}
 			}
+            if (msg.command === 'jump' && msg.graphEligible && msg.directory && graphOnResultClick(vscode.Uri.file(msg.directory))) {
+                clearAllDecorations();
+                                await openDependencyGraph(this._context, { directory: msg.directory, file: msg.file,
+                    line: Number(msg.line), query: msg.query || '', file_ext: msg.file_ext || '.py' }, getServerUrl('/dependency_graph'));
+                return;
+            }
 			if (msg.command === 'jump') {
 				const file = msg.file;
 				const line = msg.line;
@@ -2815,6 +2820,9 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
         </div>
         <p class="agent-search-help" id="mcpDisclosureHint">MCP shares retrieved code with your connected agent and its provider. It uses that agent’s model and does not require a Gemini key. Setup applies to this project.</p>
       </details>
+      <div class="option-row graph-visibility-row">
+        <label class="graph-visibility-option"><input type="checkbox" id="graphOnResultClick" ${graphOnResultClick() ? 'checked' : ''}><span id="graphOnResultClickLabel">Show dependency graph</span></label>
+      </div>
       <div class="settings-footer">
         <button id="helpBtn" class="secondary-action">Help</button>
         <button id="repoBtn" class="secondary-action">GitHub</button>

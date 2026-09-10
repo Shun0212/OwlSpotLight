@@ -3,7 +3,7 @@
 <div align="center">
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.5.5-blue.svg)](https://github.com/Shun0212/owlspotlight)
+[![Version](https://img.shields.io/badge/version-0.5.6-blue.svg)](https://github.com/Shun0212/owlspotlight)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://www.python.org/)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.100+-blue.svg)](https://code.visualstudio.com/)
 [![Marketplace](https://img.shields.io/badge/VS%20Code-Marketplace-brightgreen.svg)](https://marketplace.visualstudio.com/items?itemName=Shun0212.owlspotlight)
@@ -53,6 +53,23 @@ Under the hood, OwlSpotlight is more than generic chunk search. Its retrieval en
 | "Keep code private" | Local index/search server on `127.0.0.1` |
 
 ![Demo Preview](screenshot/detect_function.png)
+
+### Code Graph
+
+Explore callers and callees alongside the source code. Function and method results open the graph on the left and the source editor on the right by default.
+
+<img src="screenshot/graph_example.png" alt="OwlSpotlight showing calls from main, methods grouped inside a class, and highlighted call sites in the source editor" width="1200">
+
+*Follow calls from `main` in the graph, then inspect the corresponding definitions and call sites in the source editor.*
+
+- **Navigate in both directions:** click a node to open its definition; moving the cursor or switching tabs in the right editor selects the corresponding node. Click a call arrow to jump to its call site; multiple sites offer a location picker.
+- **Read names in full:** cards grow to fit long names. Methods stay inside their class frame and move together when dragged. Classes with the same name in different files have separate frames.
+- **Connect the graph to code:** call names are highlighted with their target node's color. Source definitions use the usual function, method, and class highlights, with the selected definition line in yellow.
+- **Explore the neighborhood:** drag the background to pan and use the wheel to zoom. Selecting a node centers it at 83% zoom. Open **⚙** for **Fit**, **Expand selected**, **Reset**, and similarity controls.
+- **Compare similar code:** **Show similar functions** adds up to five embedding neighbors with dotted lines. Cosine similarity appears as a number and bar; it is not a probability. Run a semantic search after edits if current embeddings are unavailable.
+- **Understand the arrows:** dashed calls are conservative Python same-file estimates; solid calls come from VS Code Call Hierarchy. Calls across files are included when the installed language extension can resolve them within the selected directory. External-directory calls are omitted, and unresolved calls may be missing. The graph is not a complete runtime dependency map.
+
+Toggle **Settings → Show dependency graph** in OwlSpotlight for code-only navigation, or use **Open dependency graph** to open it explicitly. Toggle editor synchronization under **⚙ → Settings → Sync graph and source code**. The graph explores beyond result filters, displays at most 80 nodes, and does not graph historical diff hunks. Provider-only nodes stay unscored until indexed and expanded.
 
 ### Highlights
 
@@ -269,7 +286,6 @@ For questions, bug reports, feedback, or collaboration, reach out at [owlspotlig
 ### Roadmap
 
 - Python framework extractors beyond FastAPI/pytest: Django views, SQLAlchemy models, Pydantic schemas.
-- Call graph UI panel.
 - Import dependency explorer.
 - Search history and bookmarks.
 - Benchmarks on real repositories.
@@ -294,6 +310,43 @@ OwlSpotlight は、関数やクラスの名前を覚えていなくても「**�
 内部の仕組みも、単なるチャンク検索ではありません。検索エンジンには、私が独自に開発したコード埋め込みモデル **NightOwl-CodeEmbedding**(約 150M パラメータ、ModernBERT アーキテクチャの Bi-Encoder。ゼロから学習させた自作のベースモデル「NightOwl」をコード検索向けにファインチューニングしたもの)を採用しています。Python の構造・呼び出し・import・FastAPI のルート・pytest といった静的解析メタデータに、このモデルによる密ベクトル検索(dense retrieval)・BM25・完全一致キーワード検索を組み合わせて検索します。
 
 **Codex MCP 対応**: サイドバーから OwlSpotlight を Codex に登録すれば、Codex 内で `owlspotlight.search_code` を直接呼び出せます。
+
+### コードグラフ
+
+呼び出し元・呼び出し先を、ソースコードと並べて確認できます。関数・メソッドの検索結果をクリックすると、既定で左にグラフ、右にコードを表示します。
+
+<img src="screenshot/graph_example.png" alt="main からの呼び出し、クラス枠内のメソッド、右側コードの呼び出し箇所のハイライトを表示した OwlSpotlight" width="1200">
+
+*左側で `main` の呼び出し関係をたどり、右側で定義と実際の呼び出し箇所を確認できます。*
+
+- **グラフとコードを双方向に移動**：ノードをクリックすると定義を開き、右側のカーソル移動やタブ切り替えでも対応するノードを選択します。矢印をクリックすると呼び出し箇所へ移動し、複数ある場合は移動先を選べます。
+- **長い名前とクラス構造を表示**：名前の長さに合わせてカード幅を自動調整します。メソッドはクラス枠内に整列し、ドラッグ時も一緒に移動します。別ファイルの同名クラスは別の枠になります。
+- **色で呼び出し先を確認**：コード内の呼び出し名には、呼び出し先ノードと同じ色を付けます。定義には通常の関数・メソッド・クラスのハイライトを使い、選択中の定義行は黄色で示します。
+- **周辺を展開**：背景ドラッグで移動、ホイールで拡大縮小できます。ノード選択時は83%で中央に表示します。右上の **⚙** に **Fit**、**Expand selected**、**Reset**、類似度の操作をまとめています。
+- **類似コードを比較**：**Show similar functions** で最大5件の類似ノードを点線で追加します。コサイン類似度は数値とバーで表示し、確率ではありません。編集後に類似度を取得できない場合は、セマンティック検索を実行してください。
+- **矢印の意味**：破線はPythonの同一ファイル内の静的推定、実線はVS CodeのCall Hierarchyによる呼び出しです。別ファイルへの呼び出しも、選択ディレクトリ内で言語拡張が解決できれば表示します。範囲外の呼び出しは除外し、解決できない呼び出しは表示されない場合があります。実行時の依存関係をすべて網羅するものではありません。
+
+OwlSpotlightの **Settings → 依存グラフを表示** で自動表示を切り替え、**Open dependency graph** から明示的に開けます。コードとの連動は **⚙ → Settings → Sync graph and source code** で切り替えます。グラフは検索結果のフィルターを越えて探索し、最大80ノードを表示します。履歴の差分hunkは対象外です。言語機能だけで追加したノードは、索引に登録して展開するまでスコアが付かない場合があります。
+
+
+### Agentic search
+
+Settings → **Gemini Search** → **Agentic search** を有効にすると、OwlDiffSearch と同じく Gemini が検索結果を確認し、クエリの修正とキーワード検索による確認を繰り返します。検索範囲・言語・差分の From/To は、検索開始時の指定を維持します。
+
+- APIキーはVS Code SecretStorageへ保存し、従来の設定値は保存成功後に移行・削除します。グローバル／ワークスペース／フォルダーの設定優先順位を維持します。クエリ、コードの抜粋、追加取得したソースがGeminiへ送信されます。
+- `owlspotlight.agenticMaxSearches` は既定で 3 回、最大 6 回です。
+- **Agent search** を開くと検索クエリ・件数・終了理由を確認できます。結果には関連度の推定と短い説明を表示します。関連度は確率ではありません。
+- **■ Stop**、コマンドパレット、ステータスバーの停止は共通処理です。Geminiの翻訳・エージェントリクエストを中断し、後続検索を停止します。サーバーの埋め込み処理中は現在のバッチの完了を待ちます。
+- API キー未設定や Gemini エラー時は、元のクエリによる通常検索、または取得済みの結果を表示し、理由を Agent search に示します。
+- Gemini の既定モデルは **3.8 Flash**、軽量モデルは **3.5 Flash-Lite** です。3.5 Flash を明示的に選択している場合、その選択は維持されます。旧3.1モデルの設定は3.8 Flashとして扱います。
+
+
+Geminiを有効にすると、外部送信の説明とAPIキーの設定画面が開きます。**APIキーを取得**からGoogle AI Studioへ移動し、作成したキーを貼り付けて保存できます。既存キーは画面へ返さず、設定済みかどうかだけを表示します。この画面は **Gemini Search → API key & data sharing** から再度開けます。翻訳モード（JP → EN）がオンの場合、案内とエージェントの説明は日本語になります。関連度は既存のスコアバッジ・バーのスタイルで表示します。
+
+
+エージェントは必要に応じて `read_code` で検索結果のファイル全体を追加取得できます。通常のファイルは取得時点の内容、コミットの結果はそのコミット時点の内容を読み、削除されたファイルは親コミットの内容と明記します。検索結果に含まれるファイルだけを対象にし、長いファイルは最大200行・20,000文字ずつ、1検索あたり最大6回読みます（1ファイル1MiBまで）。取得範囲と行数はカードに表示します。
+
+AIはカードの見出し、注目する行、青・緑・黄・紫の色、短い説明を指定できます。ハイライトは取得済みの実コードに限り、最大4箇所・各20行です。見出しをクリックするとカード内の「取得したコード」を展開し、該当行を表示します。追加取得したコードもGemini APIへ送信されることを利用案内に表示します。
 
 ### 主な機能
 
@@ -419,23 +472,3 @@ python3 -m unittest model_server.tests.test_extractors
 ### License
 
 MIT
-
-
-### Agentic search
-
-Settings → **Gemini Search** → **Agentic search** を有効にすると、OwlDiffSearch と同じく Gemini が検索結果を確認し、クエリの修正とキーワード検索による確認を繰り返します。検索範囲・言語・差分の From/To は、検索開始時の指定を維持します。
-
-- APIキーはVS Code SecretStorageへ保存し、従来の設定値は保存成功後に移行・削除します。グローバル／ワークスペース／フォルダーの設定優先順位を維持します。クエリ、コードの抜粋、追加取得したソースがGeminiへ送信されます。
-- `owlspotlight.agenticMaxSearches` は既定で 3 回、最大 6 回です。
-- **Agent search** を開くと検索クエリ・件数・終了理由を確認できます。結果には関連度の推定と短い説明を表示します。関連度は確率ではありません。
-- **■ Stop**、コマンドパレット、ステータスバーの停止は共通処理です。Geminiの翻訳・エージェントリクエストを中断し、後続検索を停止します。サーバーの埋め込み処理中は現在のバッチの完了を待ちます。
-- API キー未設定や Gemini エラー時は、元のクエリによる通常検索、または取得済みの結果を表示し、理由を Agent search に示します。
-- Gemini の既定モデルは **3.8 Flash**、軽量モデルは **3.5 Flash-Lite** です。3.5 Flash を明示的に選択している場合、その選択は維持されます。旧3.1モデルの設定は3.8 Flashとして扱います。
-
-
-Geminiを有効にすると、外部送信の説明とAPIキーの設定画面が開きます。**APIキーを取得**からGoogle AI Studioへ移動し、作成したキーを貼り付けて保存できます。既存キーは画面へ返さず、設定済みかどうかだけを表示します。この画面は **Gemini Search → API key & data sharing** から再度開けます。翻訳モード（JP → EN）がオンの場合、案内とエージェントの説明は日本語になります。関連度は既存のスコアバッジ・バーのスタイルで表示します。
-
-
-エージェントは必要に応じて `read_code` で検索結果のファイル全体を追加取得できます。通常のファイルは取得時点の内容、コミットの結果はそのコミット時点の内容を読み、削除されたファイルは親コミットの内容と明記します。検索結果に含まれるファイルだけを対象にし、長いファイルは最大200行・20,000文字ずつ、1検索あたり最大6回読みます（1ファイル1MiBまで）。取得範囲と行数はカードに表示します。
-
-AIはカードの見出し、注目する行、青・緑・黄・紫の色、短い説明を指定できます。ハイライトは取得済みの実コードに限り、最大4箇所・各20行です。見出しをクリックするとカード内の「取得したコード」を展開し、該当行を表示します。追加取得したコードもGemini APIへ送信されることを利用案内に表示します。

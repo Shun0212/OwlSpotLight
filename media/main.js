@@ -580,6 +580,8 @@ window.onload = function() {
         }
         function updateGeminiLabels() {
           const ja = geminiJapanese();
+          const graphLabel = document.getElementById('graphOnResultClickLabel');
+          if (graphLabel) graphLabel.textContent = ja ? '依存グラフを表示' : 'Show dependency graph';
           document.getElementById('otherAiHint').textContent = ja ? '他のAIを使いたい場合は、Issueを作成してください。' : 'If you would like to use another AI provider, please open an issue.';
           document.getElementById('otherAiIssueBtn').textContent = ja ? 'Issueを作成 ↗' : 'Open issue ↗';
           document.getElementById('geminiSetupBtn').textContent = ja ? 'APIキー・外部送信について' : 'API key & data sharing';
@@ -1827,6 +1829,10 @@ window.onload = function() {
     }
 
     // 結果描画を関数化（復元時にも利用）
+    document.getElementById('graphOnResultClick')?.addEventListener('change', event => {
+        postMessage({ command: 'setGraphOnResultClick', enabled: event.target.checked });
+    });
+
     function renderResults(results, folderPath) {
         const resultsContainer = document.getElementById('results');
         const statusEl = document.getElementById('status');
@@ -2084,6 +2090,9 @@ window.onload = function() {
                 resultDiv.onclick = function() {
                     postMessage({
                         command: 'jump',
+                        graphEligible: r.symbol_kind !== 'code_block' && !r.commit_hash,
+                        directory: folderPath, query: currentSearchQuery || '',
+                        file_ext: document.getElementById('languageSelect')?.value || '.py',
                         file: fileAttr,
                         line: lineAttr,
                         functionName: functionName,
@@ -2092,6 +2101,23 @@ window.onload = function() {
                         endLine: r.end_lineno || null
                     });
                 };
+                if (r.symbol_kind !== 'code_block' && !r.commit_hash) {
+                    const graphBtn = document.createElement('button');
+                    graphBtn.type = 'button';
+                    graphBtn.className = 'secondary-action result-graph-btn';
+                    graphBtn.innerHTML = '<svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M5 6v8m0-4h10V6m0 4v4"/><rect x="2" y="1" width="6" height="5" rx="1"/><rect x="12" y="1" width="6" height="5" rx="1"/><rect x="2" y="14" width="6" height="5" rx="1"/><rect x="12" y="14" width="6" height="5" rx="1"/></svg>';
+                    const graphLabel = document.createElement('span');
+                    graphLabel.textContent = geminiJapanese() ? '依存グラフを開く' : 'Open dependency graph';
+                    graphBtn.appendChild(graphLabel);
+                    graphBtn.title = 'Explore calls and semantic similarity in the current workspace';
+                    graphBtn.onclick = function(e) {
+                        e.stopPropagation();
+                        postMessage({ command: 'openDependencyGraph', file: fileAttr, line: Number(lineAttr),
+                            directory: folderPath, query: currentSearchQuery || '',
+                            file_ext: document.getElementById('languageSelect')?.value || '.py' });
+                    };
+                    resultDiv.appendChild(graphBtn);
+                }
                 // Git Diff スコープでは関数結果にも「Open diff」アクションを添える。
                 if (inDiffScope && fileAttr) {
                     const diffBtn = document.createElement('button');
@@ -2116,6 +2142,10 @@ window.onload = function() {
 	// メッセージハンドラー
         window.addEventListener('message', event => {
                 const msg = event.data;
+                if (msg.type === 'graphPreference') {
+                    const checkbox = document.getElementById('graphOnResultClick');
+                    if (checkbox) checkbox.checked = msg.enabled;
+                }
                 if (msg.type === 'initState') {
                         restoreFromExternalState(msg.state);
                         return;

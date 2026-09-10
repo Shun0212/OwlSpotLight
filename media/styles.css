@@ -1745,3 +1745,13 @@ summary:focus-visible, button:focus-visible { outline: 1px solid var(--vscode-fo
 .agent-code-line { display: block; width: max-content; min-width: 100%; background: var(--agent-tint, transparent); }
 .agent-line-number { display: inline-block; min-width: 3em; padding: 0 0.6em; box-sizing: border-box; color: var(--vscode-descriptionForeground, #777); user-select: none; text-align: right; }
 .agent-code-details > summary { cursor: pointer; font-size: 0.8em; padding: 0.4em 0; color: var(--vscode-descriptionForeground, #777); }
+
+.result-graph-btn { display: inline-flex; align-items: center; gap: 7px; margin: 10px 0 2px; padding: 6px 10px; border: 1px solid var(--vscode-focusBorder, #008cff); border-radius: 5px; color: var(--vscode-textLink-foreground, #3794ff); background: var(--vscode-button-secondaryBackground, #3a3d41); font-weight: 600; }
+.result-graph-btn svg { flex: none; }
+.result-graph-btn:hover { background: var(--vscode-button-secondaryHoverBackground, #45494e); }
+.result-graph-btn:focus-visible { outline: 2px solid var(--vscode-focusBorder, #008cff); outline-offset: 2px; }
+
+.graph-visibility-row { overflow-x: auto; }
+.graph-visibility-option { display: inline-flex; align-items: center; flex-wrap: nowrap; gap: 6px; white-space: nowrap; }
+.graph-visibility-option input { flex: none; margin: 0; }
+#graphOnResultClickLabel { white-space: nowrap; flex: none; }

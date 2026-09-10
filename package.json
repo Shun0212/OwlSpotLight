@@ -3,7 +3,7 @@
   "displayName": "owlspotlight",
   "description": "Highlight similar code snippets using semantic search.",
   "publisher": "Shun0212",
-  "version": "0.5.5",
+  "version": "0.5.6",
   "keywords": [
     "semantic search",
     "code search",
@@ -242,6 +242,16 @@
           "minimum": 1,
           "maximum": 6,
           "description": "Maximum local searches per agentic search, including keyword verification."
+        },
+        "owlspotlight.graph.sideBySide": {
+          "type": "boolean",
+          "default": true,
+          "description": "Synchronize graph-node selection and the source editor on the right in both directions. Disable to explore nodes without opening or following source code."
+        },
+        "owlspotlight.graph.openOnResultClick": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the dependency graph when clicking a function or method search result. Can also be toggled in OwlSpotlight Settings. Disable for code-only navigation; the Open dependency graph button remains available."
         }
       }
     }
