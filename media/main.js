@@ -1,6 +1,46 @@
 // main.js
 window.onload = function() {
     const vscode = acquireVsCodeApi();
+    let localOperation = null;
+    let serverOperation = null;
+    let cancelPending = false;
+    const guardedCommands = new Set(['search', 'getClassStats', 'prepareDiffSearch', 'clearCache', 'setupAndStart', 'startServer', 'removeVenv']);
+    function renderOperationState() {
+        const busy = !!(localOperation || serverOperation);
+        const labels = { search: 'Searching', getClassStats: 'Loading statistics', prepareDiffSearch: 'Preparing diff', clearCache: 'Rebuilding index', setupAndStart: 'Setting up / starting server', startServer: 'Starting server', removeVenv: 'Removing environment' };
+        for (const id of ['searchBtn', 'loadStatsBtn', 'refreshDiffSearchBtn', 'setupAndStartBtn']) {
+            const button = document.getElementById(id);
+            if (button) { button.disabled = busy; button.setAttribute('aria-disabled', String(busy)); }
+        }
+        const banner = document.getElementById('operationBanner');
+        if (banner) banner.hidden = !busy;
+        const message = document.getElementById('operationMessage');
+        if (message) message.textContent = cancelPending ? 'Cancelling… Waiting for the current operation to finish.' : (labels[localOperation] || 'Server is processing a request') + '… Please wait.';
+        const cancel = document.getElementById('cancelOperationBtn');
+        const canStop = !!serverOperation || ['search', 'getClassStats', 'prepareDiffSearch', 'clearCache'].includes(localOperation);
+        if (cancel) {
+            cancel.hidden = !canStop;
+            cancel.disabled = cancelPending;
+            cancel.innerHTML = cancelPending ? 'Stopping…' : '<span aria-hidden="true">■</span> Stop';
+        }
+        const search = document.getElementById('searchBtn');
+        if (search) search.hidden = canStop;
+    }
+    function postMessage(message) {
+        if (guardedCommands.has(message.command)) {
+            if (localOperation || serverOperation) return;
+            localOperation = message.command;
+            renderOperationState();
+        }
+        vscode.postMessage(message);
+    }
+    document.getElementById('cancelOperationBtn').onclick = () => {
+        if (cancelPending || document.getElementById('cancelOperationBtn').hidden) return;
+        cancelPending = true;
+        renderOperationState();
+        postMessage({ command: 'cancelEmbedding' });
+    };
+
     const webviewSessionId = typeof window.OWL_WEBVIEW_SESSION_ID === 'string'
         ? window.OWL_WEBVIEW_SESSION_ID
         : '';
@@ -16,6 +56,9 @@ window.onload = function() {
     let agentActivityHidden = false;
     let commitGraphData = [];
     let commitGraphLoaded = false;
+    let commitGraphSelection = null;
+    let commitGraphRequestId = 0;
+    let commitGraphRefreshTimer;
     let indexProgressWasActive = false;
     let statusBeforeIndexProgress = '';
     let translationSettingsRequestId = 0;
@@ -29,13 +72,13 @@ window.onload = function() {
         const activeTab = activeTabBtn ? activeTabBtn.getAttribute('data-tab') : 'search';
         const searchInput = document.getElementById('searchInput')?.value || '';
         const language = document.getElementById('languageSelect')?.value || '.py';
-        const scope = document.getElementById('scopeSelect')?.value || 'all';
+        const scope = document.getElementById('scopeSelect')?.value || 'changed';
         const searchMode = document.getElementById('searchModeSelect')?.value || 'semantic';
         const searchTarget = document.getElementById('searchTargetSelect')?.value || 'functions';
         const diffBaseRef = document.getElementById('diffBaseRefInput')?.value || '';
         const diffHeadRef = document.getElementById('diffHeadRefInput')?.value || '';
         const resultTypeFilter = document.getElementById('resultTypeFilter')?.value || 'function_level';
-        const searchOptionsVisible = document.getElementById('searchOptions')?.style.display !== 'none';
+        const settingsOpen = !!document.getElementById('settingsPanel')?.open;
         const statsFilter = document.getElementById('statsFilter')?.value || 'all';
         const statusText = document.getElementById('status')?.textContent || '';
         const statsStatusText = document.getElementById('stats-status')?.textContent || '';
@@ -54,8 +97,10 @@ window.onload = function() {
             searchTarget,
             diffBaseRef,
             diffHeadRef,
+            diffRangeMode: getHistoryOptions().diffRangeMode,
+            firstParent: getHistoryOptions().firstParent,
             resultTypeFilter,
-            searchOptionsVisible,
+            settingsOpen,
             statsFilter,
             statusText,
             statsStatusText,
@@ -71,11 +116,12 @@ window.onload = function() {
     }
 
     function saveState() {
+        updateSettingsSummary();
         try {
             const state = collectState();
             vscode.setState(state);
             // 拡張側にも永続化
-            vscode.postMessage({ command: 'persistState', state });
+            postMessage({ command: 'persistState', state });
         } catch (e) {
             console.warn('Failed to save state', e);
         }
@@ -130,8 +176,14 @@ window.onload = function() {
             if (typeof state.diffHeadRef === 'string' && document.getElementById('diffHeadRefInput')) {
                 document.getElementById('diffHeadRefInput').value = state.diffHeadRef;
             }
-            if (typeof state.searchOptionsVisible === 'boolean' && document.getElementById('searchOptions')) {
-                document.getElementById('searchOptions').style.display = state.searchOptionsVisible ? 'grid' : 'none';
+            if (['branch', 'custom', 'working_tree'].includes(state.diffRangeMode)) {
+                document.getElementById('diffRangeModeSelect').value = state.diffRangeMode;
+            }
+            if (typeof state.firstParent === 'boolean') {
+                document.getElementById('diffTraversalSelect').value = state.firstParent ? 'first_parent' : 'full';
+            }
+            if (typeof state.settingsOpen === 'boolean' && document.getElementById('settingsPanel')) {
+                document.getElementById('settingsPanel').open = state.settingsOpen;
             }
             if (typeof state.translateEnabled === 'boolean') {
                 const tToggle = document.getElementById('translateToggle');
@@ -156,7 +208,7 @@ window.onload = function() {
             }
 
             // 復元: アクティブタブ
-            const activeTab = state.activeTab || 'search';
+            const activeTab = 'search';
             const btn = document.querySelector(`.tab-btn[data-tab="${activeTab}"]`);
             if (btn) btn.click();
 
@@ -227,8 +279,14 @@ window.onload = function() {
             if (typeof external.diffHeadRef === 'string' && document.getElementById('diffHeadRefInput')) {
                 document.getElementById('diffHeadRefInput').value = external.diffHeadRef;
             }
-            if (typeof external.searchOptionsVisible === 'boolean' && document.getElementById('searchOptions')) {
-                document.getElementById('searchOptions').style.display = external.searchOptionsVisible ? 'grid' : 'none';
+            if (['branch', 'custom', 'working_tree'].includes(external.diffRangeMode)) {
+                document.getElementById('diffRangeModeSelect').value = external.diffRangeMode;
+            }
+            if (typeof external.firstParent === 'boolean') {
+                document.getElementById('diffTraversalSelect').value = external.firstParent ? 'first_parent' : 'full';
+            }
+            if (typeof external.settingsOpen === 'boolean' && document.getElementById('settingsPanel')) {
+                document.getElementById('settingsPanel').open = external.settingsOpen;
             }
             if (typeof external.translateEnabled === 'boolean') {
                 const tToggle = document.getElementById('translateToggle');
@@ -253,7 +311,7 @@ window.onload = function() {
             }
 
             // タブ
-            const activeTab = external.activeTab || 'search';
+            const activeTab = 'search';
             const btn = document.querySelector(`.tab-btn[data-tab="${activeTab}"]`);
             if (btn) btn.click();
 
@@ -273,6 +331,7 @@ window.onload = function() {
                 renderAgentSearchEvents();
             }
             // 外部復元後ローカルへも保存
+            commitGraphLoaded = false;
             syncSegmentedControls();
             updateDiffControlsVisibility();
             saveState();
@@ -322,19 +381,19 @@ window.onload = function() {
             if (statusEl) {
               statusEl.innerHTML = loadingHTML('Checking environment...');
             }
-            vscode.postMessage({ command: 'setupAndStart' });
+            postMessage({ command: 'setupAndStart' });
             saveState();
           };
         }
         if (document.getElementById('stopServerBtn')) {
           document.getElementById('stopServerBtn').onclick = () => {
             console.log('stopServerBtn clicked');
-            vscode.postMessage({ command: 'stopServer' });
+            postMessage({ command: 'stopServer' });
           };
         }
         if (document.getElementById('agentSetupBtn')) {
           document.getElementById('agentSetupBtn').onclick = () => {
-            vscode.postMessage({ command: 'generateAgentSetup' });
+            postMessage({ command: 'generateAgentSetup' });
           };
         }
         if (document.getElementById('agentActivityToggleBtn')) {
@@ -344,14 +403,7 @@ window.onload = function() {
             saveState();
           };
         }
-        if (document.getElementById('searchOptionsBtn')) {
-          document.getElementById('searchOptionsBtn').onclick = () => {
-            const options = document.getElementById('searchOptions');
-            if (!options) return;
-            options.style.display = options.style.display === 'none' ? 'grid' : 'none';
-            saveState();
-          };
-        }
+        document.getElementById('settingsPanel').addEventListener('toggle', saveState);
         if (document.getElementById('languageSelect')) {
           document.getElementById('languageSelect').onchange = () => {
             updateGeneralSummary();
@@ -389,12 +441,25 @@ window.onload = function() {
           updateTranslationSummary();
           updateGeneralSummary();
         }
+        function updateSettingsSummary() {
+          const summary = document.getElementById('settingsSummary');
+          if (!summary) return;
+          const selectedLabel = id => {
+            const select = document.getElementById(id);
+            return select?.selectedOptions[0]?.textContent || '';
+          };
+          const labels = [selectedLabel('scopeSelect'), selectedLabel('searchModeSelect')];
+          if (document.getElementById('translateToggle')?.checked) labels.push('JP → EN');
+          summary.textContent = labels.filter(Boolean).join(' · ');
+          summary.title = summary.textContent;
+        }
         function updateGeneralSummary() {
+          updateSettingsSummary();
           const summary = document.getElementById('generalSummary');
           if (!summary) return;
           const langSel = document.getElementById('languageSelect');
           const langLabel = langSel ? (langSel.options[langSel.selectedIndex]?.text || langSel.value) : '';
-          const scope = document.getElementById('scopeSelect')?.value || 'all';
+          const scope = document.getElementById('scopeSelect')?.value || 'changed';
           const scopeLabel = { all: 'All', source: 'Source', changed: 'Git Diff' }[scope] || scope;
           summary.textContent = [langLabel, scopeLabel].filter(Boolean).join(' · ');
           summary.title = summary.textContent;
@@ -440,7 +505,7 @@ window.onload = function() {
           pendingTranslationSettingsRequestId = requestId;
           pendingTranslationSettings = next;
           setTranslationSaving(true);
-          vscode.postMessage({
+          postMessage({
             command: 'updateTranslationSettings',
             enable: next.enable,
             model: next.model,
@@ -502,14 +567,16 @@ window.onload = function() {
         // full-code function search; inside Git Diff scope the diff-view toggle
         // chooses between changed functions and the unified-diff view.
         function getSearchTarget() {
-          const scope = document.getElementById('scopeSelect')?.value || 'all';
+          const scope = document.getElementById('scopeSelect')?.value || 'changed';
           if (scope !== 'changed') return 'functions';
           return document.getElementById('searchTargetSelect')?.value === 'diff_hunks' ? 'diff_hunks' : 'changed_functions';
         }
         function updateDiffControlsVisibility() {
-          const isDiff = (document.getElementById('scopeSelect')?.value || 'all') === 'changed';
+          const isDiff = (document.getElementById('scopeSelect')?.value || 'changed') === 'changed';
           const diffViewRow = document.getElementById('diffViewRow');
           if (diffViewRow) diffViewRow.style.display = isDiff ? '' : 'none';
+          document.getElementById('commitGraphWrap').style.display = isDiff ? '' : 'none';
+          updateHistoryControls();
           const diffOptions = document.getElementById('diffOptions');
           if (diffOptions) diffOptions.style.display = isDiff ? 'grid' : 'none';
           if (isDiff && !commitGraphLoaded) {
@@ -526,18 +593,47 @@ window.onload = function() {
         function updateDiffRangeBar() {
           const bar = document.getElementById('diffRangeBar');
           if (!bar) return;
-          const isDiff = (document.getElementById('scopeSelect')?.value || 'all') === 'changed';
+          const isDiff = (document.getElementById('scopeSelect')?.value || 'changed') === 'changed';
           if (!isDiff) { bar.style.display = 'none'; return; }
-          const base = shortRef(document.getElementById('diffBaseRefInput')?.value || '');
-          const head = shortRef(document.getElementById('diffHeadRefInput')?.value || '');
-          let range;
-          if (base && head) range = base + ' → ' + head;
-          else if (base) range = base + ' → HEAD';
-          else range = 'HEAD → working tree';
-          bar.textContent = 'Diff range: ' + range;
-          bar.style.display = '';
+          const baseRef = (document.getElementById('diffBaseRefInput')?.value || '').trim();
+          const headRef = (document.getElementById('diffHeadRefInput')?.value || '').trim();
+          const mode = getHistoryOptions().diffRangeMode;
+          const from = mode === 'branch' ? (commitGraphSelection?.rootHash || 'First commit') : mode === 'working_tree' ? 'HEAD' : (baseRef || 'Choose From');
+          const to = mode === 'branch' ? (commitGraphSelection?.branch || 'Current branch') : mode === 'working_tree' ? 'working tree' : (headRef || 'HEAD');
+          bar.replaceChildren();
+          for (const [label, ref, className, inputId] of [
+            ['From', from, 'diff-range-from', 'diffBaseRefInput'],
+            ['To', to, 'diff-range-to', 'diffHeadRefInput']
+          ]) {
+            if (label === 'To') {
+              const arrow = document.createElement('span');
+              arrow.className = 'diff-range-arrow';
+              arrow.textContent = '→';
+              bar.appendChild(arrow);
+            }
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'diff-range-ref ' + className;
+            button.title = label + ': ' + ref + ' — Click to change';
+            const caption = document.createElement('span');
+            caption.className = 'diff-range-label';
+            caption.textContent = label;
+            const value = document.createElement('span');
+            value.className = 'diff-range-value';
+            value.textContent = shortRef(ref);
+            button.append(caption, value);
+            button.onclick = () => {
+              document.getElementById('settingsPanel').open = true;
+              document.getElementById('searchBehaviorPanel').open = true;
+              document.getElementById(getHistoryOptions().diffRangeMode === 'custom' ? inputId : 'diffRangeModeSelect').focus();
+            };
+            bar.appendChild(button);
+          }
+          bar.style.display = 'flex';
         }
+
         function requestPrepareDiffSearch(force) {
+          if (localOperation || serverOperation) return;
           const target = getSearchTarget();
           // Only the unified-diff view needs the hunk index prepared in advance.
           if (target !== 'diff_hunks') return;
@@ -545,10 +641,11 @@ window.onload = function() {
           if (status) {
             status.textContent = force ? 'Refreshing...' : 'Preparing...';
           }
-          vscode.postMessage({
+          postMessage({
             command: 'prepareDiffSearch',
+            ...getHistoryOptions(),
             lang: document.getElementById('languageSelect')?.value || '.py',
-            scope: document.getElementById('scopeSelect')?.value || 'all',
+            scope: document.getElementById('scopeSelect')?.value || 'changed',
             searchMode: document.getElementById('searchModeSelect')?.value || 'semantic',
             searchTarget: target,
             diffBaseRef: document.getElementById('diffBaseRefInput')?.value || '',
@@ -568,12 +665,43 @@ window.onload = function() {
         function laneColor(col) {
           return COMMIT_LANE_COLORS[((col % COMMIT_LANE_COLORS.length) + COMMIT_LANE_COLORS.length) % COMMIT_LANE_COLORS.length];
         }
+        function getHistoryOptions() {
+          return {
+            diffRangeMode: document.getElementById('diffRangeModeSelect')?.value || 'branch',
+            firstParent: document.getElementById('diffTraversalSelect')?.value !== 'full',
+            diffBaseRef: document.getElementById('diffBaseRefInput')?.value || '',
+            diffHeadRef: document.getElementById('diffHeadRefInput')?.value || ''
+          };
+        }
+        function updateHistoryControls() {
+          const options = getHistoryOptions();
+          for (const id of ['diffBaseRefInput', 'diffHeadRefInput']) {
+            document.getElementById(id).closest('label').hidden = options.diffRangeMode !== 'custom';
+          }
+          document.getElementById('diffTraversalSelect').disabled = options.diffRangeMode === 'working_tree';
+        }
+        function refreshHistorySelection() {
+          updateHistoryControls();
+          commitGraphLoaded = false;
+          commitGraphSelection = null;
+          highlightCommitSelection();
+          updateDiffRangeBar();
+          clearTimeout(commitGraphRefreshTimer);
+          // Invalidate any response already in flight while the user edits.
+          commitGraphRequestId++;
+          commitGraphRefreshTimer = setTimeout(requestGitCommits, 200);
+          saveState();
+        }
+        for (const id of ['diffRangeModeSelect', 'diffTraversalSelect']) {
+          document.getElementById(id).addEventListener('change', refreshHistorySelection);
+        }
         function requestGitCommits() {
           const graph = document.getElementById('commitGraph');
           if (graph && !commitGraphLoaded) {
             graph.innerHTML = '<div class="commit-graph-empty">Loading commits…</div>';
           }
-          vscode.postMessage({ command: 'getGitCommits', limit: 200 });
+          commitGraphSelection = null;
+          postMessage({ command: 'getGitCommits', limit: 1000, requestId: ++commitGraphRequestId, ...getHistoryOptions() });
         }
         // Classic lane assignment: each lane "reserves" the next expected commit
         // hash; merges/branches open or close lanes.
@@ -647,14 +775,14 @@ window.onload = function() {
                 const midY = (cy + py) / 2;
                 d = `M ${cx} ${cy} C ${cx} ${midY} ${px} ${midY} ${px} ${py}`;
               }
-              svg.appendChild(svgEl('path', { d, fill: 'none', stroke: color, 'stroke-width': '1.6' }));
+              svg.appendChild(svgEl('path', { d, fill: 'none', stroke: color, 'stroke-width': '1.6', class: 'commit-edge', 'data-child-hash': commit.hash, 'data-parent-hash': parentHash }));
             });
           });
           commits.forEach((commit, i) => {
             const col = colOf.get(commit.hash) || 0;
             svg.appendChild(svgEl('circle', {
               cx: nodeX(col), cy: nodeY(i), r: COMMIT_NODE_RADIUS,
-              fill: laneColor(col), class: 'commit-node'
+              fill: laneColor(col), class: 'commit-node', 'data-hash': commit.hash
             }));
           });
 
@@ -668,20 +796,27 @@ window.onload = function() {
             row.setAttribute('data-hash', commit.hash);
             row.title = `${commit.short} ${commit.subject}\n${commit.author} · ${commit.date}\nClick: set Base · Shift+Click: set Head`;
             const refsHtml = (commit.refs || [])
-              .map((r) => '<span class="commit-ref">' + escapeHtml(r.replace(/^HEAD -> /, '')) + '</span>')
+              .map((r) => '<span class="commit-ref" style="border-color:' + branchColor(r) + '">' + escapeHtml(r.replace(/^HEAD -> /, '')) + '</span>')
               .join('');
             row.innerHTML =
               '<span class="commit-hash">' + escapeHtml(commit.short) + '</span>' +
               refsHtml +
               '<span class="commit-subject">' + escapeHtml(commit.subject) + '</span>' +
               '<span class="commit-meta">' + escapeHtml(commit.date) + '</span>' +
-              '<span class="commit-badge commit-badge-base">Base</span>' +
-              '<span class="commit-badge commit-badge-head">Head</span>';
+              '<span class="commit-badge commit-badge-current">Current</span>' +
+              '<span class="commit-badge commit-badge-base">From</span>' +
+              '<span class="commit-badge commit-badge-head">To</span>';
             row.addEventListener('click', (e) => {
               const inputId = e.shiftKey ? 'diffHeadRefInput' : 'diffBaseRefInput';
               const input = document.getElementById(inputId);
               if (!input) return;
-              input.value = (input.value === commit.hash) ? '' : commit.hash;
+              const options = getHistoryOptions();
+              if (options.diffRangeMode !== 'custom') {
+                document.getElementById('diffRangeModeSelect').value = 'custom';
+                document.getElementById('diffBaseRefInput').value = commitGraphSelection?.rootHash || '';
+                document.getElementById('diffHeadRefInput').value = commitGraphSelection?.headHash || 'HEAD';
+              }
+              input.value = commit.hash;
               input.dispatchEvent(new Event('change', { bubbles: true }));
               highlightCommitSelection();
             });
@@ -706,14 +841,29 @@ window.onload = function() {
           // Allow an abbreviated hash (>= 4 chars) typed or clicked to match.
           return ref.length >= 4 && hash.startsWith(ref);
         }
+        function branchColor(ref) {
+          let hash = 0;
+          for (const ch of ref.replace(/^HEAD -> /, '')) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+          return laneColor(hash);
+        }
         function highlightCommitSelection() {
-          const base = (document.getElementById('diffBaseRefInput')?.value || '').trim();
-          const head = (document.getElementById('diffHeadRefInput')?.value || '').trim();
-          document.querySelectorAll('#commitGraph .commit-row').forEach((row) => {
-            const hash = row.getAttribute('data-hash') || '';
-            row.classList.toggle('is-base', refMatchesHash(base, hash));
-            row.classList.toggle('is-head', refMatchesHash(head, hash));
-          });
+          const selection = commitGraphSelection;
+          const selected = new Set(selection?.selectedHashes || []);
+          const base = selection?.baseHash || (getHistoryOptions().diffRangeMode === 'branch' ? selection?.rootHash : '');
+          const head = selection?.headHash;
+          for (const element of document.querySelectorAll('#commitGraph .commit-row, #commitGraph .commit-node')) {
+            const hash = element.getAttribute('data-hash');
+            element.classList.toggle('is-in-range', selected.has(hash));
+            element.classList.toggle('is-base', hash === base);
+            element.classList.toggle('is-head', hash === head);
+            element.classList.toggle('is-current', hash === selection?.currentHash);
+          }
+          for (const edge of document.querySelectorAll('#commitGraph .commit-edge')) {
+            edge.classList.toggle('is-in-range', selected.has(edge.getAttribute('data-child-hash')));
+          }
+          const summary = document.getElementById('commitHistorySummary');
+          const traversal = getHistoryOptions().firstParent ? 'First parent' : 'All parents';
+          if (summary) summary.textContent = selection ? `${selection.branch} · ${traversal} · ${selected.size} commits${selection.hasMore ? ' (showing latest 1000)' : ''}` : 'Loading…';
         }
         function setupSegmentedControls() {
           document.querySelectorAll('.segmented-control').forEach(control => {
@@ -736,7 +886,8 @@ window.onload = function() {
           });
         }
         setupSegmentedControls();
-        updateDiffControlsVisibility();
+        // Restore the saved selection before issuing the first history request.
+        // With no saved scope, the HTML default selects the current branch.
         if (document.getElementById('searchModeSelect')) {
           document.getElementById('searchModeSelect').onchange = () => {
             syncSegmentedControls();
@@ -763,7 +914,8 @@ window.onload = function() {
             updateDiffRangeBar();
             saveState();
           });
-          input.addEventListener('input', updateDiffRangeBar);
+          input.addEventListener('input', refreshHistorySelection);
+          input.addEventListener('change', refreshHistorySelection);
         });
         if (document.getElementById('refreshDiffSearchBtn')) {
           document.getElementById('refreshDiffSearchBtn').onclick = () => {
@@ -779,23 +931,23 @@ window.onload = function() {
         }
         if (document.getElementById('refreshOwlIgnoreTreeBtn')) {
           document.getElementById('refreshOwlIgnoreTreeBtn').onclick = () => {
-            vscode.postMessage({ command: 'requestOwlIgnoreSettings', maxDepth: 4 });
+            postMessage({ command: 'requestOwlIgnoreSettings', maxDepth: 4 });
           };
         }
         if (document.getElementById('saveOwlIgnoreBtn')) {
           document.getElementById('saveOwlIgnoreBtn').onclick = () => {
-            vscode.postMessage({ command: 'saveOwlIgnorePatterns', patterns: owlIgnorePatterns, maxDepth: 4 });
+            postMessage({ command: 'saveOwlIgnorePatterns', patterns: owlIgnorePatterns, maxDepth: 4 });
           };
         }
         if (document.getElementById('resetOwlIgnoreBtn')) {
           document.getElementById('resetOwlIgnoreBtn').onclick = () => {
-            vscode.postMessage({ command: 'resetOwlIgnorePatterns' });
+            postMessage({ command: 'resetOwlIgnorePatterns' });
           };
         }
 
         // サーバーステータス確認（必要な操作時のみ Extension Host 経由で実行）
         function checkServerStatus() {
-            vscode.postMessage({ command: 'checkServerStatus' });
+            postMessage({ command: 'checkServerStatus' });
         }
         function setServerStatus(online, port) {
             const el = document.getElementById('serverStatus');
@@ -996,17 +1148,18 @@ window.onload = function() {
           };
         }
 
-        vscode.postMessage({ command: 'requestTranslationSettings' });
-        vscode.postMessage({ command: 'requestOwlIgnoreSettings' });
+        postMessage({ command: 'requestTranslationSettings' });
+        postMessage({ command: 'requestOwlIgnoreSettings' });
 	
     document.getElementById('searchBtn').onclick = () => {
                 const text = (document.getElementById('searchInput')).value;
                 if (text) {
                         currentSearchQuery = text;
                         const lang = document.getElementById('languageSelect')?.value || '.py';
-                        const scope = document.getElementById('scopeSelect')?.value || 'all';
+                        const scope = document.getElementById('scopeSelect')?.value || 'changed';
                         const searchMode = document.getElementById('searchModeSelect')?.value || 'semantic';
                         const searchTarget = getSearchTarget();
+                        if (searchTarget !== 'functions') requestGitCommits();
                         const diffBaseRef = document.getElementById('diffBaseRefInput')?.value || '';
                         const diffHeadRef = document.getElementById('diffHeadRefInput')?.value || '';
                         showLoading('status');
@@ -1014,8 +1167,9 @@ window.onload = function() {
                         const empty = document.getElementById('emptyState');
                         if (empty) empty.style.display = 'none';
                         const translationSettings = getTranslationSettingsFromControls();
-                        vscode.postMessage({
+                        postMessage({
                           command: 'search',
+                          ...getHistoryOptions(),
                           text,
                           lang,
                           scope,
@@ -1041,11 +1195,11 @@ window.onload = function() {
                 const query = currentSearchQuery || document.getElementById('searchInput').value || '';
                 console.log('Loading class stats with query:', query);
                 const lang = document.getElementById('languageSelect')?.value || '.py';
-                const scope = document.getElementById('scopeSelect')?.value || 'all';
+                const scope = document.getElementById('scopeSelect')?.value || 'changed';
                 const searchMode = document.getElementById('searchModeSelect')?.value || 'semantic';
                 showLoading('stats-status');
                 const translationSettings = getTranslationSettingsFromControls();
-                vscode.postMessage({
+                postMessage({
                   command: 'getClassStats',
                   query: query,
                   lang,
@@ -1132,7 +1286,7 @@ window.onload = function() {
                                         `;
 					
 					methodDiv.onclick = function() {
-						vscode.postMessage({ 
+						postMessage({
 							command: 'jump', 
 							file: this.getAttribute('data-file'), 
 							line: this.getAttribute('data-line'),
@@ -1189,7 +1343,7 @@ window.onload = function() {
 					`;
 					
 					funcDiv.onclick = function() {
-						vscode.postMessage({ 
+						postMessage({
 							command: 'jump', 
 							file: this.getAttribute('data-file'), 
 							line: this.getAttribute('data-line'),
@@ -1384,7 +1538,7 @@ window.onload = function() {
     // 結果クリック時に VS Code ネイティブ diff エディタを開く（赤緑表示）。
     function postOpenDiff(file, line, baseRef, headRef) {
         if (!file) return;
-        vscode.postMessage({
+        postMessage({
             command: 'openDiff',
             file: file,
             line: line,
@@ -1395,7 +1549,7 @@ window.onload = function() {
     // コミットをリモート（GitHub 等）のページで開く。
     function postOpenCommitRemote(hash) {
         if (!hash) return;
-        vscode.postMessage({ command: 'openCommitRemote', hash: hash });
+        postMessage({ command: 'openCommitRemote', hash: hash });
     }
     // diff 結果のデフォルト表示は「前の状態」（親コミット↔このコミット）。
     // コミットが無い（作業ツリー差分）場合は選択中の Base/Head 範囲で開く。
@@ -1443,7 +1597,7 @@ window.onload = function() {
         const statusEl = document.getElementById('status');
         const emptyEl = document.getElementById('emptyState');
         const resultTypeFilter = document.getElementById('resultTypeFilter')?.value || 'function_level';
-        const inDiffScope = (document.getElementById('scopeSelect')?.value || 'all') === 'changed';
+        const inDiffScope = (document.getElementById('scopeSelect')?.value || 'changed') === 'changed';
         const formatScore = (value) => {
             if (typeof value !== 'number' || !Number.isFinite(value)) return null;
             return String(Math.round(Math.max(0, Math.min(1, value)) * 100));
@@ -1683,7 +1837,7 @@ window.onload = function() {
                 }
             } else {
                 resultDiv.onclick = function() {
-                    vscode.postMessage({
+                    postMessage({
                         command: 'jump',
                         file: fileAttr,
                         line: lineAttr,
@@ -1760,17 +1914,27 @@ window.onload = function() {
                 }
                 if (msg.type === 'serverStatus') {
                         setServerStatus(msg.online, msg.message || msg.port);
+                        if (!msg.online) { serverOperation = null; cancelPending = false; renderOperationState(); }
                 }
                 if (msg.type === 'agentSearchEvents') {
                         addAgentSearchEvents(msg.events);
                 }
+                if (msg.type === 'operationState') {
+                        localOperation = msg.operation || null;
+                        if (!localOperation && !serverOperation) cancelPending = false;
+                        renderOperationState();
+                }
                 if (msg.type === 'indexProgress') {
+                        serverOperation = msg.progress?.busy ? msg.progress.operation : null;
+                        if (!serverOperation && !localOperation) cancelPending = false;
+                        renderOperationState();
                         applyIndexProgress(msg.progress);
                 }
                 if (msg.type === 'diffPrepared') {
                         const status = document.getElementById('diffStatus');
                         const data = msg.data || {};
                         if (status) {
+                                if (data.cancelled) { status.textContent = data.message || 'Diff preparation cancelled.'; return; }
                                 const count = typeof data.num_diff_hunks === 'number' ? data.num_diff_hunks : 0;
                                 const files = typeof data.num_files === 'number' ? data.num_files : 0;
                                 const cache = data.diff_cache_hit ? 'cache' : 'fresh';
@@ -1787,6 +1951,9 @@ window.onload = function() {
                         saveState();
                 }
                 if (msg.type === 'gitCommits') {
+                        if (msg.requestId !== commitGraphRequestId) return;
+                        commitGraphSelection = msg;
+                        updateDiffRangeBar();
                         commitGraphData = Array.isArray(msg.commits) ? msg.commits : [];
                         commitGraphLoaded = true;
                         if (msg.error && !commitGraphData.length) {
@@ -1812,7 +1979,7 @@ window.onload = function() {
                         const statusEl = document.getElementById('status');
                         if (statusEl) {
                                 const lower = (msg.message || '').toLowerCase();
-                                const busy = /search|index|building|embedding|setting up|starting|checking/.test(lower);
+                                const busy = !/cancelled|stopped|completed|failed/.test(lower) && /search|index|building|embedding|setting up|starting|checking|stopping/.test(lower);
                                 if (busy) {
                                         statusEl.innerHTML = loadingHTML(msg.message);
                                 } else {
@@ -1822,6 +1989,8 @@ window.onload = function() {
                         saveState();
                 }
         if (msg.type === 'error') {
+            cancelPending = false;
+            renderOperationState();
             const statusEl = document.getElementById('status');
             if (statusEl) statusEl.textContent = msg.message;
             const emptyEl = document.getElementById('emptyState');
@@ -1829,6 +1998,7 @@ window.onload = function() {
             saveState();
         }
         if (msg.type === 'classStats') {
+            if (msg.data?.cancelled) { document.getElementById('stats-status').textContent = msg.data.message || 'Cancelled.'; return; }
             currentStatsData = msg.data;
             currentFolderPath = msg.folderPath;
             console.log('Class stats received:', currentStatsData);
@@ -1887,7 +2057,7 @@ window.onload = function() {
     if (repoBtn) {
       repoBtn.onclick = () => {
         if (window.OWL_REPO_URL) {
-          vscode.postMessage({ command: 'openExternal', url: window.OWL_REPO_URL });
+          postMessage({ command: 'openExternal', url: window.OWL_REPO_URL });
         }
       };
     }
@@ -1895,6 +2065,6 @@ window.onload = function() {
     // 初期復元（retainContextWhenHiddenが効くが、ウィンドウ再読み込み等にも対応）
     restoreFromState();
     // 拡張側の永続ストレージからの復元要求
-    vscode.postMessage({ command: 'requestInitState' });
-    vscode.postMessage({ command: 'checkServerStatus' });
+    postMessage({ command: 'requestInitState' });
+    postMessage({ command: 'checkServerStatus' });
 };

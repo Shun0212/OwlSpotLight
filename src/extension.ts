@@ -604,7 +604,7 @@ function getServerUrl(endpoint: string, port: number = activeServerPort): string
 
 async function isOwlServerReachable(port: number): Promise<boolean> {
 	try {
-		const res = await fetch(getServerUrl('/index_status', port));
+		const res = await fetch(getServerUrl('/index_status', port), { signal: AbortSignal.timeout(3000) });
 		return res.ok;
 	} catch {
 		return false;
@@ -1608,6 +1608,8 @@ function getOwlIgnorePayload(workspaceRoot: string, maxDepth = 4) {
 class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = 'owlspotlight.sidebar';
 	private _view?: vscode.WebviewView;
+	private _operation: string | undefined;
+	private _operationCancellation: { cancelled: boolean; serverStarted: boolean } | undefined;
 	private _agentSearchPoll?: NodeJS.Timeout;
 	private _indexProgressPoll?: NodeJS.Timeout;
 	private _lastAgentSearchEventId = 0;
@@ -1649,16 +1651,21 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 
 	private startAgentSearchPolling(webviewView: vscode.WebviewView) {
 		this.stopAgentSearchPolling();
+		let inFlight = false;
 		const poll = async () => {
+			if (inFlight) { return; }
+			inFlight = true;
+			try {
 			if (!webviewView.visible) {
 				return;
 			}
 			const serverPort = await resolveActiveServerPort();
 			if (serverPort === undefined) {
+                                webviewView.webview.postMessage({ type: 'serverStatus', online: false });
 				return;
 			}
 			try {
-				const res = await fetch(getServerUrl('/agent_search_events?since_id=0&limit=20', serverPort));
+				const res = await fetch(getServerUrl('/agent_search_events?since_id=0&limit=20', serverPort), { signal: AbortSignal.timeout(5000) });
 				if (!res.ok) {
 					return;
 				}
@@ -1672,6 +1679,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 			} catch {
 				// The server can be started/stopped independently; ignore transient polling failures.
 			}
+			} finally { inFlight = false; }
 		};
 		this._agentSearchPoll = setInterval(poll, 2500);
 		void poll();
@@ -1679,16 +1687,21 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 
 	private startIndexProgressPolling(webviewView: vscode.WebviewView) {
 		this.stopIndexProgressPolling();
+		let inFlight = false;
 		const tick = async () => {
+			if (inFlight) { return; }
+			inFlight = true;
+			try {
 			if (!webviewView.visible) {
 				return;
 			}
 			const serverPort = await resolveActiveServerPort();
 			if (serverPort === undefined) {
+                                webviewView.webview.postMessage({ type: 'serverStatus', online: false });
 				return;
 			}
 			try {
-				const res = await fetch(getServerUrl('/index_progress', serverPort));
+				const res = await fetch(getServerUrl('/index_progress', serverPort), { signal: AbortSignal.timeout(5000) });
 				if (res.ok) {
 					const data: any = await res.json();
 					webviewView.webview.postMessage({ type: 'indexProgress', progress: data });
@@ -1696,6 +1709,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 			} catch {
 				// Progress polling is best-effort; ignore transient failures.
 			}
+			} finally { inFlight = false; }
 		};
 		this._indexProgressPoll = setInterval(tick, 500);
 		void tick();
@@ -1787,6 +1801,22 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 
 		// Webviewからのメッセージ受信
                 webviewView.webview.onDidReceiveMessage(async (msg) => {
+                        const guarded = ['search', 'getClassStats', 'prepareDiffSearch', 'clearCache', 'setupAndStart', 'startServer', 'removeVenv'].includes(msg?.command);
+                        if (msg?.command === 'requestInitState') {
+                                webviewView.webview.postMessage({ type: 'operationState', operation: this._operation });
+                        }
+                        if (guarded && this._operation) {
+                                webviewView.webview.postMessage({ type: 'operationState', operation: this._operation });
+                                return;
+                        }
+                        const cancellation = guarded ? { cancelled: false, serverStarted: false } : undefined;
+                        if (guarded) {
+                                this._operationCancellation = cancellation;
+                                this._operation = msg.command;
+                                webviewView.webview.postMessage({ type: 'operationState', operation: this._operation });
+                        }
+                        try {
+
                         if (msg && msg.command === 'persistState') {
                                 try {
                                         await this._context.workspaceState.update('owlspotlight:webviewState', msg.state ?? {});
@@ -1930,6 +1960,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                         return;
                                 }
                                 const serverPort = await resolveActiveServerPort();
+                                if (cancellation?.cancelled) { return; }
                                 if (serverPort === undefined) {
                                         webviewView.webview.postMessage({ type: 'diffPrepareError', message: 'OwlSpotlight server is not running.' });
                                         return;
@@ -1943,7 +1974,10 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                 const diffBaseRef = typeof msg.diffBaseRef === 'string' ? msg.diffBaseRef.trim() : '';
                                 const diffHeadRef = typeof msg.diffHeadRef === 'string' ? msg.diffHeadRef.trim() : '';
                                 const includeFiles = await resolveSearchIncludeFiles(workspaceFolder, fileExt, scope, searchTarget);
+                                if (cancellation?.cancelled) { return; }
                                 try {
+                                        if (cancellation?.cancelled) { return; }
+                                        if (cancellation) { cancellation.serverStarted = true; }
                                         const res = await fetch(getServerUrl('/prepare_diff_search', serverPort), {
                                                 method: 'POST',
                                                 headers: { 'Content-Type': 'application/json' },
@@ -1953,15 +1987,20 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                                         include_files: includeFiles,
                                                         search_mode: searchMode,
                                                         search_target: searchTarget,
+                                                        diff_range_mode: ['branch', 'custom', 'working_tree'].includes(msg.diffRangeMode) ? msg.diffRangeMode : 'branch',
+                                                        first_parent: msg.firstParent !== false,
                                                         diff_base_ref: diffBaseRef,
                                                         diff_head_ref: diffHeadRef,
                                                         force: !!msg.force
                                                 })
                                         });
-                                        if (!res.ok) {
-                                                throw new Error(`HTTP ${res.status}`);
+                                        if (res.status === 409) {
+                                                webviewView.webview.postMessage({ type: 'diffPrepareError', message: 'OwlSpotlight is busy. Wait for the current operation or cancel it.' });
+                                                return;
                                         }
+                                        if (!res.ok) { throw new Error(`HTTP ${res.status}`); }
                                         const data: any = await res.json();
+                                if (cancellation?.cancelled) { return; }
                                         webviewView.webview.postMessage({ type: 'diffPrepared', data });
                                 } catch (error: any) {
                                         webviewView.webview.postMessage({
@@ -1974,7 +2013,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                         if (msg.command === 'getGitCommits') {
                                 const workspaceFolders = vscode.workspace.workspaceFolders;
                                 if (!workspaceFolders || workspaceFolders.length === 0) {
-                                        webviewView.webview.postMessage({ type: 'gitCommits', commits: [], error: 'No workspace folder found.' });
+                                        webviewView.webview.postMessage({ type: 'gitCommits', requestId: msg.requestId, commits: [], error: 'No workspace folder found.' });
                                         return;
                                 }
                                 const folderPath = workspaceFolders[0].uri.fsPath;
@@ -1982,15 +2021,30 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                 const limit = Math.min(1000, Math.max(1, requestedLimit));
                                 // Unit separator (0x1f) between fields, record separator (0x1e) between commits.
                                 const fmt = ['%H', '%h', '%P', '%an', '%ar', '%D', '%s'].join('%x1f') + '%x1e';
-                                const out = await execFileText(
-                                        'git',
-                                        // --branches/--remotes/--tags + HEAD draws the graph across branches
-                                        // without pulling in stash entries (refs/stash) like --all would.
-                                        ['log', '--date-order', '--branches', '--remotes', '--tags', 'HEAD', `--max-count=${limit}`, `--pretty=format:${fmt}`],
-                                        folderPath
-                                );
+                                const firstParent = msg.firstParent !== false;
+                                const rangeMode = ['branch', 'custom', 'working_tree'].includes(msg.diffRangeMode) ? msg.diffRangeMode : 'branch';
+                                const resolveRef = async (value: string) => (await execFileText('git', ['rev-parse', '--verify', '--end-of-options', `${value}^{commit}`], folderPath)).trim();
+                                const currentHash = await resolveRef('HEAD');
+                                const branch = (await execFileText('git', ['symbolic-ref', '--short', 'HEAD'], folderPath)).trim();
+                                const baseRef = typeof msg.diffBaseRef === 'string' ? msg.diffBaseRef.trim() : '';
+                                const headRef = typeof msg.diffHeadRef === 'string' ? msg.diffHeadRef.trim() : '';
+                                const baseHash = rangeMode === 'custom' && baseRef ? await resolveRef(baseRef) : '';
+                                const headHash = rangeMode === 'custom' ? await resolveRef(headRef || 'HEAD') : currentHash;
+                                if (!headHash || (rangeMode === 'custom' && !baseHash)) {
+                                        webviewView.webview.postMessage({ type: 'gitCommits', requestId: msg.requestId, commits: [], error: 'Choose valid From and To revisions.' });
+                                        return;
+                                }
+                                const traversal = firstParent ? ['--first-parent'] : [];
+                                const range = baseHash ? `${baseHash}..${headHash}` : headHash;
+                                const selected = rangeMode === 'working_tree' ? '' : await execFileText('git', ['rev-list', ...traversal, range, '--'], folderPath);
+                                const firstParentHistory = (await execFileText('git', ['rev-list', '--first-parent', headHash, '--'], folderPath)).trim().split(/\s+/);
+                                const rootHash = firstParentHistory[firstParentHistory.length - 1] || '';
+                                const out = await execFileText('git', [
+                                        'log', '--date-order', '--decorate=short', ...traversal,
+                                        headHash, `--max-count=${limit + 1}`, `--pretty=format:${fmt}`, '--'
+                                ], folderPath);
                                 if (!out.trim()) {
-                                        webviewView.webview.postMessage({ type: 'gitCommits', commits: [], error: 'No commits found, or this folder is not a git repository.' });
+                                        webviewView.webview.postMessage({ type: 'gitCommits', requestId: msg.requestId, commits: [], error: 'No commits found, or this folder is not a git repository.' });
                                         return;
                                 }
                                 const commits = out
@@ -2002,14 +2056,14 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                                 return {
                                                         hash: hash || '',
                                                         short: short || (hash || '').slice(0, 7),
-                                                        parents: (parents || '').split(' ').map((p) => p.trim()).filter(Boolean),
+                                                        parents: (parents || '').split(' ').map((p) => p.trim()).filter(Boolean).slice(0, firstParent ? 1 : undefined),
                                                         author: author || '',
                                                         date: date || '',
                                                         refs: (refs || '').split(',').map((r) => r.trim()).filter(Boolean),
                                                         subject: subject || ''
                                                 };
                                         });
-                                webviewView.webview.postMessage({ type: 'gitCommits', commits });
+                                webviewView.webview.postMessage({ type: 'gitCommits', requestId: msg.requestId, commits: commits.slice(0, limit), hasMore: commits.length > limit, branch: branch || 'Detached HEAD', currentHash, rootHash, baseHash, headHash, selectedHashes: selected.trim().split(/\s+/).filter(Boolean) });
                                 return;
                         }
                         if (msg.command === 'search') {
@@ -2017,6 +2071,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				let serverUp = true;
 				try {
 					const serverPort = await resolveActiveServerPort();
+                                if (cancellation?.cancelled) { return; }
 					const statusRes = serverPort !== undefined
 						? await fetch(getServerUrl('/index_status', serverPort))
 						: undefined;
@@ -2034,6 +2089,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 						return;
 					}
 					const started = await this.setupAndStartServer(webviewView);
+                                if (cancellation?.cancelled) { return; }
 					if (!started) {
 						return;
 					}
@@ -2059,18 +2115,23 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				const originalQuery = query;
 				if (searchMode !== 'keyword') {
 					query = await translateJapaneseToEnglish(query, translationOptions);
+                                if (cancellation?.cancelled) { return; }
 				}
 				// Always send both original and translated query to Webview for debugging
 				webviewView.webview.postMessage({ type: 'translatedQuery', original: originalQuery, translated: query });
 				const includeFiles = await resolveSearchIncludeFiles(workspaceFolder, fileExt, scope, searchTarget);
+                                if (cancellation?.cancelled) { return; }
 				webviewView.webview.postMessage({ type: 'status', message: 'Searching...' });
 				const serverPort = await resolveActiveServerPort();
+                                if (cancellation?.cancelled) { return; }
 				if (serverPort === undefined) {
 					webviewView.webview.postMessage({ type: 'error', message: 'Failed to search. Make sure the server is running.' });
 					return;
 				}
 				try {
-					const res = await fetch(getServerUrl('/search_functions_simple', serverPort), {
+					if (cancellation?.cancelled) { return; }
+                                        if (cancellation) { cancellation.serverStarted = true; }
+                                        const res = await fetch(getServerUrl('/search_functions_simple', serverPort), {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
 						body: JSON.stringify({
@@ -2082,11 +2143,19 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 							search_mode: searchMode,
 							scope,
 							search_target: searchTarget,
-							diff_base_ref: diffBaseRef,
+							diff_range_mode: ['branch', 'custom', 'working_tree'].includes(msg.diffRangeMode) ? msg.diffRangeMode : 'branch',
+                                                        first_parent: msg.firstParent !== false,
+                                                        diff_base_ref: diffBaseRef,
 							diff_head_ref: diffHeadRef
 						})
 					});
-					const data: any = await res.json();
+					if (res.status === 409) {
+                                                webviewView.webview.postMessage({ type: 'status', message: 'OwlSpotlight is busy. Wait for the current operation or cancel it.' });
+                                                return;
+                                        }
+                                        if (!res.ok) { throw new Error(`HTTP ${res.status}`); }
+                                        const data: any = await res.json();
+                                if (cancellation?.cancelled) { return; }
 					if (data?.cancelled) {
 						webviewView.webview.postMessage({ type: 'status', message: data.message || 'Indexing / embedding cancelled.' });
 						webviewView.webview.postMessage({ type: 'results', results: [], folderPath });
@@ -2120,22 +2189,33 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				const originalQuery = query;
 				if (searchMode !== 'keyword') {
 					query = await translateJapaneseToEnglish(query, translationOptions);
+                                if (cancellation?.cancelled) { return; }
 				}
 				webviewView.webview.postMessage({ type: 'translatedQuery', original: originalQuery, translated: query });
 				const includeFiles = await resolveSearchScopeFiles(workspaceFolder, fileExt, scope);
+                                if (cancellation?.cancelled) { return; }
 				webviewView.webview.postMessage({ type: 'status', message: 'Loading class statistics...' });
 				try {
 					const serverPort = await resolveActiveServerPort();
+                                if (cancellation?.cancelled) { return; }
 					if (serverPort === undefined) {
 						webviewView.webview.postMessage({ type: 'error', message: 'Failed to load statistics. Make sure the server is running.' });
 						return;
 					}
-					const res = await fetch(getServerUrl('/get_class_stats', serverPort), {
+					if (cancellation?.cancelled) { return; }
+                                        if (cancellation) { cancellation.serverStarted = true; }
+                                        const res = await fetch(getServerUrl('/get_class_stats', serverPort), {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
                                                 body: JSON.stringify({ directory: folderPath, query: query, top_k: 50, file_ext: fileExt, include_files: includeFiles, search_mode: searchMode })
 					});
-					const data: any = await res.json();
+					if (res.status === 409) {
+                                                webviewView.webview.postMessage({ type: 'status', message: 'OwlSpotlight is busy. Wait for the current operation or cancel it.' });
+                                                return;
+                                        }
+                                        if (!res.ok) { throw new Error(`HTTP ${res.status}`); }
+                                        const data: any = await res.json();
+                                if (cancellation?.cancelled) { return; }
 					webviewView.webview.postMessage({ type: 'classStats', data, folderPath });
 				} catch (error) {
 					webviewView.webview.postMessage({ type: 'error', message: 'Failed to load statistics. Make sure the server is running.' });
@@ -2362,7 +2442,13 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				void vscode.commands.executeCommand('owlspotlight.stopServer');
 			}
 			if (msg.command === 'cancelEmbedding') {
-				console.log('[OwlSpotlight] cancelEmbedding command received from Webview');
+				if (this._operationCancellation) {
+					this._operationCancellation.cancelled = true;
+					if (!this._operationCancellation.serverStarted) {
+						webviewView.webview.postMessage({ type: 'status', message: 'Stopping…' });
+						return;
+					}
+				}
 				webviewView.webview.postMessage({ type: 'status', message: 'Cancelling indexing / embedding...' });
 				const serverPort = await resolveActiveServerPort();
 				if (serverPort === undefined) {
@@ -2400,12 +2486,18 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 						return;
 					}
 					let data: any;
-					const res = await fetch(getServerUrl('/force_rebuild_index', serverPort), {
+					if (cancellation?.cancelled) { return; }
+                                        if (cancellation) { cancellation.serverStarted = true; }
+                                        const res = await fetch(getServerUrl('/force_rebuild_index', serverPort), {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
 						body: JSON.stringify({ directory: folderPath, file_ext: fileExt })
 					});
-					data = await res.json();
+					if (!res.ok) {
+                                                webviewView.webview.postMessage({ type: 'error', message: res.status === 409 ? 'OwlSpotlight is busy. Wait for the current operation or cancel it.' : `HTTP ${res.status}` });
+                                                return;
+                                        }
+                                        data = await res.json();
 					if (data?.cancelled) {
 						webviewView.webview.postMessage({ type: 'status', message: data.message || 'Index rebuild cancelled.' });
 						return;
@@ -2425,6 +2517,19 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					webviewView.webview.postMessage({ type: 'error', message: 'Failed to remove virtual environment.' });
 				}
 			}
+
+                        } catch (error) {
+                                webviewView.webview.postMessage({ type: 'error', message: String(error) });
+                        } finally {
+                                if (guarded) {
+                                        if (cancellation?.cancelled) {
+                                                webviewView.webview.postMessage({ type: 'status', message: 'Operation stopped.' });
+                                        }
+                                        this._operationCancellation = undefined;
+                                        this._operation = undefined;
+                                        webviewView.webview.postMessage({ type: 'operationState', operation: null });
+                                }
+                        }
 		});
 	}
 
@@ -2464,48 +2569,18 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 <body>
   <div class="header">
     <div class="header-left">
+      <img class="header-owl" src="${owlPngUri}" alt="OwlSpotlight owl" />
       OwlSpotlight
       <span class="server-status offline" id="serverStatus">
         <span class="status-dot"></span>
         <span id="serverStatusText">Offline</span>
       </span>
     </div>
-    <div class="header-btns">
-      <button class="owl-btn" id="repoBtn" title="Open GitHub Repository">
-        <img src="${owlPngUri}" alt="GitHub" style="height:1.4em;width:1.4em;vertical-align:middle;" />
-      </button>
-      <button class="help-btn" id="helpBtn" title="Help"><span aria-label="help" role="img">?</span></button>
-    </div>
   </div>
-  <div class="actions">
+  <div class="actions server-actions">
     <button id="setupAndStartBtn">Setup / Start</button>
-    <button id="stopServerBtn">Stop Server</button>
+    <button id="stopServerBtn" class="secondary-action">Stop Server</button>
   </div>
-  <details class="translation-settings option-panel" id="translationPanel">
-    <summary>
-      <span>Translation</span>
-      <span class="option-summary" id="translationSummary">Off · 3.5 Flash</span>
-    </summary>
-    <div class="translation-body">
-      <label class="translation-toggle">
-        <input type="checkbox" id="translateToggle">
-        <span>JP → EN</span>
-      </label>
-      <div class="translation-model">
-        <span>Model</span>
-        <select id="geminiModelSelect" class="hidden-select" title="Gemini translation model">
-          <option value="gemini-3.5-flash">3.5 Flash</option>
-          <option value="gemini-3.1-flash-lite">3.1 Flash-Lite</option>
-          <option value="gemini-3.1-pro-preview">3.1 Pro Preview</option>
-        </select>
-        <div class="segmented-control translation-model-buttons" data-select="geminiModelSelect" role="group" aria-label="Gemini translation model">
-          <button type="button" class="segment-btn active" data-value="gemini-3.5-flash">3.5 Flash</button>
-          <button type="button" class="segment-btn" data-value="gemini-3.1-flash-lite">3.1 Lite</button>
-          <button type="button" class="segment-btn" data-value="gemini-3.1-pro-preview">3.1 Pro</button>
-        </div>
-      </div>
-    </div>
-  </details>
   <!-- ヘルプモーダル -->
   <div id="helpModal">
     <div class="modal-content">
@@ -2514,19 +2589,33 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
     </div>
   </div>
   <!-- タブナビゲーション -->
-  <div class="tabs">
+  <div class="tabs" hidden>
     <button class="tab-btn active" data-tab="search">Search</button>
     <button class="tab-btn" data-tab="stats">Class Stats</button>
+  </div>
+  <div id="operationBanner" class="operation-banner" hidden>
+    <span id="operationMessage" class="visually-hidden" role="status" aria-live="polite"></span>
   </div>
   <!-- 検索タブ -->
   <div class="tab-content active" id="search-tab">
     <div class="searchbar">
       <input id="searchInput" type="text" placeholder="Describe what the code does..." />
       <button id="searchBtn">Search</button>
-      <button id="searchOptionsBtn" class="secondary-action" title="Show search options">Options</button>
+      <button id="cancelOperationBtn" class="secondary-action stop-operation" title="Stop the current operation" aria-label="Stop the current operation" hidden><span aria-hidden="true">■</span> Stop</button>
     </div>
     <div id="diffRangeBar" class="diff-range-bar" style="display:none;" title="Diff range currently being searched"></div>
-    <div class="search-options" id="searchOptions" style="display:none;">
+          <div class="commit-graph-wrap" id="commitGraphWrap" style="display:none;">
+            <div class="commit-range-legend"><span class="legend-from">From</span><span class="legend-range">In range</span><span class="legend-to">To</span><span id="commitHistorySummary"></span></div>
+            <div class="commit-graph-toolbar">
+              <span class="commit-graph-hint">Click = From · Shift+Click = To</span>
+              <button type="button" id="reloadCommitsBtn" class="secondary-action">Reload commits</button>
+            </div>
+            <div class="commit-graph" id="commitGraph"><div class="commit-graph-empty">Loading commits…</div></div>
+          </div>
+
+    <details id="settingsPanel" class="settings-panel">
+      <summary><span>Settings</span><span id="settingsSummary" class="settings-summary"></span></summary>
+      <div class="search-options" id="searchOptions">
       <details class="option-panel" id="generalPanel">
         <summary>
           <span>Language &amp; Scope</span>
@@ -2543,7 +2632,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
           <select id="scopeSelect" title="Search scope">
             <option value="all">All</option>
             <option value="source">Source</option>
-            <option value="changed">Git Diff</option>
+            <option value="changed" selected>Git Diff</option>
           </select>
         </label>
       </details>
@@ -2579,24 +2668,27 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
           </select>
         </div>
         <div class="diff-options" id="diffOptions" style="display:none;">
+          <label><span>Range</span><select id="diffRangeModeSelect">
+            <option value="branch" selected>Current branch: first → latest</option>
+            <option value="custom">Custom: From → To</option>
+            <option value="working_tree">HEAD → working tree</option>
+          </select></label>
+          <label><span>History</span><select id="diffTraversalSelect">
+            <option value="first_parent" selected>First parent only</option>
+            <option value="full">Include merged branch history</option>
+          </select></label>
+          <div class="diff-history-help">First parent skips side-branch commits; merge commits remain. Custom ranges exclude From and include To.</div>
           <label>
-            <span>Base</span>
+            <span>From</span>
             <input id="diffBaseRefInput" type="text" placeholder="main, origin/main, tag... (blank = HEAD)" />
           </label>
           <label>
-            <span>Head</span>
+            <span>To</span>
             <input id="diffHeadRefInput" type="text" placeholder="HEAD or branch (blank = working tree)" />
           </label>
           <div class="diff-actions">
             <button type="button" id="refreshDiffSearchBtn" class="secondary-action">Refresh Diff</button>
             <span id="diffStatus" class="diff-status"></span>
-          </div>
-          <div class="commit-graph-wrap" id="commitGraphWrap">
-            <div class="commit-graph-toolbar">
-              <span class="commit-graph-hint">Click = Base · Shift+Click = Head</span>
-              <button type="button" id="reloadCommitsBtn" class="secondary-action">Reload commits</button>
-            </div>
-            <div class="commit-graph" id="commitGraph"><div class="commit-graph-empty">Loading commits…</div></div>
           </div>
         </div>
         <div class="option-row">
@@ -2617,6 +2709,31 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
           </select>
         </div>
       </details>
+  <details class="translation-settings option-panel" id="translationPanel">
+    <summary>
+      <span>Translation</span>
+      <span class="option-summary" id="translationSummary">Off · 3.5 Flash</span>
+    </summary>
+    <div class="translation-body">
+      <label class="translation-toggle">
+        <input type="checkbox" id="translateToggle">
+        <span>JP → EN</span>
+      </label>
+      <div class="translation-model">
+        <span>Model</span>
+        <select id="geminiModelSelect" class="hidden-select" title="Gemini translation model">
+          <option value="gemini-3.5-flash">3.5 Flash</option>
+          <option value="gemini-3.1-flash-lite">3.1 Flash-Lite</option>
+          <option value="gemini-3.1-pro-preview">3.1 Pro Preview</option>
+        </select>
+        <div class="segmented-control translation-model-buttons" data-select="geminiModelSelect" role="group" aria-label="Gemini translation model">
+          <button type="button" class="segment-btn active" data-value="gemini-3.5-flash">3.5 Flash</button>
+          <button type="button" class="segment-btn" data-value="gemini-3.1-flash-lite">3.1 Lite</button>
+          <button type="button" class="segment-btn" data-value="gemini-3.1-pro-preview">3.1 Pro</button>
+        </div>
+      </div>
+    </div>
+  </details>
       <details class="option-panel owlignore-panel" id="owlIgnorePanel">
         <summary>
           <span>Ignored folders</span>
@@ -2643,7 +2760,12 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
           <button id="agentSetupBtn" class="secondary-action" title="Register or copy agent setup">Agent Setup</button>
         </div>
       </details>
-    </div>
+      <div class="settings-footer">
+        <button id="helpBtn" class="secondary-action">Help</button>
+        <button id="repoBtn" class="secondary-action">GitHub</button>
+      </div>
+      </div>
+    </details>
     <div class="status" id="status"></div>
     <div id="translatedQuery" class="translated-query" style="display:none;"></div>
     <div id="agentReviewPanel" class="agent-review-panel" style="display:none;">
@@ -2667,7 +2789,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
     </div>
   </div>
   <!-- クラス統計タブ -->
-  <div class="tab-content" id="stats-tab">
+  <div class="tab-content" id="stats-tab" hidden>
     <div class="stats-filter">
       <select id="statsFilter">
         <option value="all">All Classes & Functions</option>
@@ -2843,6 +2965,8 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(indexStatusBarItem);
 
 	const pendingIndexTimers = new Map<string, NodeJS.Timeout>();
+	let incrementalIndexRunning = false;
+	context.subscriptions.push({ dispose: () => { for (const timer of pendingIndexTimers.values()) { clearTimeout(timer); } pendingIndexTimers.clear(); } });
 	const scheduleIncrementalIndex = (uri: vscode.Uri) => {
 		const config = vscode.workspace.getConfiguration('owlspotlight');
 		if (!config.get<boolean>('autoIndexOnFileChange', true)) {
@@ -2863,6 +2987,9 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 		const timer = setTimeout(async () => {
 			pendingIndexTimers.delete(key);
+                        if (incrementalIndexRunning) { scheduleIncrementalIndex(uri); return; }
+                        incrementalIndexRunning = true;
+                        try {
 			const serverPort = await resolveActiveServerPort();
 			if (serverPort === undefined) {
 				return;
@@ -2876,7 +3003,9 @@ export function activate(context: vscode.ExtensionContext) {
 				});
 				if (res.ok) {
 					owlOutputChannel.appendLine(`[OwlSpotlight] Incremental index refreshed for ${fileExt}.`);
-				} else {
+				} else if (res.status === 409) {
+                                        scheduleIncrementalIndex(uri);
+                                } else {
 					owlOutputChannel.appendLine(`[OwlSpotlight] Incremental index refresh failed for ${fileExt}: HTTP ${res.status}`);
 				}
 			} catch (error) {
@@ -2884,6 +3013,7 @@ export function activate(context: vscode.ExtensionContext) {
 			} finally {
 				indexStatusBarItem.hide();
 			}
+			} finally { incrementalIndexRunning = false; }
 		}, 1500);
 		pendingIndexTimers.set(key, timer);
 	};
@@ -2977,6 +3107,10 @@ export function activate(context: vscode.ExtensionContext) {
 						search_mode: 'semantic'
 					})
 				});
+			if (!res.ok) {
+                                vscode.window.showWarningMessage(res.status === 409 ? 'OwlSpotlight is busy. Wait for the current operation or cancel it.' : `Search failed: HTTP ${res.status}`);
+                                return;
+                        }
 			const data: any = await res.json();
 			const results = (Array.isArray(data.results) ? data.results : []).sort((a: any, b: any) => {
 				const aPriority = a?.symbol_kind === 'code_block' ? 1 : 0;
@@ -3067,9 +3201,11 @@ export function activate(context: vscode.ExtensionContext) {
 			return;
 		}
 
+		isServerStarting = true;
 		// サーバーが既に起動中かチェック
 		const existingServerPort = await resolveActiveServerPort();
 		if (existingServerPort !== undefined) {
+			isServerStarting = false;
 			sidebarProvider.notifyServerStatus(true, existingServerPort);
 			vscode.window.showInformationMessage(`Server is already running on port ${existingServerPort}.`);
 			return;
@@ -3358,11 +3494,19 @@ export function activate(context: vscode.ExtensionContext) {
 			return;
 		}
 
-		const torchChoice = await vscode.window.showQuickPick(torchOptions, {
-			placeHolder: 'Select the PyTorch build to install during setup',
-			ignoreFocusOut: true
-		});
+		isSetupRunning = true;
+		let torchChoice: TorchInstallOption | undefined;
+		try {
+			torchChoice = await vscode.window.showQuickPick(torchOptions, {
+				placeHolder: 'Select the PyTorch build to install during setup',
+				ignoreFocusOut: true
+			});
+		} catch (error) {
+			isSetupRunning = false;
+			throw error;
+		}
 		if (!torchChoice) {
+			isSetupRunning = false;
 			vscode.window.showInformationMessage('OwlSpotlight Python environment setup cancelled.');
 			return;
 		}

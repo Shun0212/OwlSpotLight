@@ -1,6 +1,5 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-import asyncio
 from sentence_transformers import SentenceTransformer
 import torch
 from threading import Lock
@@ -41,6 +40,10 @@ OWL_TRAINING_EXAMPLES_FILE = os.environ.get(
 from extractors import extract_functions
 from indexer import CodeIndexer
 import progress
+from git_history import resolve_history, history_log_args
+from operation_lock import OperationLock
+
+operations = OperationLock()
 
 # モデル管理を model.py から import
 from model import get_model, get_current_device, cleanup_memory, encode_code, DEFAULT_MODEL, get_device
@@ -128,6 +131,8 @@ class SearchFunctionsSimpleRequest(BaseModel):
     search_target: str = "functions"
     diff_base_ref: Optional[str] = None
     diff_head_ref: Optional[str] = None
+    diff_range_mode: str = "legacy"
+    first_parent: bool = False
     force_diff_refresh: bool = False
 
 class PrepareDiffSearchRequest(BaseModel):
@@ -141,6 +146,8 @@ class PrepareDiffSearchRequest(BaseModel):
     semantic_weight: float = 0.75
     diff_base_ref: Optional[str] = None
     diff_head_ref: Optional[str] = None
+    diff_range_mode: str = "legacy"
+    first_parent: bool = False
     force: bool = False
 
 class AgentSearchFeedbackRequest(BaseModel):
@@ -820,10 +827,12 @@ def display_diff_compare(base_ref: str, head_ref: str) -> str:
     base = short_ref(base_ref)
     head = short_ref(head_ref)
     if base and head:
-        return f"{base}...{head}"
+        return f"{base}..{head}"
     if base:
-        return f"{base}...HEAD"
-    return "HEAD...working tree"
+        return f"{base}..HEAD"
+    if head:
+        return f"First commit → {head}"
+    return "HEAD → working tree"
 
 
 def git_diff_text(directory: str, base_ref: str, head_ref: str) -> str:
@@ -947,7 +956,7 @@ def parse_log_patches(output: str) -> list[tuple[dict, str]]:
     return segments
 
 
-def iter_commit_patches(directory: str, base_ref: str, head_ref: str) -> list[tuple[dict, str]]:
+def iter_commit_patches(directory: str, base_ref: str, head_ref: str, first_parent: bool = False) -> list[tuple[dict, str]]:
     """Yield (commit_meta, patch_text) for the selected diff range.
 
     For a committed range (base and/or head supplied) we use `git log -p` so
@@ -959,11 +968,11 @@ def iter_commit_patches(directory: str, base_ref: str, head_ref: str) -> list[tu
     empty_meta = {"commit_hash": "", "commit_subject": "", "commit_message": ""}
     if not base and not head:
         return [(empty_meta, git_diff_text(directory, base_ref, head_ref))]
-    rev_range = f"{base}..{head}" if (base and head) else f"{base}..HEAD"
+    head = head or "HEAD"
     fmt = f"{_LOG_RECORD_SEP}%H{_LOG_UNIT_SEP}%s{_LOG_UNIT_SEP}%B{_LOG_RECORD_SEP}"
     args = [
         "git", "log", "-p", "--no-color", "--no-ext-diff", "--unified=3",
-        f"--format={fmt}", rev_range, "--",
+        f"--format={fmt}", *history_log_args(base, head, first_parent), "--",
     ]
     proc = subprocess.run(
         args,
@@ -1033,11 +1042,20 @@ def diff_signature(
     exclude_globs: Optional[List[str]],
     diff_base_ref: Optional[str],
     diff_head_ref: Optional[str],
+    diff_range_mode: str = "legacy",
+    first_parent: bool = False,
 ) -> tuple[str, str, str]:
     root = str(Path(directory).resolve())
     base_ref = sanitize_git_ref(diff_base_ref)
     head_ref = sanitize_git_ref(diff_head_ref)
+    if diff_range_mode != "legacy":
+        base_ref, head_ref = resolve_history(root, base_ref, head_ref, diff_range_mode)
+    elif base_ref:
+        base_ref, head_ref = resolve_history(root, base_ref, head_ref, "custom")
     payload = {
+        "diff_range_mode": diff_range_mode,
+        "first_parent": first_parent,
+        "working_tree_diff": git_diff_text(root, "", "") if not base_ref and not head_ref else "",
         "directory": root,
         "file_ext": file_ext,
         "include_files": sorted(str(Path(path).resolve()) for path in include_files or []),
@@ -1066,6 +1084,8 @@ def collect_diff_hunks(
     exclude_globs: Optional[List[str]],
     diff_base_ref: Optional[str],
     diff_head_ref: Optional[str],
+    diff_range_mode: str = "legacy",
+    first_parent: bool = False,
 ) -> tuple[list[dict], int, str, str]:
     root = Path(directory).resolve()
     if not root.is_dir():
@@ -1078,10 +1098,12 @@ def collect_diff_hunks(
         exclude_globs,
         diff_base_ref,
         diff_head_ref,
+        diff_range_mode=diff_range_mode,
+        first_parent=first_parent,
     )
     include_file_set = {str(Path(path).resolve()) for path in include_files or []}
     ignore_spec = load_gitignore_spec(str(root))
-    segments = iter_commit_patches(str(root), base_ref, head_ref)
+    segments = iter_commit_patches(str(root), base_ref, head_ref, first_parent)
     if not any(patch.strip() for _meta, patch in segments):
         return [], 0, base_ref, head_ref
 
@@ -1497,6 +1519,8 @@ def changed_line_ranges_by_file(
     exclude_globs: Optional[List[str]],
     diff_base_ref: Optional[str],
     diff_head_ref: Optional[str],
+    diff_range_mode: str = "legacy",
+    first_parent: bool = False,
 ) -> dict[str, list[tuple[int, int]]]:
     """Return, per absolute file path, the line ranges (in head/working-tree
     coordinates) that were changed by the selected diff. Reuses the unified-diff
@@ -1509,6 +1533,8 @@ def changed_line_ranges_by_file(
         exclude_globs,
         diff_base_ref,
         diff_head_ref,
+        diff_range_mode=diff_range_mode,
+        first_parent=first_parent,
     )
     ranges: dict[str, list[tuple[int, int]]] = {}
     for hunk in hunks:
@@ -1553,6 +1579,8 @@ def prepare_diff_search_index(
     diff_base_ref: Optional[str],
     diff_head_ref: Optional[str],
     force: bool = False,
+    diff_range_mode: str = "legacy",
+    first_parent: bool = False,
 ) -> dict:
     signature, base_ref, head_ref = diff_signature(
         directory,
@@ -1562,6 +1590,8 @@ def prepare_diff_search_index(
         exclude_globs,
         diff_base_ref,
         diff_head_ref,
+        diff_range_mode=diff_range_mode,
+        first_parent=first_parent,
     )
     hunk_cache_hit = (
         not force
@@ -1576,8 +1606,10 @@ def prepare_diff_search_index(
             include_files,
             include_globs,
             exclude_globs,
-            diff_base_ref,
-            diff_head_ref,
+            base_ref,
+            head_ref,
+            diff_range_mode="legacy",
+            first_parent=first_parent,
         )
         units = build_file_diff_units(hunks)
         diff_search_state.replace_hunks(
@@ -1661,6 +1693,8 @@ def search_diff_hunks(req: SearchFunctionsSimpleRequest) -> dict:
         req.diff_base_ref,
         req.diff_head_ref,
         req.force_diff_refresh,
+        diff_range_mode=req.diff_range_mode,
+        first_parent=req.first_parent,
     )
     units = diff_search_state.units
     needs_embeddings = search_mode in {"semantic", "hybrid"}
@@ -2112,9 +2146,9 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
     return results, len(file_paths), indexer
 
 @app.post("/embed")
-async def embed(req: EmbedRequest):
+@operations.exclusive
+def embed(req: EmbedRequest):
     print("/embed called")
-    progress.clear_cancel()
     try:
         embeddings = encode_with_memory_management(req.texts, settings.batch_size)
         return {"embeddings": embeddings.tolist()}
@@ -2133,12 +2167,12 @@ async def cancel_indexing():
     return await cancel_embedding()
 
 @app.post("/build_index")
-async def build_index_api(req: BuildIndexRequest):
+@operations.exclusive
+def build_index_api(req: BuildIndexRequest):
     print(f"/build_index called for directory: {req.directory}")
     with index_lock:
-        progress.clear_cancel()
         try:
-            results, file_count, _ = await asyncio.to_thread(build_index, req.directory, req.file_ext, update_state=True)
+            results, file_count, _ = build_index(req.directory, req.file_ext, update_state=True)
         except progress.OperationCancelled:
             return {"num_functions": 0, "num_files": 0, "cancelled": True, "message": "Indexing cancelled."}
         finally:
@@ -2146,14 +2180,14 @@ async def build_index_api(req: BuildIndexRequest):
     return {"num_functions": len(results), "num_files": file_count}
 
 @app.post("/force_rebuild_index")
-async def force_rebuild_index_api(req: BuildIndexRequest):
+@operations.exclusive
+def force_rebuild_index_api(req: BuildIndexRequest):
     """キャッシュをクリアして強制的にインデックスを再構築"""
     print(f"/force_rebuild_index called for directory: {req.directory}")
     with index_lock:
-        progress.clear_cancel()
         global_index_state.clear_cache()
         try:
-            results, file_count, _ = await asyncio.to_thread(build_index, req.directory, req.file_ext, update_state=True)
+            results, file_count, _ = build_index(req.directory, req.file_ext, update_state=True)
         except progress.OperationCancelled:
             return {"num_functions": 0, "num_files": 0, "cancelled": True, "message": "Index rebuild cancelled."}
         finally:
@@ -2161,7 +2195,7 @@ async def force_rebuild_index_api(req: BuildIndexRequest):
     return {"num_functions": len(results), "num_files": file_count, "message": "Index forcefully rebuilt"}
 
 @app.get("/index_status")
-async def index_status():
+def index_status():
     # If no directory is set, consider it up to date (no index to check)
     if global_index_state.directory is None:
         up_to_date = True
@@ -2177,27 +2211,21 @@ async def index_status():
 @app.get("/index_progress")
 async def index_progress():
     """インデックス作成の進捗（実際の割合）を返す。"""
-    return progress.snapshot()
+    return {**progress.snapshot(), **operations.snapshot()}
 
 @app.post("/prepare_diff_search")
-async def prepare_diff_search_api(req: PrepareDiffSearchRequest):
+@operations.exclusive
+def prepare_diff_search_api(req: PrepareDiffSearchRequest):
     # Preparing the hunk index only matters for the unified-diff view.
     search_target = "diff_hunks"
     search_mode = req.search_mode if req.search_mode in {"semantic", "bm25", "hybrid", "keyword"} else "hybrid"
     with diff_search_lock:
-        progress.clear_cancel()
         try:
-            prepared = await asyncio.to_thread(
-                prepare_diff_search_index,
-                req.directory,
-                req.file_ext,
-                req.include_files,
-                req.include_globs,
-                req.exclude_globs,
-                search_mode,
-                req.diff_base_ref,
-                req.diff_head_ref,
-                req.force,
+            prepared = prepare_diff_search_index(
+                req.directory, req.file_ext, req.include_files,
+                req.include_globs, req.exclude_globs, search_mode,
+                req.diff_base_ref, req.diff_head_ref, req.force,
+                diff_range_mode=req.diff_range_mode, first_parent=req.first_parent,
             )
         except progress.OperationCancelled:
             return {"cancelled": True, "message": "Diff preparation cancelled.", "results": []}
@@ -2210,7 +2238,8 @@ async def prepare_diff_search_api(req: PrepareDiffSearchRequest):
     }
 
 @app.post("/search")
-async def search_api(query: str, top_k: int = 5):
+@operations.exclusive
+def search_api(query: str, top_k: int = 5):
     print(f"/search called with query: {query}")
     with index_lock:
         if not global_index_state.indexer:
@@ -2219,13 +2248,17 @@ async def search_api(query: str, top_k: int = 5):
     return {"results": results}
 
 @app.post("/search_functions_simple")
-async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
+@operations.exclusive
+def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
+    return _search_functions_simple(req)
+
+
+def _search_functions_simple(req: SearchFunctionsSimpleRequest):
     search_target = normalize_search_target(req.search_target)
     if search_target == "diff_hunks":
         with diff_search_lock:
-            progress.clear_cancel()
             try:
-                response = await asyncio.to_thread(search_diff_hunks, req)
+                response = search_diff_hunks(req)
             except progress.OperationCancelled:
                 return {"results": [], "cancelled": True, "message": "Diff search cancelled."}
             finally:
@@ -2241,13 +2274,10 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
     with index_lock:
         effective_include_files = list(req.include_files) if req.include_files is not None else None
         effective_scope = req.scope or ("scoped" if effective_include_files is not None else "all")
-        progress.clear_cancel()
         # 意味検索/ハイブリッド: 埋め込みを構築 (update_state=True)
         # キーワード/BM25: 関数リストのみ取得し埋め込み計算をスキップ (update_state=False)
         try:
-            results, file_count, indexer = await asyncio.to_thread(
-                build_index, req.directory, req.file_ext, 8, needs_embeddings
-            )
+            results, file_count, indexer = build_index(req.directory, req.file_ext, 8, needs_embeddings)
         except progress.OperationCancelled:
             return {"results": [], "cancelled": True, "message": "Search indexing cancelled."}
         finally:
@@ -2342,6 +2372,8 @@ async def search_functions_simple_api(req: SearchFunctionsSimpleRequest):
                 req.exclude_globs,
                 req.diff_base_ref,
                 req.diff_head_ref,
+                diff_range_mode=req.diff_range_mode,
+                first_parent=req.first_parent,
             )
             kept_positions = [
                 pos
@@ -2594,7 +2626,8 @@ async def grep_repo_api(req: GrepRepoRequest):
 
 
 @app.post("/get_class_stats")
-async def get_class_stats(request: ClassStatsRequest):
+@operations.exclusive
+def get_class_stats(request: ClassStatsRequest):
     try:
         # まず検索を実行して検索結果を取得
         search_request = SearchFunctionsSimpleRequest(
@@ -2606,7 +2639,10 @@ async def get_class_stats(request: ClassStatsRequest):
             search_mode=request.search_mode,
             semantic_weight=request.semantic_weight,
         )
-        search_response = await search_functions_simple_api(search_request)
+        # This endpoint already owns the shared operation lock.
+        search_response = _search_functions_simple(search_request)
+        if search_response.get("cancelled"):
+            return search_response
         search_results = search_response["results"]
         
         # 全ての関数を抽出

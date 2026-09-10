@@ -27,6 +27,12 @@ body {
   align-items: center;
   gap: 0.5em;
 }
+.header-owl {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
 .header-btns {
   display: flex;
   align-items: center;
@@ -133,16 +139,6 @@ body {
 #setupAndStartBtn {
   flex: 1.35;
 }
-#stopServerBtn {
-  background: var(--vscode-errorForeground, #cf222e);
-  color: #ffffff;
-  border-color: rgba(207, 34, 46, 0.65);
-}
-#stopServerBtn:hover {
-  background: #a40e18;
-  box-shadow: 0 1px 5px rgba(207, 34, 46, 0.24);
-}
-
 /* ===== Translation settings ===== */
 .translation-settings {
   padding: 0.45em 0.8em;
@@ -349,21 +345,12 @@ button:focus {
 }
 
 .secondary-action {
-  background: var(--vscode-button-background, #0078d4);
-  color: var(--vscode-button-foreground, #ffffff);
+  background: var(--vscode-button-secondaryBackground, #e6e6e6);
+  color: var(--vscode-button-secondaryForeground, #333333);
 }
 
 .secondary-action:hover {
-  background: var(--vscode-button-hoverBackground, #106ebe);
-}
-
-#searchOptionsBtn {
-  background: var(--vscode-button-secondaryBackground, #5a5d5e);
-  color: var(--vscode-button-secondaryForeground, #ffffff);
-}
-
-#searchOptionsBtn:hover {
-  background: var(--vscode-button-secondaryHoverBackground, #6c7172);
+  background: var(--vscode-button-secondaryHoverBackground, #d8d8d8);
 }
 
 .search-options {
@@ -416,7 +403,7 @@ button:focus {
   color: var(--vscode-descriptionForeground, #777777);
 }
 
-.option-panel[open] summary::before {
+.option-panel[open] > summary::before {
   content: "▾";
 }
 
@@ -568,7 +555,7 @@ button:focus {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--vscode-foreground, #cccccc);
+  color: var(--vscode-foreground, #333333);
 }
 
 .commit-meta {
@@ -1106,7 +1093,7 @@ input[type=text]::placeholder {
   padding: 0.6em 1em;
   border: none;
   background: transparent;
-  color: var(--vscode-tab-inactiveForeground, rgba(255, 255, 255, 0.55));
+  color: var(--vscode-tab-inactiveForeground, var(--vscode-descriptionForeground, #666));
   cursor: pointer;
   font-weight: 500;
   font-size: 0.88em;
@@ -1120,12 +1107,12 @@ input[type=text]::placeholder {
 }
 
 .tab-btn:hover {
-  color: var(--vscode-tab-hoverForeground, rgba(255, 255, 255, 0.8));
+  color: var(--vscode-tab-hoverForeground, var(--vscode-foreground, #333));
   background: rgba(255, 255, 255, 0.04);
 }
 
 .tab-btn.active {
-  color: var(--vscode-tab-activeForeground, var(--vscode-foreground, #ffffff));
+  color: var(--vscode-tab-activeForeground, var(--vscode-foreground, #333));
   background: transparent;
   border-bottom: 2px solid var(--vscode-button-background, #0078d4);
   font-weight: 600;
@@ -1603,3 +1590,104 @@ input[type=text]::placeholder {
     font-size: 0.7em;
   }
 }
+
+.operation-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 10px;
+  margin: 0.4em 0.8em;
+  background: var(--vscode-sideBar-background, #f3f3f3);
+  border: 1px solid var(--vscode-input-border, #d0d7de);
+  border-radius: 6px;
+  font-size: 0.85em;
+  color: var(--vscode-foreground, #333);
+}
+.operation-banner[hidden] { display: none; }
+#cancelOperationBtn { margin-left: auto; }
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Keep secondary controls in a single, quiet disclosure below the query. */
+.settings-panel { margin: 0 0.8em 0.5em; }
+.settings-panel > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.4em 0;
+  color: var(--vscode-descriptionForeground, #666);
+  font-size: 0.82em;
+  cursor: pointer;
+  list-style: none;
+}
+.settings-panel > summary::-webkit-details-marker { display: none; }
+.settings-panel > summary::before { content: '▸'; }
+.settings-panel[open] > summary::before { content: '▾'; }
+.settings-summary { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-panel .search-options { padding: 0.4em 0 0.6em; border-bottom: 0; }
+.settings-panel .translation-settings { padding: 0.35em 0 0; border-bottom: 0; font-size: inherit; }
+.settings-actions, .settings-footer { display: flex; flex-wrap: wrap; gap: 0.5em; padding-top: 0.6em; }
+.settings-footer { border-top: 1px solid var(--vscode-sideBarSectionHeader-border, #e0e0e0); }
+summary:focus-visible, button:focus-visible { outline: 1px solid var(--vscode-focusBorder, #0078d4); outline-offset: 2px; }
+
+.settings-panel .option-panel > summary > span:first-of-type { flex: 1; }
+
+.tabs[hidden], #stats-tab[hidden] { display: none !important; }
+.diff-range-bar { gap: 6px; align-items: center; font-family: inherit; white-space: normal; }
+.diff-range-ref {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 8px;
+  color: var(--vscode-foreground, #333);
+  border: 1px solid;
+  border-left-width: 3px;
+  text-align: left;
+}
+.diff-range-ref.diff-range-from { border-color: #4f9cff; background: rgba(79,156,255,0.14); }
+.diff-range-ref.diff-range-to { border-color: #e0a23a; background: rgba(224,162,58,0.14); }
+.diff-range-ref:hover { filter: brightness(1.1); }
+.diff-range-label { flex-shrink: 0; font-weight: 600; }
+.diff-range-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--vscode-editor-font-family, monospace); }
+.diff-range-arrow { flex-shrink: 0; }
+
+.operation-banner { border: 0; padding: 0 0.4em; margin-top: 0; margin-bottom: 0; }
+.search-options label[hidden] { display: none; }
+#commitGraphWrap { margin: 0.3em 0.8em 0.6em; }
+.commit-range-legend { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 0.75em; padding: 6px; }
+.commit-range-legend > span:not(#commitHistorySummary) { border-left-width: 3px; border-left-style: solid; padding-left: 5px; }
+.commit-range-legend .legend-from { border-color: #4f9cff; }
+.commit-range-legend .legend-range { border-color: #22b07d; }
+.commit-range-legend .legend-to { border-color: #e0a23a; }
+#commitHistorySummary { flex-basis: 100%; overflow-wrap: anywhere; color: var(--vscode-descriptionForeground, #777); }
+.diff-history-help { font-size: 0.8em; color: var(--vscode-descriptionForeground, #777); }
+.commit-row.is-in-range { background: rgba(34,176,125,0.12); border-left-color: #22b07d; }
+.commit-row.is-base { background: rgba(79,156,255,0.18); border-left-color: #4f9cff; }
+.commit-row.is-head { background: rgba(224,162,58,0.18); border-left-color: #e0a23a; }
+.commit-node.is-in-range { fill: #22b07d; }
+.commit-node.is-base { fill: #4f9cff; stroke: #4f9cff; stroke-width: 2px; }
+.commit-node.is-head { fill: #e0a23a; stroke: #e0a23a; stroke-width: 2px; }
+.commit-edge.is-in-range { stroke: #22b07d; stroke-width: 2.5px; }
+.commit-row.is-current .commit-badge-current { display: inline-block; }
+.commit-badge-current { border: 1px solid var(--vscode-descriptionForeground, #777); }
+.commit-ref { border-bottom: 2px solid; background: transparent; color: var(--vscode-foreground, #333); border-radius: 2px; }
+
+/* Keep Stop in the same action slot as Search, including narrow sidebars. */
+.searchbar button[hidden] { display: none; }
+.searchbar .stop-operation { flex-shrink: 0; margin-left: 0; min-width: 76px; }
+.stop-operation span { font-size: 0.8em; margin-right: 4px; }

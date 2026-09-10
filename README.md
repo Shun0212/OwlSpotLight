@@ -108,7 +108,11 @@ The sidebar keeps the main search bar compact. Click **Options** to choose:
 
 `Source` auto-detects folders such as `src`, `app`, `lib`, `packages`, `client`, `server`, `backend`, and `frontend`.
 
-`Git Diff` restricts the search to a git diff. Pick the base and head commits from the built-in **commit graph** (click a commit to set the base, Shift+Click to set the head; leave both blank to compare `HEAD` against the working tree), then choose a **Diff view**:
+With no saved settings, the sidebar opens in `Git Diff` and automatically loads the current branch's complete first-parent history, including its initial commit. Explicitly saved scope and range selections are preserved. Merge commits remain (compared with their first parent), while individual commits from merged side branches are excluded.
+
+In **Settings → Search behavior**, choose **Range** (`Current branch: first → latest`, `Custom: From → To`, or `HEAD → working tree`) and **History** (`First parent only` or `Include merged branch history`). Custom ranges exclude From and include To. The tree remains visible outside Settings: From is blue, To is yellow, and selected commits and edges are green. Click a commit to set From; Shift+Click sets To and switches to a custom range. The tree shows up to 1,000 recent commits; the search includes the full selected history.
+
+Choose a **Diff view**:
 
 - `Functions` — only the functions changed in the selected diff.
 - `Unified diff` — the changed lines, shown as unified diff hunks.
@@ -122,7 +126,7 @@ Use `Git Diff` when you want to review a working-tree change, a branch compariso
 - `Unified diff` searches the actual patch hunks — added, removed, and context lines — and results can open in VS Code's native side-by-side diff editor.
 - All the usual ranking modes apply: use `Hybrid` / `Semantic` for intent-based review, `BM25` for lexical terms, and `Keyword` for exact identifiers.
 
-Agents can use the same feature through `owlspotlight.search_code`: set `search_target` to `changed_functions` or `diff_hunks`, and pass `diff_base_ref` / `diff_head_ref` for a specific comparison.
+Agents can use the same feature through `owlspotlight.search_code`: set `search_target` to `changed_functions` or `diff_hunks`, with `diff_range_mode="branch"` and `first_parent=true` for the sidebar defaults. Use `diff_range_mode="custom"` with `diff_base_ref` / `diff_head_ref` for a specific range, or `"working_tree"` for local changes. API calls that omit these settings use legacy range selection and all-parent traversal.
 
 <img src="screenshot/owlspotlight-code-diff-search-screen.png" alt="OwlSpotlight Code Diff search with unified diff results in VS Code" width="900">
 
