@@ -139,6 +139,15 @@ body {
 #setupAndStartBtn {
   flex: 1.35;
 }
+#stopServerBtn {
+  background: var(--vscode-errorForeground, #cf222e);
+  color: #ffffff;
+  border-color: rgba(207, 34, 46, 0.65);
+}
+#stopServerBtn:hover {
+  background: #a40e18;
+  box-shadow: 0 1px 5px rgba(207, 34, 46, 0.24);
+}
 /* ===== Translation settings ===== */
 .translation-settings {
   padding: 0.45em 0.8em;
@@ -1689,5 +1698,12 @@ summary:focus-visible, button:focus-visible { outline: 1px solid var(--vscode-fo
 
 /* Keep Stop in the same action slot as Search, including narrow sidebars. */
 .searchbar button[hidden] { display: none; }
-.searchbar .stop-operation { flex-shrink: 0; margin-left: 0; min-width: 76px; }
+.searchbar .stop-operation {
+  flex-shrink: 0;
+  margin-left: 0;
+  min-width: 76px;
+  background: #b91c1c;
+  color: #fff;
+}
+.searchbar .stop-operation:hover:not(:disabled) { background: #991b1b; }
 .stop-operation span { font-size: 0.8em; margin-right: 4px; }
