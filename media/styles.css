@@ -1755,3 +1755,13 @@ summary:focus-visible, button:focus-visible { outline: 1px solid var(--vscode-fo
 .graph-visibility-option { display: inline-flex; align-items: center; flex-wrap: nowrap; gap: 6px; white-space: nowrap; }
 .graph-visibility-option input { flex: none; margin: 0; }
 #graphOnResultClickLabel { white-space: nowrap; flex: none; }
+
+/* Full-mode tools are unavailable in the server-free backend. */
+.simple-backend .server-actions,
+.simple-backend #agentReviewPanel,
+.simple-backend #resultTypeFilter {
+  display: none !important;
+}
+#onnxSettings[hidden] { display: none; }
+
+.simple-backend [data-select="resultTypeFilter"] [data-value="codeblocks"] { display: none; }

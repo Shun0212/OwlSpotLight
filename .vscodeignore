@@ -19,3 +19,4 @@ model_server/tests/
 test_sample.py
 screenshot/
 CHANGELOG.md
+scripts/**

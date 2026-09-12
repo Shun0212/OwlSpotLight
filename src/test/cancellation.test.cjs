@@ -10,7 +10,7 @@ test('shared Stop aborts the planner and targets only the sidebar HTTP operation
     const end = source.indexOf('\n\tpublic notifyServerStatus', start);
     const method = source.slice(start, end).replace('public async', 'async');
     const calls = [];
-    const context = vm.createContext({ AbortController, AbortSignal, resolveActiveServerPort: async () => 8000,
+    const context = vm.createContext({ AbortController, AbortSignal, isSimpleMode: () => false, resolveActiveServerPort: async () => 8000,
         getServerUrl: (route, port) => `${port}${route}`, fetch: async (url, options) => {
             calls.push({ url, options }); return { ok: true, json: async () => ({ operation_id: 'observed-external' }) };
         } });

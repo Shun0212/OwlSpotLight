@@ -10,13 +10,13 @@ const { normalizeAgentSearchLimit } = require('../../out/agenticSearch');
 // Execute the actual extension Search handler with transport and VS Code stubs.
 function fixture(agent, overrides = {}) {
     const source = fs.readFileSync(path.join(__dirname, '../extension.ts'), 'utf8');
-    const start = source.indexOf("if (msg.command === 'search') {");
+    const start = source.lastIndexOf("if (msg.command === 'search') {");
     const end = source.indexOf("if (msg.command === 'getClassStats')", start);
     const messages = [], requests = [];
     const cancellation = { cancelled: false, serverStarted: false, controller: new AbortController() };
     const config = { get: (key, fallback) => ({ enableAgenticSearch: true, geminiModel: 'gemini-3.8-flash', agenticMaxSearches: 3 })[key] ?? fallback };
     const context = vm.createContext({
-        AbortController,
+        AbortController, isSimpleMode: () => false,
         vscode: { workspace: { getConfiguration: () => config, workspaceFolders: [{ uri: { fsPath: '/fixture' } }] } },
         webviewView: { webview: { postMessage: message => messages.push(message) } },
         resolveActiveServerPort: async () => 8000,
@@ -93,4 +93,21 @@ test('agentic off keeps a single ordinary search and diff target maps to commit 
     assert.equal(f.requests.length, 1);
     await f.run({ searchTarget: 'diff_hunks' });
     assert.equal(invoked, true);
+});
+
+test('Node mode reuses Gemini tool searches with no HTTP transport', async () => {
+    const requests = [];
+    const f = fixture(async options => {
+        const results = await options.search('authentication', 'bm25');
+        assert.equal(results[0].function_name, 'verify');
+        return { results, steps: [], summary: 'Local result', stopReason: 'finished' };
+    }, { isSimpleMode: () => true,
+        resolveActiveServerPort: () => { throw new Error('Must not probe HTTP'); },
+        fetch: () => { throw new Error('Must not fetch HTTP'); },
+        simpleMode: { search: async request => { requests.push(request); return { results: [{ function_name: 'verify', symbol_kind: 'function' }] }; } } });
+    await f.run();
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].scope, 'changed');
+    assert.equal(requests[0].diff_base_ref, 'abc');
+    assert.equal(f.messages.some(message => message.type === 'results'), true);
 });

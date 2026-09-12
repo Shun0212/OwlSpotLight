@@ -35,6 +35,18 @@ Find functions, methods, classes, Python CodeBlocks, routes, tests, and call-hea
 <a name="english"></a>
 ## English
 
+### Simple mode (Node.js + ONNX)
+
+On first setup/search, choose **Node.js · Simple** or **Python · Full**. Node.js requires no Python environment or listening port; Python sets up the environment and starts the server. The choice is saved and can be changed in VS Code extension settings **Owlspotlight: Search Backend**. Existing explicit settings are preserved. If Python setup or startup fails (including missing uv or a startup timeout), OwlSpotlight switches to Node.js automatically, logs the cause and stops its owned Python process. Dismissing a setup picker does not trigger fallback. The first semantic search downloads the selected ONNX model; subsequent searches can run offline.
+
+Simple mode searches complete **functions and methods** in Python, Java, JavaScript/JSX, and TypeScript/TSX. Tree-sitter WASM grammars run inside the Node worker, preserving function names, class names, decorators and source ranges. Long functions remain one result; top-level statements and unnamed callbacks are not returned as arbitrary code blocks. Semantic, hybrid, BM25 and literal keyword search, All/Source scopes, Git history / working-tree / custom-range diff search, and Find Similar to Selection are supported. BM25 and keyword search do not load an embedding model. Semantic results are ranked similarities, not a guarantee that a relevant function exists.
+
+Choose NightOwl 35M (384 dimensions; INT8 ~35 MB / FP32 ~137 MB) or NightOwl (768 dimensions; INT8 ~152 MB / FP32 ~604 MB). Models use pinned revisions and verified ONNX checksums. Model files and embeddings are stored under the extension's global storage `node-onnx/`; embeddings are separated by parser version, model, revision and precision. Each search rereads saved files, reusing unchanged embeddings and reflecting edits/deletions. Source indexing respects `.gitignore` and `.owlignore` and skips symlinks, generated/dependency folders and files over 1 MiB. Unsaved editor changes are not indexed.
+
+**Clear embedding cache** rebuilds embeddings on the next search while preserving downloaded models. Set `owlspotlight.onnxLocalFilesOnly` to require offline operation. Optional Gemini translation and agentic search use the existing API-key/data-sharing controls in both modes. Simple mode also provides class statistics and dependency graphs: unambiguous static call estimates are supplemented by installed VS Code language providers, with optional ONNX similarity edges. Static estimates are not proof of runtime calls. **Agent Setup** can register a Node.js stdio MCP process exposing `owlspotlight.search_code` and `owlspotlight.read_code`, without Python or HTTP. MCP result annotations, human feedback and agent-activity mirroring remain Python-mode features. Gemini and MCP share code only through their existing explicit integrations.
+
+Development checks: `npm run test:unit` and `npm run test:onnx`. The latter runs real CPU inference on three small fixtures and caches its model under the system temporary directory. Set `OWL_ONNX_SMOKE_OFFLINE=1` to verify it without downloads.
+
 ### Why OwlSpotlight?
 
 OwlSpotlight lets you search your codebase by **describing what the code does** — no need to remember names or guess keywords. Type a natural-language query (in English or Japanese) into the VS Code sidebar, and OwlSpotlight finds the matching functions, methods, classes, top-level code blocks, FastAPI routes, and tests, then jumps straight to the definition and highlights it. You can also select a block of code in the editor and search for similar code, limit the search to files you've changed in git, and switch between hybrid, semantic, BM25, and literal keyword modes.
@@ -300,6 +312,14 @@ For questions, bug reports, feedback, or collaboration, reach out at [owlspotlig
 **VS Code 向けのローカル完結型セマンティックコード検索**
 
 </div>
+
+### 簡易モード（Node.js + ONNX）
+
+初回のSetup／検索時に **Node.jsの簡易モード** と **Pythonの通常モード** を選択できます。選択は保存され、VS Code拡張機能の **Owlspotlight: Search Backend** 設定から変更できます。簡易モードではPythonのインストールやサーバー起動は不要です。Python環境の構築や起動に失敗した場合は、自動的に簡易モードへ切り替えて原因をOUTPUTへ記録します。設定画面をキャンセルしただけの場合は切り替えません。モデルは初回の意味検索でダウンロードされ、以後はオフラインでも検索できます。初期モデルは軽量なNightOwl 35MのINT8版で、通常のNightOwlやFP32にも切り替えられます。
+
+Python・Java・JavaScript/JSX・TypeScript/TSXをNode.js内で構文解析し、**関数・メソッド単位**で検索します。長い関数も途中で分割せず、関数名・クラス名と正しいソース範囲を表示します。保存済みファイルの変更・削除は次回検索に反映されます。旧ブロック方式の埋め込みキャッシュは再利用しません。
+
+簡易モードでもGit履歴・作業ツリー・指定範囲の差分検索、依存グラフ、類似関数、クラス統計、日本語翻訳、Gemini検索改善、MCPによる検索・コード取得を利用できます。依存グラフの静的解析は推定として表示します。GeminiはAPIキーと既存のデータ共有設定に従います。MCPの結果注釈・フィードバック・Agent Activityへの同期はPythonモードの機能です。
 
 ### OwlSpotlight とは
 

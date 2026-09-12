@@ -34,11 +34,11 @@ export function updateProjectCodexConfig(workspace: string, server: Record<strin
     return filename;
 }
 
-export function writeMcpRuntime(storage: string, workspace: string, python: string, script: string, serverUrl: string, language = 'en') {
+export function writeMcpRuntime(storage: string, workspace: string, python: string, script: string, serverUrl: string, language = 'en', nodeOptions?: object) {
     const id = crypto.createHash('sha256').update(path.resolve(workspace)).digest('hex').slice(0, 24);
     const directory = path.join(storage, 'mcp', id);
     const launcher = path.join(directory, 'launch.cjs');
-    atomicWrite(path.join(directory, 'runtime.json'), JSON.stringify({ python, script, workspace, serverUrl, language }));
+    atomicWrite(path.join(directory, 'runtime.json'), JSON.stringify({ python, script, workspace, serverUrl, language, nodeOptions }));
     atomicWrite(launcher, `const fs = require('fs');
 const path = require('path');
 const cp = require('child_process');
@@ -47,6 +47,9 @@ if (!fs.existsSync(config.script) || !fs.existsSync(config.workspace)) {
   process.stderr.write('OwlSpotlight runtime is unavailable. Open this workspace in VS Code and run Agent Setup again.\\n');
   process.exit(1);
 }
+if (config.nodeOptions) {
+  require(config.script).run(config.workspace, config.nodeOptions).catch(error => { process.stderr.write(String(error) + '\\n'); process.exitCode = 1; });
+} else {
 const child = cp.spawn(config.python, [config.script], { cwd: config.workspace, stdio: 'inherit', env: {
   ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8',
   OWLSPOTLIGHT_WORKSPACE: config.workspace, OWLSPOTLIGHT_SERVER_URL: config.serverUrl,
@@ -55,6 +58,7 @@ const child = cp.spawn(config.python, [config.script], { cwd: config.workspace, 
 child.on('error', () => { process.stderr.write('Unable to launch OwlSpotlight Python. Run Setup Environment in VS Code.\\n'); process.exitCode = 1; });
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => child.kill(signal));
 child.on('exit', code => { process.exitCode = code ?? 1; });
+}
 `);
     return launcher;
 }

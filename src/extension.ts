@@ -1,6 +1,8 @@
+import { searchBackend, chooseSearchBackend, fallbackToSimpleMode } from './searchBackend';
+import { SimpleMode, isSimpleMode } from './nodeSearch/simpleMode';
 import { getHighlightColors, deriveBorderColor } from './highlightColors';
 import { graphOnResultClick, updateGraphOnResultClick } from './graphSettings';
-import { openDependencyGraph, closeDependencyGraph } from './dependencyGraph';
+import { openDependencyGraph, closeDependencyGraph, GraphLoader } from './dependencyGraph';
 import * as TOML from '@iarna/toml';
 import { CODEX_TOOL_TIMEOUT, shellQuote, updateProjectCodexConfig, writeMcpRuntime } from './codexSetup';
 import * as crypto from 'crypto';
@@ -18,6 +20,9 @@ import { createCodeReader } from './agentCode';
 import { runAgenticSearch, normalizeAgentSearchLimit, GenerateAgent } from './agenticSearch';
 import { DEFAULT_GEMINI_MODEL, GEMINI_MODELS, normalizeGeminiModel, geminiModelLabel } from './queryExpansion';
 import type { DiffSearchMode } from './searchTypes';
+
+let simpleMode: SimpleMode;
+const localGraph: GraphLoader = (request, signal) => simpleMode.search(request, () => {}, signal, 'graph');
 
 const DEFAULT_SERVER_HOST = '127.0.0.1';
 const DEFAULT_SERVER_PORT = 8000;
@@ -1252,7 +1257,7 @@ function buildAgentSetupPayload(
 	serverUrl: string
 ) {
 	const serverDir = path.join(context.extensionPath, 'model_server');
-	const mcpServerPath = path.join(serverDir, 'mcp_server.py');
+	const mcpServerPath = isSimpleMode() ? path.join(context.extensionPath, 'out', 'nodeSearch', 'mcp.js') : path.join(serverDir, 'mcp_server.py');
 	const venvPython = os.platform() === 'win32'
 		? path.join(serverDir, '.venv', 'Scripts', 'python.exe')
 		: path.join(serverDir, '.venv', 'bin', 'python');
@@ -1272,11 +1277,14 @@ function buildAgentSetupPayload(
 			}
 		}
 	};
-    const launcher = writeMcpRuntime(context.globalStorageUri.fsPath, workspaceRoot, mcpPythonCommand, mcpServerPath, serverUrl, vscode.workspace.getConfiguration('owlspotlight').get<boolean>('enableJapaneseTranslation', false) ? 'ja' : 'en');
+    const launcher = writeMcpRuntime(context.globalStorageUri.fsPath, workspaceRoot, mcpPythonCommand, mcpServerPath, serverUrl, vscode.workspace.getConfiguration('owlspotlight').get<boolean>('enableJapaneseTranslation', false) ? 'ja' : 'en', isSimpleMode() ? simpleMode.engineOptions() : undefined);
     const codexServer = { command: process.execPath, args: [launcher], cwd: workspaceRoot,
         env: { ELECTRON_RUN_AS_NODE: '1' }, startup_timeout_sec: 30, tool_timeout_sec: CODEX_TOOL_TIMEOUT };
+    if (isSimpleMode()) {
+        Object.assign(mcpConfig.mcpServers.owlspotlight, { command: process.execPath, args: [launcher], env: { ELECTRON_RUN_AS_NODE: '1' } });
+    }
     const codexCommand = (process.platform === 'win32' ? '& ' : '') + ['codex', '-c', `mcp_servers.owlspotlight=${TOML.stringify.value(codexServer)}`].map(part => shellQuote(part)).join(' ');
-	const instructions = [
+	const fullInstructions = [
 		'Use OwlSpotlight before grep/ripgrep for local code search when looking for functions, methods, routes, handlers, storage logic, auth/session logic, or code blocks.',
 		`Workspace: ${workspaceRoot}`,
 		`OwlSpotlight server: ${serverUrl}`,
@@ -1305,7 +1313,14 @@ function buildAgentSetupPayload(
 		'4. Call owlspotlight.mark_results_used for the ranks or grep locations you actually referenced so OwlSpotlight preserves the evidence trail.',
 		'5. Do not wait for human fallback. Use the mirrored sidebar only as observability unless the user explicitly asks for review.'
 	].join('\n');
-	return { mcpConfig, instructions, codexCommand, mcpPythonCommand, mcpServerPath, codexServer };
+	const instructions = isSimpleMode() ? [
+        `OwlSpotlight Node.js / ONNX MCP. Workspace: ${workspaceRoot}. No Python or HTTP server is required.`,
+        'Use owlspotlight.search_code to discover functions/methods and Git changes, then owlspotlight.read_code to inspect complete source.',
+        'Available tools in this mode: owlspotlight.search_code, owlspotlight.read_code. Search annotations, feedback and activity mirroring are available in Python mode.',
+        'MCP returns source code to your connected agent and its provider. A Gemini key is not required.',
+        `Codex command: ${codexCommand}`
+    ].join('\n') : fullInstructions;
+    return { mcpConfig, instructions, codexCommand, mcpPythonCommand, mcpServerPath, codexServer };
 }
 
 function mergeOwlspotlightMcpConfig(existing: any, owlspotlightEntry: any): any {
@@ -1325,7 +1340,8 @@ async function generateAgentSetup(context: vscode.ExtensionContext): Promise<voi
 		vscode.window.showWarningMessage('No workspace folder found.');
 		return;
 	}
-	const serverPort = await resolveActiveServerPort();
+	if (!await chooseSearchBackend()) { return; }
+    const serverPort = isSimpleMode() ? undefined : await resolveActiveServerPort();
 	const serverUrl = getServerBaseUrl(serverPort ?? activeServerPort);
 	const { mcpConfig, instructions, codexCommand, mcpPythonCommand, mcpServerPath, codexServer } = buildAgentSetupPayload(context, workspaceRoot, serverUrl);
 	const mcpJson = JSON.stringify(mcpConfig, null, 2);
@@ -1356,7 +1372,7 @@ async function generateAgentSetup(context: vscode.ExtensionContext): Promise<voi
 	}
     if (pick.value === 'registerCodex' || pick.value === 'removeCodex') {
         try {
-            if (pick.value === 'registerCodex') {
+            if (pick.value === 'registerCodex' && !isSimpleMode()) {
                 if (serverPort === undefined) { throw new Error('Start the OwlSpotlight server before registering Codex.'); }
                 const check = await execFileResult(mcpPythonCommand, ['-c', 'import pathspec'], workspaceRoot);
                 if (!check.ok || !fs.existsSync(mcpServerPath)) { throw new Error('Run Setup Environment before registering Codex.'); }
@@ -1568,6 +1584,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 	}
 
     public refreshMcpRuntime(port?: number) {
+        if (searchBackend() === 'ask') { return; }
         const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
         if (!workspace) { return; }
         try { buildAgentSetupPayload(this._context, workspace, getServerBaseUrl(port ?? activeServerPort)); }
@@ -1575,6 +1592,10 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
     }
 
     public async cancelOperation(): Promise<void> {
+        if (isSimpleMode()) {
+            if (this._operationCancellation) { this._operationCancellation.cancelled = true; this._operationCancellation.controller.abort(); }
+            await simpleMode.stop(); return;
+        }
         const active = this._operationCancellation;
         if (active) {
             active.cancelled = true;
@@ -1605,7 +1626,8 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
     }
 
 	public notifyServerStatus(online: boolean, port?: number) {
-		this._view?.webview.postMessage({ type: 'serverStatus', online, port });
+		this._view?.webview.postMessage(searchBackend() === 'ask' ? { type: 'serverStatus', online: false, message: 'Choose a mode · Setup' }
+            : isSimpleMode() ? { type: 'serverStatus', online: true, message: 'Simple · ONNX' } : { type: 'serverStatus', online, port });
         this.refreshMcpRuntime(port);
 	}
 
@@ -1634,7 +1656,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 			if (inFlight) { return; }
 			inFlight = true;
 			try {
-			if (!webviewView.visible) {
+			if (searchBackend() !== 'python' || !webviewView.visible) {
 				return;
 			}
 			const serverPort = await resolveActiveServerPort();
@@ -1667,7 +1689,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 			if (inFlight) { return; }
 			inFlight = true;
 			try {
-			if (!webviewView.visible) {
+			if (searchBackend() !== 'python' || !webviewView.visible) {
 				return;
 			}
 			const serverPort = await resolveActiveServerPort();
@@ -1690,44 +1712,37 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 		void tick();
 	}
 
-	private async setupAndStartServer(webviewView: vscode.WebviewView): Promise<boolean> {
-		const serverDir = path.join(this._context.extensionPath, 'model_server');
-		const venvDir = path.join(serverDir, '.venv');
-		const pythonBin = os.platform() === 'win32'
-			? path.join(venvDir, 'Scripts', 'python.exe')
-			: path.join(venvDir, 'bin', 'python');
-		try {
-			const bindHost = getConfiguredHost();
-			if (!(await canBindHost(bindHost))) {
-				const errMsg = `このIPアドレス (${bindHost}) はこの端末で使用できません。設定 owlspotlight.serverHost を 127.0.0.1 などバインド可能なアドレスに変更してください。\nThis IP address (${bindHost}) is not available on this machine. Change the owlspotlight.serverHost setting to a bindable address such as 127.0.0.1.`;
-				this.notifyServerStatus(false);
-				this.notifyError(errMsg);
-				void vscode.window.showErrorMessage(errMsg, { modal: true });
-				return false;
-			}
-			webviewView.webview.postMessage({ type: 'serverStatus', online: false, message: 'Checking setup...' });
-			if (!fs.existsSync(pythonBin)) {
-				webviewView.webview.postMessage({ type: 'status', message: 'Setting up Python environment...' });
-				const setupResult = await vscode.commands.executeCommand<boolean | undefined>('owlspotlight.setupEnv', { startServerAfterSetup: false });
-				if (setupResult === false || !fs.existsSync(pythonBin)) {
-					webviewView.webview.postMessage({ type: 'error', message: 'Environment setup did not complete. Check the OwlSpotlight OUTPUT panel.' });
-					return false;
-				}
-			}
-			webviewView.webview.postMessage({ type: 'status', message: 'Starting server...' });
-			await vscode.commands.executeCommand('owlspotlight.startServer');
-			const serverPort = await waitForActiveServerPort(60000, 2000);
-			webviewView.webview.postMessage({ type: 'serverStatus', online: serverPort !== undefined, port: serverPort });
-			webviewView.webview.postMessage({
-				type: 'status',
-				message: serverPort !== undefined ? 'Server is ready. Enter a query to search.' : 'Server start requested, but readiness check timed out. Check the OwlSpotlight OUTPUT panel.'
-			});
-			return serverPort !== undefined;
-		} catch {
-			webviewView.webview.postMessage({ type: 'error', message: 'Setup and start failed. Check the OwlSpotlight OUTPUT panel.' });
-			return false;
-		}
-	}
+    private async setupAndStartServer(webviewView: vscode.WebviewView): Promise<boolean> {
+        if (!await chooseSearchBackend()) { return false; }
+        const ready = () => {
+            webviewView.webview.postMessage(simpleMode.settings());
+            this.notifyServerStatus(true);
+            webviewView.webview.postMessage({ type: 'status', message: 'Node.js simple mode is ready. Enter a query to search.' });
+            return true;
+        };
+        if (isSimpleMode()) { return ready(); }
+        const pythonBin = path.join(this._context.extensionPath, 'model_server', '.venv', os.platform() === 'win32' ? 'Scripts/python.exe' : 'bin/python');
+        try {
+            if (!fs.existsSync(pythonBin)) {
+                webviewView.webview.postMessage({ type: 'status', message: 'Setting up Python environment…' });
+                const result = await vscode.commands.executeCommand<boolean | undefined>('owlspotlight.setupEnv', { startServerAfterSetup: false });
+                if (isSimpleMode()) { return ready(); }
+                if (result !== true) { return false; } // Dismissed setup is not a failure.
+            }
+            await vscode.commands.executeCommand('owlspotlight.startServer');
+            for (let attempt = 0; attempt < 45; attempt++) {
+                if (isSimpleMode()) { return ready(); }
+                const port = await resolveActiveServerPort();
+                if (port !== undefined) { this.notifyServerStatus(true, port); return true; }
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+            await fallbackToSimpleMode('Server readiness timed out.', this._outputChannel);
+            return ready();
+        } catch (error) {
+            await fallbackToSimpleMode(String(error), this._outputChannel);
+            return ready();
+        }
+    }
 
        async resolveWebviewView(
                webviewView: vscode.WebviewView,
@@ -1777,6 +1792,12 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                 } catch {}
 
         const graphPreferenceListener = vscode.workspace.onDidChangeConfiguration(event => {
+            if (event.affectsConfiguration('owlspotlight.searchBackend') || event.affectsConfiguration('owlspotlight.onnxModel') || event.affectsConfiguration('owlspotlight.onnxDtype') || event.affectsConfiguration('owlspotlight.onnxLocalFilesOnly')) {
+                void simpleMode.stop();
+                closeDependencyGraph();
+                void webviewView.webview.postMessage(simpleMode.settings());
+                this.notifyServerStatus(false);
+            }
             if (event.affectsConfiguration('owlspotlight.graph.openOnResultClick')) {
                 void webviewView.webview.postMessage({ type: 'graphPreference', enabled: graphOnResultClick() });
                 if (!graphOnResultClick()) { closeDependencyGraph(); }
@@ -1787,6 +1808,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                 webviewView.webview.onDidReceiveMessage(async (msg) => {
                         const guarded = ['search', 'getClassStats', 'prepareDiffSearch', 'clearCache', 'setupAndStart', 'startServer', 'removeVenv'].includes(msg?.command);
                         if (msg?.command === 'requestInitState') {
+                                webviewView.webview.postMessage(simpleMode.settings());
                                 webviewView.webview.postMessage({ type: 'operationState', operation: this._operation });
                         }
                         if (guarded && this._operation) {
@@ -1801,13 +1823,31 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                         }
                         try {
 
+                        if (['search', 'setupAndStart', 'startServer', 'getClassStats', 'prepareDiffSearch', 'generateAgentSetup'].includes(msg.command)) {
+                            if (!await chooseSearchBackend()) { return; }
+                            webviewView.webview.postMessage(simpleMode.settings());
+                        }
+                        if (isSimpleMode()) {
+                            if (['checkServerStatus', 'setupAndStart', 'startServer'].includes(msg.command)) {
+                                this.notifyServerStatus(true);
+                                webviewView.webview.postMessage({ type: 'status', message: 'Simple mode is ready. The ONNX model downloads on the first semantic search.' });
+                                return;
+                            }
+                            if (msg.command === 'clearCache') {
+                                await simpleMode.clearCache();
+                                webviewView.webview.postMessage({ type: 'status', message: 'ONNX embedding cache cleared. The next search rebuilds it.' });
+                                return;
+                            }
+
+                        }
+
                         if (msg?.command === 'setGraphOnResultClick' && typeof msg.enabled === 'boolean') {
                                 await updateGraphOnResultClick(msg.enabled);
                                 return;
                         }
                         if (msg?.command === 'openDependencyGraph') {
                                 clearAllDecorations();
-                                await openDependencyGraph(this._context, msg, getServerUrl('/dependency_graph'));
+                                await openDependencyGraph(this._context, msg, isSimpleMode() ? localGraph : getServerUrl('/dependency_graph'));
                                 return;
                         }
 
@@ -1955,6 +1995,16 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                 return;
                         }
                         if (msg.command === 'prepareDiffSearch') {
+                                if (isSimpleMode()) {
+                                    const directory = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+                                    if (!directory) { throw new Error('Open a workspace folder first.'); }
+                                    const data = await simpleMode.search({ directory, query: '', file_ext: msg.lang || '.py',
+                                        scope: 'changed', search_target: 'diff_hunks', diff_range_mode: msg.diffRangeMode || 'branch',
+                                        diff_base_ref: msg.diffBaseRef, diff_head_ref: msg.diffHeadRef, first_parent: msg.firstParent !== false },
+                                        () => {}, cancellation?.controller.signal, 'prepare');
+                                    webviewView.webview.postMessage({ type: 'diffPrepared', data }); return;
+                                }
+
                                 const workspaceFolders = vscode.workspace.workspaceFolders;
                                 if (!workspaceFolders || workspaceFolders.length === 0) {
                                         webviewView.webview.postMessage({ type: 'diffPrepareError', message: 'No workspace folder found.' });
@@ -2068,10 +2118,11 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                 return;
                         }
                         if (msg.command === 'search') {
+                if (!isSimpleMode()) {
 				// サーバー起動チェック
 				let serverUp = true;
 				try {
-					const serverPort = await resolveActiveServerPort();
+					const serverPort = isSimpleMode() ? undefined : await resolveActiveServerPort();
                                 if (cancellation?.cancelled) { return; }
 					const statusRes = serverPort !== undefined
 						? await fetch(getServerUrl('/index_status', serverPort))
@@ -2081,20 +2132,13 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					serverUp = false;
 				}
 				if (!serverUp) {
-					const choice = await vscode.window.showWarningMessage(
-						'The search server is not running. Start it now?',
-						{ modal: true },
-						'Start Server'
-					);
-					if (choice !== 'Start Server') {
-						return;
-					}
 					const started = await this.setupAndStartServer(webviewView);
                                 if (cancellation?.cancelled) { return; }
 					if (!started) {
 						return;
 					}
 				}
+                }
                                 const queryConfig = vscode.workspace.getConfiguration('owlspotlight');
                                 const agenticEnabled = typeof msg.agenticEnabled === 'boolean' ? msg.agenticEnabled : queryConfig.get<boolean>('enableAgenticSearch', false);
                                 let query = msg.text;
@@ -2126,15 +2170,23 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				const includeFiles = await resolveSearchIncludeFiles(workspaceFolder, fileExt, scope, searchTarget);
                                 if (cancellation?.cancelled) { return; }
 				webviewView.webview.postMessage({ type: 'status', message: 'Searching...' });
-				const serverPort = await resolveActiveServerPort();
+				const serverPort = isSimpleMode() ? undefined : await resolveActiveServerPort();
                                 if (cancellation?.cancelled) { return; }
-				if (serverPort === undefined) {
+				if (!isSimpleMode() && serverPort === undefined) {
 					webviewView.webview.postMessage({ type: 'error', message: 'Failed to search. Make sure the server is running.' });
 					return;
 				}
                 try {
                     const searchOnce = async (nextQuery: string, mode: DiffSearchMode) => {
                         cancellation?.controller.signal.throwIfAborted();
+                        if (isSimpleMode()) {
+                            return simpleMode.search({ directory: folderPath, query: nextQuery, top_k: 30, file_ext: fileExt,
+                                include_files: includeFiles, search_mode: mode, scope, search_target: searchTarget,
+                                diff_range_mode: ['branch', 'custom', 'working_tree'].includes(msg.diffRangeMode) ? msg.diffRangeMode : 'branch',
+                                first_parent: msg.firstParent !== false, diff_base_ref: diffBaseRef, diff_head_ref: diffHeadRef },
+                                progress => webviewView.webview.postMessage({ type: 'status', message: `${progress.phase}${progress.total ? ` (${progress.current}/${progress.total})` : ''}…` }),
+                                cancellation?.controller.signal);
+                        }
                         if (cancellation) { cancellation.serverStarted = true; cancellation.serverPort = serverPort; }
                         try {
                             // Await the actual worker response so Stop never unlocks an active index.
@@ -2174,7 +2226,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                             query: originalQuery,
                             rewriteOptions: { expand: false, translate: translationOptions.enabled ?? queryConfig.get<boolean>('enableJapaneseTranslation', false),
                                 searchMode, searchTarget: searchTarget === 'diff_hunks' ? 'diff_commits' : searchTarget,
-                                embeddingModel: queryConfig.get<string>('modelName', 'Shuu12121/NightOwl-CodeEmbedding') },
+                                embeddingModel: queryConfig.get<string>(isSimpleMode() ? 'onnxModel' : 'modelName', 'Shuu12121/NightOwl-CodeEmbedding') },
                             model: normalizeGeminiModel(msg.geminiModel || queryConfig.get<string>('geminiModel')),
                             maxSearches: normalizeAgentSearchLimit(queryConfig.get<number>('agenticMaxSearches', 3)),
                             signal: cancellation?.controller.signal,
@@ -2215,9 +2267,9 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					} else {
 						webviewView.webview.postMessage({ type: 'results', results: [], folderPath });
 					}
-				} catch {
+				} catch (error) {
                     if (cancellation?.cancelled) { return; }
-					webviewView.webview.postMessage({ type: 'error', message: 'Failed to search. Make sure the server is running.' });
+					webviewView.webview.postMessage({ type: 'error', message: `Search failed: ${String(error)}` });
 				}
 			}
 			if (msg.command === 'getClassStats') {
@@ -2246,8 +2298,13 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				const includeFiles = await resolveSearchScopeFiles(workspaceFolder, fileExt, scope);
                                 if (cancellation?.cancelled) { return; }
 				webviewView.webview.postMessage({ type: 'status', message: 'Loading class statistics...' });
-				try {
-					const serverPort = await resolveActiveServerPort();
+                try {
+                    if (isSimpleMode()) {
+                        const data = await simpleMode.search({ directory: folderPath, query, file_ext: fileExt, include_files: includeFiles, search_mode: searchMode },
+                            () => {}, cancellation?.controller.signal, 'stats');
+                        webviewView.webview.postMessage({ type: 'classStats', data, folderPath }); return;
+                    }
+                    const serverPort = await resolveActiveServerPort();
                                 if (cancellation?.cancelled) { return; }
 					if (serverPort === undefined) {
 						webviewView.webview.postMessage({ type: 'error', message: 'Failed to load statistics. Make sure the server is running.' });
@@ -2275,7 +2332,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
             if (msg.command === 'jump' && msg.graphEligible && msg.directory && graphOnResultClick(vscode.Uri.file(msg.directory))) {
                 clearAllDecorations();
                                 await openDependencyGraph(this._context, { directory: msg.directory, file: msg.file,
-                    line: Number(msg.line), query: msg.query || '', file_ext: msg.file_ext || '.py' }, getServerUrl('/dependency_graph'));
+                    line: Number(msg.line), query: msg.query || '', file_ext: msg.file_ext || '.py' }, isSimpleMode() ? localGraph : getServerUrl('/dependency_graph'));
                 return;
             }
 			if (msg.command === 'jump') {
@@ -2506,6 +2563,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                 await this.cancelOperation();
             }
 			if (msg.command === 'checkServerStatus') {
+                if (searchBackend() === 'ask') { webviewView.webview.postMessage({ type: 'serverStatus', online: false, message: 'Choose a mode · Setup' }); return; }
 				const serverPort = await resolveActiveServerPort();
 				webviewView.webview.postMessage({ type: 'serverStatus', online: serverPort !== undefined, port: serverPort });
 			}
@@ -2923,6 +2981,7 @@ function setupDecorationListeners() {
 
 // 拡張機能設定の監視とPythonサーバーへの反映
 function updatePythonServerConfig() {
+    if (searchBackend() !== 'python') { return; }
     const config = vscode.workspace.getConfiguration('owlspotlight');
     const defaultModelName = 'Shuu12121/NightOwl-CodeEmbedding';
     const defaultBatchSize = 2;
@@ -3014,7 +3073,11 @@ function updatePythonServerConfig() {
 }
 
 export function activate(context: vscode.ExtensionContext) {
+    simpleMode = new SimpleMode(context);
     geminiCredentials = new GeminiCredentials(context.secrets);
+    context.subscriptions.push(vscode.commands.registerCommand('owlspotlight.chooseBackend', async () => {
+        await vscode.commands.executeCommand('workbench.action.openSettings', 'owlspotlight.searchBackend');
+    }));
 	console.log('Congratulations, your extension "owlspotlight" is now active!');
 
 	// 設定で指定されたポートを基準にする
@@ -3032,6 +3095,7 @@ export function activate(context: vscode.ExtensionContext) {
 	let incrementalIndexRunning = false;
 	context.subscriptions.push({ dispose: () => { for (const timer of pendingIndexTimers.values()) { clearTimeout(timer); } pendingIndexTimers.clear(); } });
 	const scheduleIncrementalIndex = (uri: vscode.Uri) => {
+        if (searchBackend() !== 'python') { return; }
 		const config = vscode.workspace.getConfiguration('owlspotlight');
 		if (!config.get<boolean>('autoIndexOnFileChange', true)) {
 			return;
@@ -3051,6 +3115,7 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 		const timer = setTimeout(async () => {
 			pendingIndexTimers.delete(key);
+            if (isSimpleMode()) { return; }
                         if (incrementalIndexRunning) { scheduleIncrementalIndex(uri); return; }
                         incrementalIndexRunning = true;
                         try {
@@ -3116,6 +3181,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('owlspotlight.findSimilarSelection', async () => {
+            if (!await chooseSearchBackend()) { return; }
 			const editor = vscode.window.activeTextEditor;
 			if (!editor) {
 				vscode.window.showWarningMessage('Open a file and select code to search for similar snippets.');
@@ -3153,12 +3219,24 @@ export function activate(context: vscode.ExtensionContext) {
 				vscode.window.showInformationMessage(`No changed ${fileExt} files found.`);
 				return;
 			}
+            const folderPath = workspaceFolder.uri.fsPath;
+            let data: any;
+            if (isSimpleMode()) {
+                try {
+                    data = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'OwlSpotlight ONNX', cancellable: true }, async (progress, token) => {
+                        const controller = new AbortController();
+                        const listener = token.onCancellationRequested(() => controller.abort());
+                        try { return await simpleMode.search({ directory: folderPath, query, file_ext: fileExt, include_files: includeFiles, search_mode: 'semantic' },
+                            update => progress.report({ message: update.phase }), controller.signal); }
+                        finally { listener.dispose(); }
+                    });
+                } catch (error) { vscode.window.showErrorMessage(String(error)); return; }
+            } else {
 			const serverPort = await resolveActiveServerPort();
 			if (serverPort === undefined) {
 				vscode.window.showWarningMessage('OwlSpotlight server is not running. Use Setup / Start first.');
 				return;
 			}
-			const folderPath = workspaceFolder.uri.fsPath;
 			const res = await fetch(getServerUrl('/search_functions_simple', serverPort), {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
@@ -3175,7 +3253,8 @@ export function activate(context: vscode.ExtensionContext) {
                                 vscode.window.showWarningMessage(res.status === 409 ? 'OwlSpotlight is busy. Wait for the current operation or cancel it.' : `Search failed: HTTP ${res.status}`);
                                 return;
                         }
-			const data: any = await res.json();
+			data = await res.json();
+            }
 			const results = (Array.isArray(data.results) ? data.results : []).sort((a: any, b: any) => {
 				const aPriority = a?.symbol_kind === 'code_block' ? 1 : 0;
 				const bPriority = b?.symbol_kind === 'code_block' ? 1 : 0;
@@ -3220,7 +3299,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('owlspotlight.generateAgentSetup', async () => {
-			await generateAgentSetup(context);
+            await generateAgentSetup(context);
 		})
 	);
 
@@ -3243,6 +3322,8 @@ export function activate(context: vscode.ExtensionContext) {
 	};
 
 	const startServerDisposable = vscode.commands.registerCommand('owlspotlight.startServer', async () => {
+        if (!await chooseSearchBackend()) { return; }
+        if (isSimpleMode()) { sidebarProvider.notifyServerStatus(true); return; }
 		// 二重起動防止
 		if (isServerStarting) {
 			vscode.window.showInformationMessage('Server is already starting. Please wait...');
@@ -3268,23 +3349,11 @@ export function activate(context: vscode.ExtensionContext) {
 		const venvDir = path.join(serverDir, '.venv');
 		const fs = require('fs');
 
-		// 仮想環境がなければ作成を促す
-		if (!fs.existsSync(venvDir)) {
-			isServerStarting = false;
-			const result = await vscode.window.showWarningMessage(
-				'No Python virtual environment (.venv) found. Would you like to set it up now?',
-				{ modal: true },
-				'Yes, Setup',
-				'Cancel'
-			);
-			if (result === 'Yes, Setup') {
-				await vscode.commands.executeCommand('owlspotlight.setupEnv');
-				return;
-			} else {
-				vscode.window.showInformationMessage('Server start cancelled.');
-				return;
-			}
-		}
+        if (!fs.existsSync(venvDir)) {
+            isServerStarting = false;
+            await vscode.commands.executeCommand('owlspotlight.setupEnv');
+            return;
+        }
 
 		if (autoClearCache) {
 			try {
@@ -3302,7 +3371,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 		if (!fs.existsSync(pythonBin)) {
 			isServerStarting = false;
-			vscode.window.showErrorMessage(`Python binary not found: ${pythonBin}`);
+			await fallbackToSimpleMode(`Python binary not found: ${pythonBin}`, serverOutputChannel);
 			return;
 		}
 
@@ -3312,7 +3381,7 @@ export function activate(context: vscode.ExtensionContext) {
 			const errMsg = `このIPアドレス (${bindHost}) はこの端末で使用できません。設定 owlspotlight.serverHost を 127.0.0.1 などバインド可能なアドレスに変更してください。\nThis IP address (${bindHost}) is not available on this machine. Change the owlspotlight.serverHost setting to a bindable address such as 127.0.0.1.`;
 			sidebarProvider.notifyServerStatus(false);
 			sidebarProvider.notifyError(errMsg);
-			void vscode.window.showErrorMessage(errMsg, { modal: true });
+			await fallbackToSimpleMode(errMsg, serverOutputChannel);
 			serverOutputChannel.appendLine(`\n[OwlSpotlight] Cannot bind to host "${bindHost}". This address is not assigned to this machine.`);
 			return;
 		}
@@ -3396,15 +3465,17 @@ export function activate(context: vscode.ExtensionContext) {
 				if (serverProcess === child) {
 					serverProcess = undefined;
 				}
-				isServerStarting = false;
-				const stoppedByUser = isServerStopping;
+				const failedDuringStartup = isServerStarting;
+                isServerStarting = false;
+                const stoppedByUser = isServerStopping;
 				isServerStopping = false;
 				if (stoppedByUser) {
 					serverOutputChannel.appendLine(`\n[OwlSpotlight] Server stopped.`);
 				} else {
 					serverOutputChannel.appendLine(`\n[OwlSpotlight] Server process exited (code: ${code})`);
 				}
-				const runningPort = await findRunningServerPort();
+				if (failedDuringStartup && !stoppedByUser) { await fallbackToSimpleMode(`Server exited during startup (${code}).`, serverOutputChannel); return; }
+                const runningPort = await findRunningServerPort();
 				activeServerPort = runningPort ?? getConfiguredBasePort();
 				sidebarProvider.notifyServerStatus(runningPort !== undefined, runningPort);
 			});
@@ -3416,7 +3487,7 @@ export function activate(context: vscode.ExtensionContext) {
 				isServerStopping = false;
 				activeServerPort = getConfiguredBasePort();
 				sidebarProvider.notifyServerStatus(false);
-				vscode.window.showErrorMessage(`Failed to start server: ${err.message}`);
+				void fallbackToSimpleMode(err.message, serverOutputChannel);
 			});
 
 			const portMessage = selectedPort === DEFAULT_SERVER_PORT
@@ -3427,7 +3498,7 @@ export function activate(context: vscode.ExtensionContext) {
 			clearServerStartupPoll();
 			isServerStarting = false;
 			activeServerPort = getConfiguredBasePort();
-			vscode.window.showErrorMessage(`Failed to start server: ${err}`);
+			await fallbackToSimpleMode(String(err), serverOutputChannel);
 			return;
 		}
 
@@ -3447,18 +3518,18 @@ export function activate(context: vscode.ExtensionContext) {
 					sidebarProvider.notifyServerStatus(true, startupPort);
 					vscode.window.showInformationMessage(`OwlSpotlight server is ready on port ${startupPort}.`);
 				}
-			} catch {
-				if (retries >= maxRetries) {
-					clearServerStartupPoll();
-					isServerStarting = false;
-				}
-			}
+			} catch { /* Still starting. */ }
+            if (retries >= maxRetries && isServerStarting) {
+                clearServerStartupPoll(); isServerStarting = false;
+                await fallbackToSimpleMode('Server readiness timed out.', serverOutputChannel);
+            }
 		}, 5000);
 	});
 	context.subscriptions.push(startServerDisposable);
 
 	// サーバー停止コマンド
-	const stopServerDisposable = vscode.commands.registerCommand('owlspotlight.stopServer', () => {
+	const stopServerDisposable = vscode.commands.registerCommand('owlspotlight.stopServer', (options?: { ownedOnly?: boolean }) => {
+        if (isSimpleMode() && !options?.ownedOnly) { void sidebarProvider.cancelOperation(); return; }
 		if (serverProcess && !serverProcess.killed) {
 			clearServerStartupPoll();
 			isServerStopping = true;
@@ -3473,7 +3544,7 @@ export function activate(context: vscode.ExtensionContext) {
 			);
 			sidebarProvider.notifyServerStatus(false);
 			vscode.window.showInformationMessage('OwlSpotlight server stopping...');
-		} else {
+		} else if (!options?.ownedOnly) {
 			void resolveActiveServerPort().then((serverPort) => {
 				if (serverPort !== undefined) {
 					vscode.window.showInformationMessage(`A server is reachable on port ${serverPort}, but it is not managed by this extension.`);
@@ -3504,6 +3575,8 @@ export function activate(context: vscode.ExtensionContext) {
 	let isSetupRunning = false;
 	let setupProcess: cp.ChildProcess | undefined;
 	const setupEnvDisposable = vscode.commands.registerCommand('owlspotlight.setupEnv', async (options?: { startServerAfterSetup?: boolean }) => {
+        if (!await chooseSearchBackend()) { return; }
+        if (isSimpleMode()) { vscode.window.showInformationMessage('Simple mode needs no Python setup. Enter a query to search.'); return; }
 		if (isSetupRunning) {
 			vscode.window.showInformationMessage('Environment setup is already running. Please wait for it to finish.');
 			owlOutputChannel.show(true);
@@ -3530,7 +3603,8 @@ export function activate(context: vscode.ExtensionContext) {
 			vscode.window.showErrorMessage(
 				`uv was not found in PATH or common install locations. ${installHint}`
 			);
-			return;
+			await fallbackToSimpleMode('uv was not found.', owlOutputChannel);
+            return false;
 		}
 
 		let torchOptions: TorchInstallOption[];
@@ -3539,8 +3613,8 @@ export function activate(context: vscode.ExtensionContext) {
 		try {
 			({ options: torchOptions, gpuInfo, autoReason } = getTorchInstallOptions());
 		} catch (error) {
-			vscode.window.showErrorMessage(`Failed to load the OwlSpotlight torch build matrix: ${error}`);
-			return;
+			await fallbackToSimpleMode(`Could not load torch configuration: ${error}`, owlOutputChannel);
+            return false;
 		}
 
 		isSetupRunning = true;
@@ -3613,8 +3687,8 @@ export function activate(context: vscode.ExtensionContext) {
 		} catch (err: any) {
 			isSetupRunning = false;
 			owlOutputChannel.appendLine(`[OwlSpotlight] Failed to launch setup: ${err?.message ?? err}`);
-			vscode.window.showErrorMessage(`Failed to launch environment setup: ${err?.message ?? err}`);
-			return;
+			await fallbackToSimpleMode(`Could not launch setup: ${err?.message ?? err}`, owlOutputChannel);
+            return false;
 		}
 
 		setupProcess.stdout?.on('data', (data: Buffer) => {
@@ -3628,7 +3702,8 @@ export function activate(context: vscode.ExtensionContext) {
 				owlOutputChannel.appendLine(`\n[OwlSpotlight] Setup process exited (code: ${code})`);
 				isSetupRunning = false;
 				setupProcess = undefined;
-				if (code === 0) {
+				if (searchBackend() !== 'python') { resolve(false); return; }
+                if (code === 0) {
 					const message = startServerAfterSetup
 						? 'OwlSpotlight Python environment setup completed. Starting the server...'
 						: 'OwlSpotlight Python environment setup completed.';
@@ -3652,6 +3727,7 @@ export function activate(context: vscode.ExtensionContext) {
 			`OwlSpotlight uv environment setup started with ${torchChoice.label}. Progress is shown in the OUTPUT panel.`
 		);
 		const setupSucceeded = await setupCompleted;
+        if (!setupSucceeded) { await fallbackToSimpleMode('Environment setup failed. See process output above.', owlOutputChannel); return false; }
 		if (setupSucceeded && startServerAfterSetup) {
 			const serverPort = await resolveActiveServerPort();
 			if (serverPort !== undefined) {
@@ -3669,6 +3745,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	// --- キャッシュクリアコマンドを追加 ---
 	const clearCacheDisposable = vscode.commands.registerCommand('owlspotlight.clearCache', async () => {
+        if (isSimpleMode()) { await sidebarProvider.cancelOperation(); await simpleMode.clearCache(); vscode.window.showInformationMessage('ONNX embedding cache cleared.'); return; }
 		const config = vscode.workspace.getConfiguration('owlspotlight');
 		const cacheSettings = config.get<any>('cacheSettings', {});
 		const customCachePath = cacheSettings.cachePath || '';
@@ -3774,8 +3851,13 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeConfiguration(e => {
             if (e.affectsConfiguration('owlspotlight')) { sidebarProvider.refreshMcpRuntime(); }
+            if (e.affectsConfiguration('owlspotlight.searchBackend') && searchBackend() !== 'python') {
+                void vscode.commands.executeCommand('owlspotlight.stopServer', { ownedOnly: true });
+                if (setupProcess && !setupProcess.killed) { setupProcess.kill(); }
+            }
 			if (
-				e.affectsConfiguration('owlspotlight.batchSize') ||
+				e.affectsConfiguration('owlspotlight.searchBackend') ||
+                e.affectsConfiguration('owlspotlight.batchSize') ||
 				e.affectsConfiguration('owlspotlight.cacheSettings') ||
 				e.affectsConfiguration('owlspotlight.environmentSettings') ||
 				e.affectsConfiguration('owlspotlight.modelName')
@@ -3789,8 +3871,9 @@ export function activate(context: vscode.ExtensionContext) {
 
 	// サーバー自動起動（少し遅延を入れてVS Code起動完了を待つ）
 	const autoStart = vscode.workspace.getConfiguration('owlspotlight').get<boolean>('autoStartServer', false);
-	if (autoStart) {
+	if (autoStart && searchBackend() === 'python') {
 		setTimeout(async () => {
+            if (isSimpleMode()) { return; }
 			const serverPort = await resolveActiveServerPort();
 			if (serverPort !== undefined) {
 				console.log(`[OwlSpotlight] Server already running on port ${serverPort}, skipping auto-start.`);

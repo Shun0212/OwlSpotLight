@@ -15,10 +15,11 @@ interface GraphEdge {
     sites?: CallSite[];
     source: string; target: string; kind: 'call' | 'similar'; evidence: 'static' | 'provider' | 'embedding'; score?: number;
 }
-interface GraphData {
+export interface GraphData {
     center: string; nodes: GraphNode[]; edges: GraphEdge[]; truncated?: boolean; embeddingsAvailable?: boolean;
 }
-interface GraphRequest { directory: string; file: string; line: number; query: string; file_ext: string }
+export interface GraphRequest { directory: string; file: string; line: number; query: string; file_ext: string }
+export type GraphLoader = (request: GraphRequest & { similar: boolean }, signal: AbortSignal) => Promise<GraphData>;
 const MAX_NODES = 80;
 let currentGraph: { root: string; show: (request: GraphRequest) => Promise<void>; close: () => void } | undefined;
 
@@ -44,7 +45,7 @@ async function deadline<T>(work: Thenable<T>, milliseconds = 8000): Promise<T> {
     } finally { clearTimeout(timer); }
 }
 
-export async function openDependencyGraph(context: vscode.ExtensionContext, request: GraphRequest, endpoint: string): Promise<void> {
+export async function openDependencyGraph(context: vscode.ExtensionContext, request: GraphRequest, endpoint: string | GraphLoader): Promise<void> {
     const root = await fs.promises.realpath(request.directory);
     const file = await fs.promises.realpath(request.file);
     if (!isInside(root, file) || !Number.isInteger(request.line) || request.line < 1) {
@@ -353,6 +354,11 @@ export async function openDependencyGraph(context: vscode.ExtensionContext, requ
             for (const [key, edge] of edges) { if (edge.kind === 'similar') { edges.delete(key); } }
             for (const node of nodes.values()) { node.similarity = null; }
             try {
+                const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(60000)]);
+                let data: GraphData & { cancelled?: boolean };
+                if (typeof endpoint === 'function') {
+                    data = await endpoint({ ...request, directory: root, file: filePath, line, similar }, signal);
+                } else {
                 const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ ...request, directory: root, file: filePath, line, similar }),
                     signal: AbortSignal.any([abort.signal, AbortSignal.timeout(60000)]) });
@@ -360,7 +366,8 @@ export async function openDependencyGraph(context: vscode.ExtensionContext, requ
                     const error = await response.json() as { detail?: string | { message?: string } };
                     throw new Error(typeof error.detail === 'string' ? error.detail : error.detail?.message || `Graph server: ${response.status}`);
                 }
-                const data = await response.json() as GraphData & { cancelled?: boolean };
+                data = await response.json() as GraphData & { cancelled?: boolean };
+                }
                 if (data.cancelled) { throw new Error('Graph operation cancelled'); }
                 if (disposed) { return; }
                 const ids = new Map<string, string>();

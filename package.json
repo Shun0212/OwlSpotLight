@@ -90,6 +90,10 @@
       {
         "command": "owlspotlight.generateAgentSetup",
         "title": "OwlSpotlight: Generate Agent Setup"
+      },
+      {
+        "command": "owlspotlight.chooseBackend",
+        "title": "OwlSpotlight: Open Search Backend Settings"
       }
     ],
     "configuration": {
@@ -252,6 +256,49 @@
           "type": "boolean",
           "default": true,
           "description": "Show the dependency graph when clicking a function or method search result. Can also be toggled in OwlSpotlight Settings. Disable for code-only navigation; the Open dependency graph button remains available."
+        },
+        "owlspotlight.searchBackend": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "python",
+            "node-onnx"
+          ],
+          "enumItemLabels": [
+            "ask (Choose on first setup)",
+            "backend_server(python)",
+            "node_onnx (Simple mode, no server)"
+          ],
+          "enumDescriptions": [
+            "Choose between the Python backend server and server-free simple mode on first setup or search.",
+            "Choose this for faster search using a supported GPU. Sets up a Python environment and starts a local backend search server. Falls back to simple mode if setup or startup fails.",
+            "Choose this if you cannot set up a Python server or prefer to run everything within VS Code. Runs ONNX models on the CPU using Node.js inside the extension, without a backend server."
+          ],
+          "default": "ask",
+          "description": "Choose how search runs: start a Python backend server, or use server-free simple mode within VS Code. Your choice is saved for future sessions."
+        },
+        "owlspotlight.onnxModel": {
+          "type": "string",
+          "enum": [
+            "Shuu12121/NightOwl-CodeEmbedding-35M",
+            "Shuu12121/NightOwl-CodeEmbedding"
+          ],
+          "default": "Shuu12121/NightOwl-CodeEmbedding-35M",
+          "description": "Simple-mode model. 35M: 384 dimensions, INT8 35 MB / FP32 137 MB. Original: 768 dimensions, INT8 152 MB / FP32 604 MB. Downloads once and caches locally."
+        },
+        "owlspotlight.onnxDtype": {
+          "type": "string",
+          "enum": [
+            "q8",
+            "fp32"
+          ],
+          "default": "q8",
+          "description": "Simple-mode ONNX precision. Models and precisions use separate embedding caches."
+        },
+        "owlspotlight.onnxLocalFilesOnly": {
+          "type": "boolean",
+          "default": false,
+          "description": "Use only previously downloaded ONNX files. Search fails with a missing-file message if the selected model is not cached."
         }
       }
     }
@@ -279,10 +326,10 @@
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
     "test": "vscode-test",
-    "test:unit": "npm run compile && node --test src/test/*.test.cjs"
+    "test:unit": "npm run compile && node --test src/test/*.test.cjs",
+    "test:onnx": "npm run compile && node scripts/onnxSmoke.cjs"
   },
   "devDependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "20.x",
     "@types/vscode": "^1.100.0",
@@ -296,7 +343,9 @@
   "overrides": {
     "mocha": {
       "serialize-javascript": "^7.0.5"
-    }
+    },
+    "sharp": "^0.35.4",
+    "adm-zip": "^0.6.1"
   },
   "repository": {
     "type": "git",
@@ -304,6 +353,12 @@
   },
   "dependencies": {
     "@google/genai": "^1.52.0",
-    "@iarna/toml": "^2.2.5"
+    "@huggingface/transformers": "4.2.0",
+    "@iarna/toml": "^2.2.5",
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "ignore": "7.0.5",
+    "minimatch": "10.2.4",
+    "tree-sitter-wasms": "0.1.13",
+    "web-tree-sitter": "0.25.10"
   }
 }

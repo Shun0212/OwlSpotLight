@@ -1,6 +1,9 @@
 // main.js
 window.onload = function() {
     const vscode = acquireVsCodeApi();
+    let simpleBackend = false;
+    let backendSettings = null;
+    let backendInitialized = false;
     let localOperation = null;
     let serverOperation = null;
     let cancelPending = false;
@@ -12,6 +15,7 @@ window.onload = function() {
             const button = document.getElementById(id);
             if (button) { button.disabled = busy; button.setAttribute('aria-disabled', String(busy)); }
         }
+
         const banner = document.getElementById('operationBanner');
         if (banner) banner.hidden = !busy;
         const message = document.getElementById('operationMessage');
@@ -44,6 +48,33 @@ window.onload = function() {
             renderOperationState();
         }
         vscode.postMessage(message);
+    }
+    function applyBackendSettings(settings) {
+        const previousBackend = backendSettings?.backend;
+        backendSettings = settings;
+        const wasSimple = simpleBackend;
+        simpleBackend = settings.backend === 'node-onnx';
+        document.body.classList.toggle('simple-backend', simpleBackend);
+        const scope = document.getElementById('scopeSelect');
+        scope.querySelector('[value="changed"]').disabled = false;
+        if (simpleBackend && (!backendInitialized || previousBackend === 'ask')) scope.value = 'all';
+        const filter = document.getElementById('resultTypeFilter');
+        if (simpleBackend && filter && filter.value === 'codeblocks') filter.value = 'function_level';
+        const codeBlocksButton = document.querySelector('[data-select="resultTypeFilter"] [data-value="codeblocks"]');
+        if (codeBlocksButton) codeBlocksButton.hidden = simpleBackend;
+        document.querySelector('.tabs').hidden = !simpleBackend;
+        document.getElementById('stats-tab').hidden = !simpleBackend;
+        if (!simpleBackend) document.querySelector('[data-tab="search"]').click();
+        if (backendInitialized && wasSimple !== simpleBackend) {
+            currentResults = []; renderResults([], currentFolderPath || '');
+            serverOperation = null; cancelPending = false;
+        }
+        backendInitialized = true;
+        updateDiffControlsVisibility(); syncSegmentedControls();
+        if (simpleBackend) setServerStatus(true, 'Simple · ONNX');
+        if (settings.backend === 'ask') setServerStatus(false, 'Choose a mode · Setup');
+        document.getElementById('setupAndStartBtn').textContent = settings.backend === 'ask' ? 'Choose search mode' : 'Setup / Start';
+        renderOperationState();
     }
     document.getElementById('cancelOperationBtn').onclick = () => {
         if (cancelPending || document.getElementById('cancelOperationBtn').hidden) return;
@@ -680,7 +711,7 @@ window.onload = function() {
             methods: 'Methods',
             codeblocks: 'CodeBlocks'
           }[type] || type;
-          summary.textContent = modeLabel + ' · ' + targetLabel + ' · ' + typeLabel;
+          summary.textContent = simpleBackend ? modeLabel + (target === 'diff_hunks' ? ' · Unified diff' : ' · Functions / methods') : modeLabel + ' · ' + targetLabel + ' · ' + typeLabel;
           summary.title = summary.textContent;
         }
         // The effective search target: outside Git Diff scope it is always the
@@ -1073,7 +1104,10 @@ window.onload = function() {
             const el = document.getElementById('serverStatus');
             const txt = document.getElementById('serverStatusText');
             if (!el || !txt) return;
-            if (online) {
+            if (simpleBackend) {
+                el.className = 'server-status online';
+                txt.textContent = 'ONNX';
+            } else if (online) {
                 el.className = 'server-status online';
                 txt.textContent = port ? `Online (${port})` : 'Online';
             } else if (typeof port === 'string' && port.length > 0) {
@@ -2088,20 +2122,21 @@ window.onload = function() {
                 }
             } else {
                 resultDiv.onclick = function() {
+                    if (r.snapshot_ref) { postOpenDiff(fileAttr, lineAttr, r.diff_base_ref || '', r.snapshot_ref); return; }
                     postMessage({
                         command: 'jump',
-                        graphEligible: r.symbol_kind !== 'code_block' && !r.commit_hash,
+                        graphEligible: !r.snapshot_ref && r.symbol_kind !== 'code_block' && !r.commit_hash,
                         directory: folderPath, query: currentSearchQuery || '',
                         file_ext: document.getElementById('languageSelect')?.value || '.py',
                         file: fileAttr,
                         line: lineAttr,
                         functionName: functionName,
                         className: className || null,
-                        startLine: r.lineno || r.line_number || 1,
+                        startLine: r.start_lineno || r.lineno || r.line_number || 1,
                         endLine: r.end_lineno || null
                     });
                 };
-                if (r.symbol_kind !== 'code_block' && !r.commit_hash) {
+                if (!r.snapshot_ref && r.symbol_kind !== 'code_block' && !r.commit_hash) {
                     const graphBtn = document.createElement('button');
                     graphBtn.type = 'button';
                     graphBtn.className = 'secondary-action result-graph-btn';
@@ -2142,12 +2177,14 @@ window.onload = function() {
 	// メッセージハンドラー
         window.addEventListener('message', event => {
                 const msg = event.data;
+                if (msg.type === 'backendSettings') { applyBackendSettings(msg); return; }
                 if (msg.type === 'graphPreference') {
                     const checkbox = document.getElementById('graphOnResultClick');
                     if (checkbox) checkbox.checked = msg.enabled;
                 }
                 if (msg.type === 'initState') {
                         restoreFromExternalState(msg.state);
+                        if (backendSettings) applyBackendSettings(backendSettings);
                         return;
                 }
                 if (msg.type === 'translationSettings') {
@@ -2198,7 +2235,7 @@ window.onload = function() {
                         }
                 }
                 if (msg.type === 'serverStatus') {
-                        setServerStatus(msg.online, msg.message || msg.port);
+                        setServerStatus(simpleBackend || msg.online, simpleBackend ? 'Simple · ONNX' : msg.message || msg.port);
                         if (!msg.online) { serverOperation = null; cancelPending = false; renderOperationState(); }
                 }
                 if (msg.type === 'agentSearchEvents') {

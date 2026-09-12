@@ -48,7 +48,7 @@ export function createCodeReader(root: string) {
         const absolute = path.resolve(root, filename);
         const relative = path.relative(root, absolute);
         if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) { throw new Error('Result is outside the workspace.'); }
-        const commit = result.commit_hash;
+        const commit = result.commit_hash || result.snapshot_ref;
         const key = `${commit || 'working-tree'}:${relative}`;
         if (cache.has(key)) { return cache.get(key)!; }
         let document: CodeDocument;
