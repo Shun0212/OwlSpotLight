@@ -16,6 +16,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from language_scope import matches_language
 from pathspec import PathSpec
 from pathspec.patterns import GitWildMatchPattern
 
@@ -219,8 +220,7 @@ def resolve_file_ext(directory: str, requested_ext: Any, scope: str) -> tuple[st
     detected = [(ext, count) for ext, count in counts.items() if count > 0]
     if not detected:
         raise ValueError(f"No supported source files found in {directory}")
-    detected.sort(key=lambda item: (-item[1], SUPPORTED_FILE_EXTENSIONS.index(item[0])))
-    return detected[0][0], counts
+    return "auto", counts
 
 
 def truncate_text(text: str, limit: int = 900) -> str:
@@ -310,7 +310,7 @@ def changed_files(directory: str, file_ext: str) -> list[str]:
         path = (root / rel_path).resolve()
         if (
             path in seen
-            or path.suffix.lower() != file_ext
+            or not matches_language(str(path), file_ext)
             or not path.exists()
             or should_skip_path(path)
             or is_owl_ignored(path, directory, ignore_spec)
@@ -329,7 +329,7 @@ def source_files(directory: str, file_ext: str) -> list[str]:
     root = Path(directory).resolve()
     files: list[str] = []
     for path in candidate_source_files(directory):
-        if path.suffix.lower() != file_ext:
+        if not matches_language(str(path), file_ext):
             continue
         try:
             rel_parts = path.relative_to(root).parts
@@ -376,7 +376,7 @@ def glob_filtered_files(directory: str, file_ext: str, include_globs: list[str],
     root = Path(directory).resolve()
     files: list[str] = []
     for path in candidate_source_files(directory):
-        if path.suffix.lower() != file_ext:
+        if not matches_language(str(path), file_ext):
             continue
         try:
             rel_path = path.resolve().relative_to(root).as_posix()
@@ -443,7 +443,7 @@ def tool_definitions() -> list[dict[str, Any]]:
                     },
                     "file_ext": {
                         "type": "string",
-                        "description": "File extension to search. Use auto unless the target language is known; auto detects supported files while respecting .owlignore plus git ignore/exclude rules.",
+                        "description": "File extension to search. Use auto unless the target language is known; auto searches all supported languages while respecting .owlignore plus git ignore/exclude rules.",
                         "enum": ["auto", ".py", ".java", ".ts", ".tsx", ".js", ".jsx"],
                         "default": "auto",
                     },

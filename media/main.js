@@ -117,7 +117,7 @@ window.onload = function() {
         const activeTabBtn = document.querySelector('.tab-btn.active');
         const activeTab = activeTabBtn ? activeTabBtn.getAttribute('data-tab') : 'search';
         const searchInput = document.getElementById('searchInput')?.value || '';
-        const language = document.getElementById('languageSelect')?.value || '.py';
+        const language = document.getElementById('languageSelect')?.value || 'auto';
         const scope = document.getElementById('scopeSelect')?.value || 'changed';
         const searchMode = document.getElementById('searchModeSelect')?.value || 'semantic';
         const searchTarget = document.getElementById('searchTargetSelect')?.value || 'functions';
@@ -795,7 +795,7 @@ window.onload = function() {
           postMessage({
             command: 'prepareDiffSearch',
             ...getHistoryOptions(),
-            lang: document.getElementById('languageSelect')?.value || '.py',
+            lang: document.getElementById('languageSelect')?.value || 'auto',
             scope: document.getElementById('scopeSelect')?.value || 'changed',
             searchMode: document.getElementById('searchModeSelect')?.value || 'semantic',
             searchTarget: target,
@@ -1312,7 +1312,7 @@ window.onload = function() {
                 const text = (document.getElementById('searchInput')).value;
                 if (text) {
                         currentSearchQuery = text;
-                        const lang = document.getElementById('languageSelect')?.value || '.py';
+                        const lang = document.getElementById('languageSelect')?.value || 'auto';
                         const scope = document.getElementById('scopeSelect')?.value || 'changed';
                         const searchMode = document.getElementById('searchModeSelect')?.value || 'semantic';
                         const searchTarget = getSearchTarget();
@@ -1352,7 +1352,7 @@ window.onload = function() {
     document.getElementById('loadStatsBtn').onclick = () => {
                 const query = currentSearchQuery || document.getElementById('searchInput').value || '';
                 console.log('Loading class stats with query:', query);
-                const lang = document.getElementById('languageSelect')?.value || '.py';
+                const lang = document.getElementById('languageSelect')?.value || 'auto';
                 const scope = document.getElementById('scopeSelect')?.value || 'changed';
                 const searchMode = document.getElementById('searchModeSelect')?.value || 'semantic';
                 showLoading('stats-status');
@@ -2127,7 +2127,7 @@ window.onload = function() {
                         command: 'jump',
                         graphEligible: !r.snapshot_ref && r.symbol_kind !== 'code_block' && !r.commit_hash,
                         directory: folderPath, query: currentSearchQuery || '',
-                        file_ext: document.getElementById('languageSelect')?.value || '.py',
+                        file_ext: document.getElementById('languageSelect')?.value || 'auto',
                         file: fileAttr,
                         line: lineAttr,
                         functionName: functionName,
@@ -2149,7 +2149,7 @@ window.onload = function() {
                         e.stopPropagation();
                         postMessage({ command: 'openDependencyGraph', file: fileAttr, line: Number(lineAttr),
                             directory: folderPath, query: currentSearchQuery || '',
-                            file_ext: document.getElementById('languageSelect')?.value || '.py' });
+                            file_ext: document.getElementById('languageSelect')?.value || 'auto' });
                     };
                     resultDiv.appendChild(graphBtn);
                 }

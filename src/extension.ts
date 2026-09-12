@@ -1163,7 +1163,7 @@ function buildCommitUrl(remoteUrl: string, hash: string): string | undefined {
 }
 
 async function findWorkspaceFilesByExtension(workspaceFolder: vscode.WorkspaceFolder, fileExt: string): Promise<string[]> {
-	const pattern = new vscode.RelativePattern(workspaceFolder, `**/*${fileExt}`);
+	const pattern = new vscode.RelativePattern(workspaceFolder, fileExt === 'auto' ? '**/*.{py,java,ts,tsx,js,jsx}' : `**/*${fileExt}`);
 	const files = await vscode.workspace.findFiles(pattern, '**/{node_modules,.git,dist,build,out,coverage,.venv}/**');
 	return files.map((file) => file.fsPath);
 }
@@ -1188,7 +1188,7 @@ async function findChangedFilesByExtension(workspaceFolder: vscode.WorkspaceFold
 		if (!filePath.startsWith(workspaceRoot) || seen.has(filePath)) {
 			continue;
 		}
-		if (path.extname(filePath).toLowerCase() !== fileExt || !fs.existsSync(filePath)) {
+		if (!getSupportedFileExtension(filePath) || (fileExt !== 'auto' && path.extname(filePath).toLowerCase() !== fileExt) || !fs.existsSync(filePath)) {
 			continue;
 		}
 		seen.add(filePath);
@@ -1998,7 +1998,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                 if (isSimpleMode()) {
                                     const directory = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
                                     if (!directory) { throw new Error('Open a workspace folder first.'); }
-                                    const data = await simpleMode.search({ directory, query: '', file_ext: msg.lang || '.py',
+                                    const data = await simpleMode.search({ directory, query: '', file_ext: msg.lang || 'auto',
                                         scope: 'changed', search_target: 'diff_hunks', diff_range_mode: msg.diffRangeMode || 'branch',
                                         diff_base_ref: msg.diffBaseRef, diff_head_ref: msg.diffHeadRef, first_parent: msg.firstParent !== false },
                                         () => {}, cancellation?.controller.signal, 'prepare');
@@ -2018,7 +2018,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                 }
                                 const workspaceFolder = workspaceFolders[0];
                                 const folderPath = workspaceFolder.uri.fsPath;
-                                const fileExt = msg.lang || '.py';
+                                const fileExt = msg.lang || 'auto';
                                 const scope = (msg.scope === 'source' || msg.scope === 'changed') ? msg.scope as SearchScope : 'all';
                                 const searchMode = ['semantic', 'bm25', 'hybrid', 'keyword'].includes(msg.searchMode) ? msg.searchMode : 'semantic';
                                 const searchTarget = normalizeSearchTarget(msg.searchTarget);
@@ -2142,7 +2142,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                                 const queryConfig = vscode.workspace.getConfiguration('owlspotlight');
                                 const agenticEnabled = typeof msg.agenticEnabled === 'boolean' ? msg.agenticEnabled : queryConfig.get<boolean>('enableAgenticSearch', false);
                                 let query = msg.text;
-                                const fileExt = msg.lang || '.py';
+                                const fileExt = msg.lang || 'auto';
 				const workspaceFolders = vscode.workspace.workspaceFolders;
 				if (!workspaceFolders || workspaceFolders.length === 0) {
 					webviewView.webview.postMessage({ type: 'error', message: 'No workspace folder found' });
@@ -2281,7 +2281,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 				const workspaceFolder = workspaceFolders[0];
 				const folderPath = workspaceFolder.uri.fsPath;
 				let query = msg.query || '';
-				const fileExt = msg.lang || '.py';
+				const fileExt = msg.lang || 'auto';
 				const scope = (msg.scope === 'source' || msg.scope === 'changed') ? msg.scope as SearchScope : 'all';
 				const searchMode = ['semantic', 'bm25', 'hybrid', 'keyword'].includes(msg.searchMode) ? msg.searchMode : 'semantic';
 				const translationOptions: TranslationRuntimeOptions = {
@@ -2332,7 +2332,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
             if (msg.command === 'jump' && msg.graphEligible && msg.directory && graphOnResultClick(vscode.Uri.file(msg.directory))) {
                 clearAllDecorations();
                                 await openDependencyGraph(this._context, { directory: msg.directory, file: msg.file,
-                    line: Number(msg.line), query: msg.query || '', file_ext: msg.file_ext || '.py' }, isSimpleMode() ? localGraph : getServerUrl('/dependency_graph'));
+                    line: Number(msg.line), query: msg.query || '', file_ext: msg.file_ext || 'auto' }, isSimpleMode() ? localGraph : getServerUrl('/dependency_graph'));
                 return;
             }
 			if (msg.command === 'jump') {
@@ -2574,7 +2574,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
 					return;
 				}
                                 const folderPath = workspaceFolders[0].uri.fsPath;
-                                const fileExt = msg.lang || '.py';
+                                const fileExt = msg.lang || 'auto';
                                 webviewView.webview.postMessage({ type: 'status', message: 'Clearing cache and rebuilding index...' });
 				try {
 					const serverPort = await resolveActiveServerPort();
@@ -2652,8 +2652,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                         '.js': 'JavaScript',
                         '.jsx': 'JavaScript React'
                 };
-                const options = (languages.length ? languages : ['.py']).map(l => `<option value="${l}">${langMap[l] || l}</option>`).join('');
-                const selectStyle = (languages.length <= 1) ? 'style="display:none;"' : '';
+                const options = '<option value="auto">All languages</option>' + Object.keys(langMap).map(l => `<option value="${l}">${langMap[l] || l}</option>`).join('');
 
                 return `<!DOCTYPE html>
 <html lang="ja">
@@ -2740,7 +2739,7 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
         </summary>
         <label>
           <span>Language</span>
-          <select id="languageSelect" ${selectStyle}>
+          <select id="languageSelect" title="Search all supported languages or limit to one language">
             ${options}
           </select>
         </label>
@@ -3100,8 +3099,8 @@ export function activate(context: vscode.ExtensionContext) {
 		if (!config.get<boolean>('autoIndexOnFileChange', true)) {
 			return;
 		}
-		const fileExt = getSupportedFileExtension(uri.fsPath);
-		if (!fileExt) {
+		const fileExt = 'auto';
+		if (!getSupportedFileExtension(uri.fsPath)) {
 			return;
 		}
 		const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
@@ -3193,8 +3192,8 @@ export function activate(context: vscode.ExtensionContext) {
 				vscode.window.showWarningMessage('Select code first, then run OwlSpotlight: Find Similar to Selection.');
 				return;
 			}
-			const fileExt = getSupportedFileExtension(editor.document.fileName);
-			if (!fileExt) {
+			const selectedFileExt = getSupportedFileExtension(editor.document.fileName);
+			if (!selectedFileExt) {
 				vscode.window.showWarningMessage('The selected file type is not supported by OwlSpotlight search.');
 				return;
 			}
@@ -3203,9 +3202,15 @@ export function activate(context: vscode.ExtensionContext) {
 				vscode.window.showWarningMessage('No workspace folder found.');
 				return;
 			}
+			const languagePick = await vscode.window.showQuickPick([
+				{ label: 'All languages', value: 'auto' },
+				{ label: `Selected file language (${selectedFileExt})`, value: selectedFileExt }
+			], { placeHolder: 'Which languages should OwlSpotlight search?' });
+			if (!languagePick) { return; }
+			const fileExt = languagePick.value;
 			const scopePick = await vscode.window.showQuickPick(
 				[
-					{ label: 'All files', description: 'Search all indexed files for this language', value: 'all' as SearchScope },
+					{ label: 'All files', description: 'Search all indexed files in the selected languages', value: 'all' as SearchScope },
 					{ label: 'Source files', description: 'Auto-detect src/app/lib/packages-like folders', value: 'source' as SearchScope },
 					{ label: 'Changed files', description: 'Search only git changed and untracked files', value: 'changed' as SearchScope }
 				],

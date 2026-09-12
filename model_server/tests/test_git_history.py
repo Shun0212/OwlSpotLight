@@ -13,6 +13,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from git_history import resolve_history, history_log_args
+from language_scope import matches_language
 
 
 class GitHistoryTests(unittest.TestCase):
@@ -36,7 +37,7 @@ class GitHistoryTests(unittest.TestCase):
                  'diff_file_header', 'append_line_range', 'format_line_ranges',
                  'display_diff_compare', 'short_ref'}
         tree = ast.parse((Path(__file__).resolve().parents[1] / 'server.py').read_text())
-        namespace = dict(Optional=Optional, List=List, Path=Path, re=re, subprocess=subprocess,
+        namespace = dict(matches_language=matches_language, Optional=Optional, List=List, Path=Path, re=re, subprocess=subprocess,
                          os=os, hashlib=hashlib, json=json, resolve_history=resolve_history,
                          history_log_args=history_log_args, load_gitignore_spec=lambda _: None,
                          is_ignored=lambda *args: False, path_allowed_by_globs=lambda *args: True,
@@ -76,6 +77,16 @@ class GitHistoryTests(unittest.TestCase):
         self.assertTrue(all('First commit' in h['diff_compare'] for h in hunks))
         full, _, _, _ = self.functions['collect_diff_hunks'](*args, 'branch', False)
         self.assertIn(self.side, {h['commit_hash'] for h in full})
+
+    def test_mixed_language_history_and_separate_cache_keys(self):
+        self.commit('client.js', 'client')
+        collect = self.functions['collect_diff_hunks']
+        all_hunks, _, _, _ = collect(self.repo, 'auto', None, None, None, '', '', 'branch', True)
+        self.assertEqual({Path(h['file_path']).suffix for h in all_hunks}, {'.py', '.js'})
+        js_hunks, _, _, _ = collect(self.repo, '.js', None, None, None, '', '', 'branch', True)
+        self.assertEqual({Path(h['file_path']).suffix for h in js_hunks}, {'.js'})
+        auto_key = self.functions['diff_signature'](self.repo, 'auto', None, None, None, '', '', 'branch', True)[0]
+        self.assertNotEqual(auto_key, self.signature())
 
     def test_full_history_and_custom_exclusive_from(self):
         self.assertIn(self.side, [m['commit_hash'] for m, _ in self.patches(first_parent=False)])

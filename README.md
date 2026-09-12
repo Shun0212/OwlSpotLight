@@ -95,6 +95,8 @@ The choice is saved. To change it, search for `owlspotlight.searchBackend` in **
 
 ### Supported Languages
 
+Settings → **Language & Scope → Language** defaults to **All languages**, searching all supported languages together. Select an individual language to limit indexing and search. This applies to both Python and server-free Node.js backends. Saved language selections are preserved.
+
 | Language | Support |
 |---|---|
 | Python | Functions and methods in both modes; CodeBlocks, AST metadata, and FastAPI/pytest hints with the Python backend |
@@ -117,7 +119,7 @@ Open **Settings** in the sidebar to adjust search options:
 
 | Option | Values |
 |---|---|
-| Language | Python, Java, TypeScript, TSX, JavaScript, JSX |
+| Language | All languages (default), or Python, Java, TypeScript, TSX, JavaScript, JSX |
 | Scope | `All`, `Source`, `Git Diff` |
 | Mode | `Hybrid`, `Semantic`, `BM25`, `Keyword` |
 | Type | `All`, `Functions`, `Methods`, `CodeBlocks` (Python backend only) |
@@ -332,6 +334,8 @@ OwlSpotlight は、関数やクラスの名前を覚えていなくても「**�
 - **類似コードを比較**：**Show similar functions** で最大5件の類似ノードを点線で追加します。コサイン類似度は数値とバーで表示し、確率ではありません。編集後に類似度を取得できない場合は、セマンティック検索を実行してください。
 - **矢印の意味**：破線は静的解析による推定、実線はVS CodeのCall Hierarchyによる呼び出しです。別ファイルへの呼び出しも、選択ディレクトリ内で言語拡張が解決できれば表示します。範囲外の呼び出しは除外し、解決できない呼び出しは表示されない場合があります。実行時の依存関係をすべて網羅するものではありません。
 
+複数言語のプロジェクトは **Settings → Language & Scope → Language → All languages** で対応言語をまとめて検索できます。特定の言語を選ぶと、その言語だけに絞れます。初期設定は All languages で、保存済みの言語指定は維持されます。
+
 OwlSpotlightの **Settings → 依存グラフを表示** で自動表示を切り替え、**Open dependency graph** から明示的に開けます。コードとの連動は **⚙ → Settings → Sync graph and source code** で切り替えます。グラフは検索結果のフィルターを越えて探索し、最大80ノードを表示します。履歴の差分hunkは対象外です。言語機能だけで追加したノードは、索引に登録して展開するまでスコアが付かない場合があります。
 
 
@@ -392,7 +396,7 @@ AIはカードの見出し、注目する行、青・緑・黄・紫の色、短
 
 | Option | 内容 |
 |---|---|
-| Language | Python, Java, TypeScript, TSX, JavaScript, JSX |
+| Language | All languages (default), or Python, Java, TypeScript, TSX, JavaScript, JSX |
 | Scope | `All`, `Source`, `Git Diff` |
 | Mode | `Hybrid`, `Semantic`, `BM25`, `Keyword` |
 | Type | `All`, `Functions`, `Methods`, `CodeBlocks`（Python版のみ） |

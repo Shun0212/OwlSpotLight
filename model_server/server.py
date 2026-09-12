@@ -38,6 +38,7 @@ OWL_TRAINING_EXAMPLES_FILE = os.environ.get(
 )
 
 from extractors import extract_functions
+from language_scope import matches_language
 from indexer import CodeIndexer
 import progress
 from git_history import resolve_history, history_log_args
@@ -114,14 +115,14 @@ class IndexStatus(BaseModel):
 class BuildIndexRequest(BaseModel):
     operation_id: Optional[str] = None
     directory: str
-    file_ext: str = ".py"
+    file_ext: str = "auto"
 
 class SearchFunctionsSimpleRequest(BaseModel):
     operation_id: Optional[str] = None
     directory: str
     query: str
     top_k: int = 5
-    file_ext: str = ".py"
+    file_ext: str = "auto"
     include_files: Optional[List[str]] = None
     include_globs: Optional[List[str]] = None
     exclude_globs: Optional[List[str]] = None
@@ -143,7 +144,7 @@ class SearchFunctionsSimpleRequest(BaseModel):
 class PrepareDiffSearchRequest(BaseModel):
     operation_id: Optional[str] = None
     directory: str
-    file_ext: str = ".py"
+    file_ext: str = "auto"
     include_files: Optional[List[str]] = None
     include_globs: Optional[List[str]] = None
     exclude_globs: Optional[List[str]] = None
@@ -205,7 +206,7 @@ class ClassStatsRequest(BaseModel):
     directory: str
     query: str  # 検索クエリ
     top_k: int = 50  # 上位何件の関数を取得するか
-    file_ext: str = ".py"
+    file_ext: str = "auto"
     include_files: Optional[List[str]] = None
     search_mode: str = "semantic"
     semantic_weight: float = 0.75
@@ -492,7 +493,7 @@ class GlobalIndexerState:
         self.file_info: Dict[str, Dict[str, float | str]] = {}  # mtimeとhashを保持
         self.directory: Optional[str] = None
         self.last_indexed: float = 0.0
-        self.file_ext: str = ".py"
+        self.file_ext: str = "auto"
         self.embeddings: Optional[np.ndarray] = None  # 追加: 関数埋め込み
         self.faiss_index: Optional[faiss.IndexFlatL2] = None  # 追加: FAISSインデックス
         self.index_dir = None  # ディレクトリごとに動的に設定
@@ -507,7 +508,7 @@ class GlobalIndexerState:
             # e.g. add more: "embedding_dim": ..., "other_param": ...
         }
 
-    def set_index_dir(self, directory: str, file_ext: str = ".py"):
+    def set_index_dir(self, directory: str, file_ext: str = "auto"):
         # Hash the directory name to make it unique
         import hashlib
         dir_hash = hashlib.md5(os.path.abspath(directory).encode()).hexdigest()[:16]
@@ -558,7 +559,7 @@ class GlobalIndexerState:
                 # Respect .gitignore for directories
                 dirs[:] = [d for d in dirs if not is_ignored(os.path.join(root, d), spec, scan_dir)]
                 for fname in files:
-                    if not fname.endswith(self.file_ext):
+                    if not matches_language(fname, self.file_ext):
                         continue
                     fpath = os.path.join(root, fname)
                     if is_ignored(fpath, spec, scan_dir):
@@ -586,7 +587,7 @@ class GlobalIndexerState:
         if clear_disk and self.index_dir and os.path.exists(self.index_dir):
             shutil.rmtree(self.index_dir, ignore_errors=True)
 
-    def force_rebuild_from_disk(self, directory: str, file_ext: str = ".py"):
+    def force_rebuild_from_disk(self, directory: str, file_ext: str = "auto"):
         """Force rebuild index from disk"""
         self.clear_cache()
         self.load(directory, file_ext)
@@ -644,7 +645,7 @@ class GlobalIndexerState:
         with open(os.path.join(self.index_dir, "meta.json"), "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False)
 
-    def load(self, directory: str, file_ext: str = ".py"):
+    def load(self, directory: str, file_ext: str = "auto"):
         directory = os.path.abspath(directory)
         self.set_index_dir(directory, file_ext)
         # If index directory does not exist, do nothing (prefer memory cache)
@@ -1141,7 +1142,7 @@ def collect_diff_hunks(
     new_line = 0
 
     def path_allowed(rel_path: Optional[str]) -> bool:
-        if not rel_path or not rel_path.endswith(file_ext):
+        if not rel_path or not matches_language(rel_path, file_ext):
             return False
         file_path = str((root / rel_path).resolve())
         if include_file_set and file_path not in include_file_set:
@@ -1943,7 +1944,7 @@ def record_diff_agent_event(req: SearchFunctionsSimpleRequest, response: dict, m
     return append_agent_search_event(event)
 
 # ディレクトリ内の全ファイルから関数抽出・インデックス作成（一時的なインデックス、状態保存なし）
-def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, update_state: bool = False):
+def build_index(directory: str, file_ext: str = "auto", max_workers: int = 8, update_state: bool = False):
     import hashlib
     def func_id(func):
         # ファイルパス・関数名・lineno・end_linenoを組み合わせて一意なIDを生成
@@ -2021,7 +2022,7 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
         dirs[:] = [d for d in dirs if not is_ignored(os.path.join(root, d), spec, directory)]
         for fname in files:
             progress.raise_if_cancelled()
-            if not fname.endswith(file_ext):
+            if not matches_language(fname, file_ext):
                 continue
             fpath = os.path.join(root, fname)
             if is_ignored(fpath, spec, directory):
@@ -2169,7 +2170,7 @@ class DependencyGraphRequest(BaseModel):
     directory: str
     file: str
     line: int = 1
-    file_ext: str = ".py"
+    file_ext: str = "auto"
     query: str = ""
     similar: bool = False
 
@@ -2753,7 +2754,7 @@ def get_class_stats(request: ClassStatsRequest):
             files = [
                 file_path
                 for file_path in include_files
-                if file_path.endswith(request.file_ext)
+                if matches_language(file_path, request.file_ext)
                 and os.path.exists(file_path)
                 and not is_ignored(file_path, ignore_spec, directory)
             ]
@@ -2764,7 +2765,7 @@ def get_class_stats(request: ClassStatsRequest):
                 dirs[:] = [d for d in dirs if not is_ignored(os.path.join(root, d), ignore_spec, directory)]
                 
                 for filename in filenames:
-                    if filename.endswith(request.file_ext):
+                    if matches_language(filename, request.file_ext):
                         file_path = os.path.join(root, filename)
                         if not is_ignored(file_path, ignore_spec, directory):
                             files.append(file_path)

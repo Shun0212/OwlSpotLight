@@ -14,6 +14,23 @@ import mcp_server as mcp
 from agent_cards import AgentCards
 
 
+class MixedLanguageTests(unittest.TestCase):
+    def test_auto_keeps_all_languages_and_scope_filters(self):
+        with tempfile.TemporaryDirectory() as root:
+            src = Path(root) / 'src'
+            src.mkdir()
+            for name in ('app.py', 'client.js', 'types.ts', 'notes.txt'):
+                (src / name).write_text('example')
+            (Path(root) / '.owlignore').write_text('src/types.ts\n')
+            extension, counts = mcp.resolve_file_ext(root, 'auto', 'all')
+            self.assertEqual(extension, 'auto')
+            self.assertEqual(counts['.py'], 1)
+            self.assertEqual(counts['.js'], 1)
+            self.assertEqual({Path(f).suffix for f in mcp.source_files(root, extension)}, {'.py', '.js'})
+            self.assertEqual({Path(f).suffix for f in mcp.source_files(root, '.js')}, {'.js'})
+            self.assertEqual({Path(f).suffix for f in mcp.glob_filtered_files(root, extension, ['src/**'], [])}, {'.py', '.js'})
+
+
 class McpTests(unittest.TestCase):
     def test_initialize_and_tools_include_provider_independent_cards(self):
         result = mcp.handle_request({'id': 1, 'method': 'initialize', 'params': {'clientInfo': {'name': 'codex'}}})

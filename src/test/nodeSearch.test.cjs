@@ -91,3 +91,18 @@ test('worker cancellation settles, restarts, rejects concurrency and reports mis
     await assert.rejects(client.search({ ...request, search_mode: 'semantic' }, () => {}), /missing or corrupt/);
     assert.equal((await client.search(request, () => {})).results.length, 1);
 });
+
+
+test('mixed-language searches can switch between all languages and one extension', async t => {
+    const root = await fixture(t);
+    await fs.writeFile(path.join(root, 'client.js'), 'function verifyToken(token) { return token.valid; }');
+    await fs.writeFile(path.join(root, 'client.ts'), 'function verifySession(token: string) { return token; }');
+    await fs.writeFile(path.join(root, 'notes.txt'), 'function ignored() {}');
+    const request = { directory: root, query: 'verify', file_ext: 'auto' };
+    const extensions = async req => new Set((await collectSymbols(req)).map(x => path.extname(x.file_path)));
+    assert.deepEqual(await extensions(request), new Set(['.py', '.js', '.ts']));
+    assert.deepEqual(await extensions({ ...request, file_ext: '.js' }), new Set(['.js']));
+    assert.deepEqual(await extensions(request), new Set(['.py', '.js', '.ts']));
+    await fs.unlink(path.join(root, 'client.js'));
+    assert.deepEqual(await extensions(request), new Set(['.py', '.ts']));
+});
