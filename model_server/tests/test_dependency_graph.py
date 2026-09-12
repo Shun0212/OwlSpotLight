@@ -1,12 +1,18 @@
 import sys
+import ast
 import math
+import os
+import tempfile
 import unittest
+from contextlib import nullcontext
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from dependency_graph import graph_neighborhood, node_id, direct_calls
+from dependency_graph import graph_neighborhood, node_id, direct_calls, align_cached_embeddings
 
 
 def function(name, line, code='', owner=None, file='/repo/app.py'):
@@ -15,6 +21,88 @@ def function(name, line, code='', owner=None, file='/repo/app.py'):
 
 
 class GraphTests(unittest.TestCase):
+    def test_graph_api_reuses_rescanned_embeddings_only_for_current_model(self):
+        # Execute the real endpoint without loading models or starting the server.
+        tree = ast.parse((Path(__file__).resolve().parents[1] / 'server.py').read_text(encoding='utf-8'))
+        endpoint = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
+                        and node.name == 'dependency_graph_api')
+        endpoint.decorator_list = []
+        with tempfile.TemporaryDirectory() as directory:
+            file = str(Path(directory) / 'app.py')
+            cached = [function('run', 1, file=file)]
+            config = {'model_name': 'test'}
+            state = SimpleNamespace(indexer=SimpleNamespace(functions=cached), directory=directory,
+                                    embeddings=np.array([[1., 0.]]), model_name='test',
+                                    model_config=config, get_current_model_config=lambda: config)
+            encode = Mock(return_value=np.array([[1., 0.]]))
+            namespace = dict(os=os, DependencyGraphRequest=SimpleNamespace,
+                             index_lock=nullcontext(), global_index_state=state,
+                             build_index=lambda *args: ([dict(cached[0])], 1, None),
+                             model_name='test', settings=SimpleNamespace(batch_size=1), encode_code=encode)
+            exec(compile(ast.Module(body=[endpoint], type_ignores=[]), 'server.py', 'exec'), namespace)
+            request = SimpleNamespace(directory=directory, file=file, line=1,
+                                      file_ext='.py', query='test', similar=False)
+            graph = namespace['dependency_graph_api'](request)
+            self.assertEqual(graph['nodes'][0]['queryScore'], 1)
+            self.assertEqual(graph['nodes'][0]['similarity'], 1)
+            state.model_config = {'model_name': 'old'}
+            graph = namespace['dependency_graph_api'](request)
+            self.assertFalse(graph['embeddingsAvailable'])
+            self.assertIsNone(graph['nodes'][0]['queryScore'])
+            self.assertEqual(encode.call_count, 1)
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows path casing')
+    def test_windows_graph_api_keeps_search_cache_and_resolves_same_file(self):
+        tree = ast.parse((Path(__file__).resolve().parents[1] / 'server.py').read_text(encoding='utf-8'))
+        endpoint = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
+                        and node.name == 'dependency_graph_api')
+        endpoint.decorator_list = []
+        with tempfile.TemporaryDirectory() as directory:
+            file = Path(directory) / 'app.py'
+            file.write_text('def run():\n    pass\n')
+            search_directory = directory[0].lower() + directory[1:]
+            search_file = str(file)[0].lower() + str(file)[1:]
+            cached = [function('run', 1, file=search_file)]
+            config = {'model_name': 'test'}
+            state = SimpleNamespace(directory=search_directory, indexer=SimpleNamespace(functions=cached),
+                                    embeddings=np.array([[1., 0.]]), model_name='test',
+                                    model_config=config, get_current_model_config=lambda: config)
+            def build(directory, *args):
+                self.assertEqual(directory, search_directory, 'must use the search cache path')
+                return cached, 1, state.indexer
+            namespace = dict(os=os, DependencyGraphRequest=SimpleNamespace, index_lock=nullcontext(),
+                             global_index_state=state, build_index=build, model_name='test',
+                             settings=SimpleNamespace(batch_size=1),
+                             encode_code=lambda *args, **kwargs: np.array([[1., 0.]]))
+            exec(compile(ast.Module(body=[endpoint], type_ignores=[]), 'server.py', 'exec'), namespace)
+            graph = namespace['dependency_graph_api'](SimpleNamespace(
+                directory=os.path.realpath(directory), file=os.path.realpath(file),
+                line=1, file_ext='.py', query='test', similar=False))
+            self.assertTrue(graph['embeddingsAvailable'])
+            self.assertEqual(graph['nodes'][0]['queryScore'], 1)
+            self.assertEqual(graph['nodes'][0]['similarity'], 1)
+
+    def test_rescanned_and_reordered_functions_keep_their_scores(self):
+        cached = [function('run', 1), function('helper', 20)]
+        current = [dict(cached[1], lineno=30, end_lineno=38), dict(cached[0])]
+        embeddings = align_cached_embeddings(current, cached, [[1, 0], [0, 1]])
+        graph = graph_neighborhood(current, current[0]['file'], 30,
+                                   embeddings, [1, 0], True)
+        nodes = {node['name']: node for node in graph['nodes']}
+        self.assertEqual(nodes['run']['queryScore'], 1)
+        self.assertEqual(nodes['helper']['queryScore'], 0)
+        self.assertEqual(nodes['helper']['similarity'], 1)
+        self.assertEqual(nodes['run']['similarity'], 0)
+
+    def test_changed_new_and_invalid_cached_code_remains_unscored(self):
+        cached = [function('run', 1), function('helper', 20), function('invalid', 40)]
+        current = [dict(cached[0]), dict(cached[1], raw_code='def helper():\n    return 42'),
+                   dict(cached[2]), function('new', 60)]
+        embeddings = align_cached_embeddings(current, cached, [[1, 0], [0, 1], [math.nan, 1]])
+        np.testing.assert_array_equal(embeddings, [[1, 0], [0, 0], [0, 0], [0, 0]])
+        self.assertIsNone(align_cached_embeddings(current, cached, None))
+        self.assertIsNone(align_cached_embeddings(current, cached, [[1, 0]]))
+
     def test_call_sites_preserve_indentation_unicode_and_repeated_calls(self):
         item = function('run', 10, '    def run(self):\n        x = "😀"; helper(); helper()')
         calls = direct_calls(item)

@@ -1975,8 +1975,8 @@ def build_index(directory: str, file_ext: str = ".py", max_workers: int = 8, upd
     global_index_state.load(directory, file_ext)
     global_index_state.set_index_dir(directory, file_ext)
     
-    # 3. ディスクからロードした直後にモデル設定をチェック
-    global_index_state.model_config = current_model_config
+    # Keep the loaded model config until validation; replacing it here would
+    # make stale embeddings appear to belong to the current model.
     
     # 4. ディスクキャッシュが最新かつモデル設定が一致するなら即リターン
     if (
@@ -2177,16 +2177,27 @@ class DependencyGraphRequest(BaseModel):
 @app.post("/dependency_graph")
 @operations.exclusive
 def dependency_graph_api(req: DependencyGraphRequest):
-    from dependency_graph import graph_neighborhood
+    from dependency_graph import graph_neighborhood, align_cached_embeddings
     directory = os.path.realpath(req.directory)
     file = os.path.realpath(req.file)
     if not os.path.isdir(directory) or os.path.commonpath([directory, file]) != directory:
         raise HTTPException(status_code=400, detail="Graph source must be inside the selected directory.")
     with index_lock:
-        functions, _, _ = build_index(directory, req.file_ext, 8, False)
-        # Only reuse vectors when their exact ordered metadata snapshot was returned.
+        # VS Code uses lowercase drive letters; realpath restores their casing.
+        # Keep the indexed spelling for the existing cache key, which hashes paths.
+        index_directory = directory
+        cached_directory = global_index_state.directory
+        if (cached_directory and os.path.normcase(os.path.realpath(cached_directory))
+                == os.path.normcase(directory)):
+            index_directory = cached_directory
+        functions, _, _ = build_index(index_directory, req.file_ext, 8, False)
         cached = global_index_state.indexer
-        embeddings = global_index_state.embeddings if cached is not None and functions is cached.functions else None
+        embeddings = None
+        if (cached is not None
+                and global_index_state.model_config == global_index_state.get_current_model_config()
+                and global_index_state.model_name in (None, model_name)):
+            embeddings = (global_index_state.embeddings if functions is cached.functions else
+                          align_cached_embeddings(functions, cached.functions, global_index_state.embeddings))
         query_vector = None
         if embeddings is not None and req.query.strip():
             query_vector = encode_code([req.query], settings.batch_size, show_progress=False, input_type="query")[0]

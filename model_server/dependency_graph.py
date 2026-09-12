@@ -12,6 +12,30 @@ def node_id(item):
     return hashlib.sha256(key.encode()).hexdigest()[:24]
 
 
+def align_cached_embeddings(functions, cached_functions, embeddings):
+    """Reuse unchanged code by identity, regardless of list order or rescanning."""
+    if embeddings is None:
+        return None
+    matrix, valid = normalized_rows(embeddings, len(cached_functions))
+    if matrix is None:
+        return None
+
+    def key(item):
+        return (os.path.normcase(os.path.realpath(item['file'])), item.get('name'),
+                item.get('class_name'), item.get('symbol_kind'),
+                item.get('code'), item.get('raw_code'))
+
+    # Code is part of the key: a function edited since indexing stays unscored.
+    rows = {key(item): matrix[i] for i, item in enumerate(cached_functions)
+            if valid[i] and (item.get('code') or item.get('raw_code'))}
+    aligned = np.zeros((len(functions), matrix.shape[1]), dtype=np.float64)
+    for i, item in enumerate(functions):
+        row = rows.get(key(item))
+        if row is not None:
+            aligned[i] = row
+    return aligned
+
+
 def direct_calls(item):
     """Do not attribute nested functions' calls to their enclosing function."""
     if not item['file'].endswith('.py'):
@@ -97,7 +121,8 @@ def normalized_rows(values, count):
 def graph_neighborhood(functions, file, line, embeddings=None, query_vector=None,
                        similar=False, limit=60):
     items = [f for f in functions if f.get('symbol_kind') != 'code_block']
-    matches = [f for f in items if os.path.abspath(f['file']) == os.path.abspath(file)
+    file_key = os.path.normcase(os.path.realpath(file))
+    matches = [f for f in items if os.path.normcase(os.path.realpath(f['file'])) == file_key
                and f['lineno'] <= line <= f.get('end_lineno', f['lineno'])]
     if not matches:
         raise ValueError('Function is not in the current index. Run a new search after edits.')
