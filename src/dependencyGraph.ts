@@ -24,6 +24,12 @@ let currentGraph: { root: string; show: (request: GraphRequest) => Promise<void>
 
 export function closeDependencyGraph(): void { currentGraph?.close(); }
 
+function sameFile(left: string, right: string): boolean {
+    // URI.fsPath lowercases Windows drive letters, while realpath/server paths
+    // can retain their casing and use different separators. Keep POSIX case-sensitive.
+    return path.relative(left, right) === '';
+}
+
 export function isInside(root: string, file: string): boolean {
     const relative = path.relative(root, file);
     return relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative);
@@ -44,7 +50,7 @@ export async function openDependencyGraph(context: vscode.ExtensionContext, requ
     if (!isInside(root, file) || !Number.isInteger(request.line) || request.line < 1) {
         throw new Error('Invalid graph location');
     }
-    if (currentGraph?.root === root) {
+    if (currentGraph && sameFile(currentGraph.root, root)) {
         await currentGraph.show({ ...request, directory: root, file });
         return;
     }
@@ -103,7 +109,7 @@ export async function openDependencyGraph(context: vscode.ExtensionContext, requ
     });
     const post = (message: object) => { if (!disposed) { void panel.webview.postMessage(message); } };
     const addNode = (node: GraphNode): GraphNode | undefined => {
-        const existing = [...nodes.values()].find(n => n.file === node.file &&
+        const existing = [...nodes.values()].find(n => sameFile(n.file, node.file) &&
             n.line <= node.line && n.endLine >= node.line && (n.name === node.name || n.id === node.id));
         if (existing) {
             if (node.className) { existing.className = node.className; }
@@ -149,7 +155,7 @@ export async function openDependencyGraph(context: vscode.ExtensionContext, requ
         };
         // Use the same kind-based colors and block outlines as ordinary search navigation.
         const owner = node.symbolKind === 'class' ? node : [...nodes.values()].find(candidate =>
-            candidate.symbolKind === 'class' && candidate.file === node.file && candidate.name === node.className);
+            candidate.symbolKind === 'class' && sameFile(candidate.file, node.file) && candidate.name === node.className);
         if (owner) {
             const classStart = Math.max(0, Math.min(owner.line - 1, editor.document.lineCount - 1));
             const classEnd = Math.max(classStart, Math.min(owner.endLine - 1, editor.document.lineCount - 1));
@@ -166,7 +172,7 @@ export async function openDependencyGraph(context: vscode.ExtensionContext, requ
                 if (edge.kind !== 'call' || edge.target !== target.id ||
                     (edge.source !== node.id && edge.target !== node.id)) { continue; }
                 for (const site of edge.sites || []) {
-                    if (site.file !== editor.document.uri.fsPath || site.line < 1 ||
+                    if (!sameFile(site.file, editor.document.uri.fsPath) || site.line < 1 ||
                         site.endLine > editor.document.lineCount || site.endLine < site.line) { continue; }
                     const line = editor.document.lineAt(site.endLine - 1).text;
                     const nameStart = target.name ? line.lastIndexOf(target.name, site.endColumn - target.name.length) : -1;
@@ -197,7 +203,7 @@ export async function openDependencyGraph(context: vscode.ExtensionContext, requ
         const line = editor.selection.active.line + 1;
         const actual = await fs.promises.realpath(editor.document.uri.fsPath).catch(() => '');
         if (disposed || version !== editorSyncVersion || syncingPreview) { return; }
-        let node: GraphNode | undefined = [...nodes.values()].filter(n => n.file === actual && n.line <= line && n.endLine >= line)
+        let node: GraphNode | undefined = [...nodes.values()].filter(n => actual && sameFile(n.file, actual) && n.line <= line && n.endLine >= line)
             .sort((a, b) => (a.endLine - a.line) - (b.endLine - b.line))[0];
         // A right-hand function not yet in this neighborhood can join the graph
         // without discarding the existing layout or fetching a full call graph.
@@ -340,7 +346,7 @@ export async function openDependencyGraph(context: vscode.ExtensionContext, requ
         busy = true;
         post({ type: 'busy', busy: true });
         const current = ++generation;
-        let selected = [...nodes.values()].find(n => n.file === filePath && n.line === line);
+        let selected = [...nodes.values()].find(n => sameFile(n.file, filePath) && n.line === line);
         const warnings: string[] = [];
         try {
             if (reset) { nodes.clear(); edges.clear(); }
@@ -432,7 +438,7 @@ export async function openDependencyGraph(context: vscode.ExtensionContext, requ
             if (message.type === 'openCall') {
                 const edge = edges.get(`${message.source}:${message.target}:call`);
                 const caller = edge && nodes.get(edge.source);
-                const sites = edge?.sites?.filter(site => caller && site.file === caller.file && site.line >= caller.line && site.line <= caller.endLine);
+                const sites = edge?.sites?.filter(site => caller && sameFile(site.file, caller.file) && site.line >= caller.line && site.line <= caller.endLine);
                 if (!caller || !sites?.length) { post({ type: 'error', message: 'Call location is unavailable for this relation.' }); return; }
                 const site = sites.length === 1 ? sites[0] : (await vscode.window.showQuickPick(
                     sites.map(site => ({ label: `${path.basename(site.file)}:${site.line}`, description: `Column ${site.column + 1}`, site })),

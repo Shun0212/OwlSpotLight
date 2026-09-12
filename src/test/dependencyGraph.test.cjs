@@ -5,7 +5,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 
-async function harness(provider = true, sideBySide = true) {
+async function harness(provider = true, sideBySide = true, sitePath = file => file) {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'owl-graph-'));
     const file = path.join(root, 'app.py');
     await fs.writeFile(file, 'def run():\n    helper()\n\ndef helper():\n    pass\n');
@@ -15,7 +15,9 @@ async function harness(provider = true, sideBySide = true) {
     let receive, dispose;
     let documentSymbols = [];
     let hierarchyKind;
-    const uri = file => ({ scheme: 'file', fsPath: file });
+    // VS Code's URI.fsPath lowercases Windows drive letters.
+    const uri = file => ({ scheme: 'file', fsPath: process.platform === 'win32'
+        ? file.replace(/^[A-Z]:/, drive => drive.toLowerCase()) : file });
     const pos = line => ({ line, character: 4 });
     const range = (start, end) => ({ start: pos(start), end: pos(end) });
     const hierarchy = name => ({ name, kind: hierarchyKind, uri: uri(file), range: range(name === 'run' ? 0 : 3, name === 'run' ? 1 : 4), selectionRange: range(name === 'run' ? 0 : 3, name === 'run' ? 0 : 3) });
@@ -76,7 +78,8 @@ async function harness(provider = true, sideBySide = true) {
         const node = (id, line, name) => ({ id, file, line, endLine: line + 1, name, queryScore: .7, similarity: .8, unresolved: 0 });
         return { ok: true, json: async () => ({ center: req.line === 1 ? 'run' : 'helper',
             nodes: [node('run', 1, 'run'), node('helper', 4, 'helper')],
-            edges: [{ source: 'run', target: 'helper', kind: 'call', evidence: 'static' }], embeddingsAvailable: true }) };
+            edges: [{ source: 'run', target: 'helper', kind: 'call', evidence: 'static',
+                sites: [{ file: sitePath(file), line: 2, column: 4, endLine: 2, endColumn: 10 }] }], embeddingsAvailable: true }) };
     };
     await module.openDependencyGraph({ extensionUri: uri(path.resolve(__dirname, '../..')) },
         { directory: root, file, line: 1, query: 'authentication', file_ext: '.py' }, 'http://127.0.0.1/dependency_graph');
@@ -260,6 +263,38 @@ test('call navigation uses the caller location and colors are stable across sele
     } finally { await h.cleanup(); }
 });
 
+
+for (const provider of [false, true]) {
+    test(`Windows call colors survive URI drive casing and server path separators (provider: ${provider})`,
+        { skip: process.platform !== 'win32' }, async () => {
+        const h = await harness(provider, true, file => file.replace(/\\/g, '/').toUpperCase());
+        try {
+            await h.receive({ type: 'ready' });
+            for (const id of ['run', 'helper']) {
+                h.decorations.length = 0;
+                await h.receive({ type: 'select', id });
+                const call = h.decorations.find(d => d.options.textDecoration === 'underline solid #008cff');
+                assert.ok(call, `call to helper has its graph color when ${id} is selected`);
+                assert.deepEqual(call.ranges.map(r => [r.start.line, r.start.character, r.end.character]), [[1, 4, 10]]);
+            }
+            await h.receive({ type: 'openCall', source: 'run', target: 'helper' });
+            assert.equal(h.opened.at(-1).selection.start.line, 1);
+            assert.ok(!h.messages.some(m => m.type === 'error'));
+        } finally { await h.cleanup(); }
+    });
+}
+
+test('call sites belonging to another file are not colored or opened in the caller', async () => {
+    const h = await harness(false, true, file => path.join(path.dirname(file), 'other.py'));
+    try {
+        await h.receive({ type: 'ready' });
+        assert.ok(!h.decorations.some(d => d.options.textDecoration));
+        const opened = h.opened.length;
+        await h.receive({ type: 'openCall', source: 'run', target: 'helper' });
+        assert.equal(h.opened.length, opened);
+        assert.match(h.messages.at(-1).message, /Call location is unavailable/);
+    } finally { await h.cleanup(); }
+});
 
 test('late method ownership updates an existing node and survives another static expansion', async () => {
     const h = await harness();
