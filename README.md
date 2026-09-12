@@ -35,25 +35,13 @@ Find functions, methods, classes, Python CodeBlocks, routes, tests, and call-hea
 <a name="english"></a>
 ## English
 
-### Simple mode (Node.js + ONNX)
-
-On first setup/search, choose **Node.js · Simple** or **Python · Full**. Node.js requires no Python environment or listening port; Python sets up the environment and starts the server. The choice is saved and can be changed in VS Code extension settings **Owlspotlight: Search Backend**. Existing explicit settings are preserved. If Python setup or startup fails (including missing uv or a startup timeout), OwlSpotlight switches to Node.js automatically, logs the cause and stops its owned Python process. Dismissing a setup picker does not trigger fallback. The first semantic search downloads the selected ONNX model; subsequent searches can run offline.
-
-Simple mode searches complete **functions and methods** in Python, Java, JavaScript/JSX, and TypeScript/TSX. Tree-sitter WASM grammars run inside the Node worker, preserving function names, class names, decorators and source ranges. Long functions remain one result; top-level statements and unnamed callbacks are not returned as arbitrary code blocks. Semantic, hybrid, BM25 and literal keyword search, All/Source scopes, Git history / working-tree / custom-range diff search, and Find Similar to Selection are supported. BM25 and keyword search do not load an embedding model. Semantic results are ranked similarities, not a guarantee that a relevant function exists.
-
-Choose NightOwl 35M (384 dimensions; INT8 ~35 MB / FP32 ~137 MB) or NightOwl (768 dimensions; INT8 ~152 MB / FP32 ~604 MB). Models use pinned revisions and verified ONNX checksums. Model files and embeddings are stored under the extension's global storage `node-onnx/`; embeddings are separated by parser version, model, revision and precision. Each search rereads saved files, reusing unchanged embeddings and reflecting edits/deletions. Source indexing respects `.gitignore` and `.owlignore` and skips symlinks, generated/dependency folders and files over 1 MiB. Unsaved editor changes are not indexed.
-
-**Clear embedding cache** rebuilds embeddings on the next search while preserving downloaded models. Set `owlspotlight.onnxLocalFilesOnly` to require offline operation. Optional Gemini translation and agentic search use the existing API-key/data-sharing controls in both modes. Simple mode also provides class statistics and dependency graphs: unambiguous static call estimates are supplemented by installed VS Code language providers, with optional ONNX similarity edges. Static estimates are not proof of runtime calls. **Agent Setup** can register a Node.js stdio MCP process exposing `owlspotlight.search_code` and `owlspotlight.read_code`, without Python or HTTP. MCP result annotations, human feedback and agent-activity mirroring remain Python-mode features. Gemini and MCP share code only through their existing explicit integrations.
-
-Development checks: `npm run test:unit` and `npm run test:onnx`. The latter runs real CPU inference on three small fixtures and caches its model under the system temporary directory. Set `OWL_ONNX_SMOKE_OFFLINE=1` to verify it without downloads.
-
 ### Why OwlSpotlight?
 
 OwlSpotlight lets you search your codebase by **describing what the code does** — no need to remember names or guess keywords. Type a natural-language query (in English or Japanese) into the VS Code sidebar, and OwlSpotlight finds the matching functions, methods, classes, top-level code blocks, FastAPI routes, and tests, then jumps straight to the definition and highlights it. You can also select a block of code in the editor and search for similar code, limit the search to files you've changed in git, and switch between hybrid, semantic, BM25, and literal keyword modes.
 
-Indexing and retrieval run locally on `127.0.0.1`, and the index refreshes as you edit. Optional Gemini features send queries and inspected code to Google. MCP returns code to your connected agent and its provider; it does not invoke Gemini.
+Indexing and retrieval run locally. Optional Gemini features send queries and inspected code to Google. MCP returns code to your connected agent and its provider; it does not invoke Gemini.
 
-Under the hood, OwlSpotlight is more than generic chunk search. Its retrieval engine is **NightOwl-CodeEmbedding**, a ~150M-parameter code-embedding model I built myself: a bi-encoder on the ModernBERT architecture, fine-tuned for code retrieval from NightOwl, a base model I trained from scratch. OwlSpotlight builds a local semantic index from your code's structure, then combines the model's dense retrieval with lightweight BM25 lexical ranking and literal keyword matching.
+Under the hood, OwlSpotlight is more than generic chunk search. Its retrieval engine is **NightOwl-CodeEmbedding**, a ~150M-parameter code-embedding model I built myself: a bi-encoder on the ModernBERT architecture, fine-tuned for code retrieval from NightOwl, a base model I trained from scratch. OwlSpotlight builds a local semantic index from your code's structure, then combines the model's dense retrieval with BM25 lexical ranking and literal keyword matching.
 
 | What you need | OwlSpotlight gives you |
 |---|---|
@@ -62,7 +50,7 @@ Under the hood, OwlSpotlight is more than generic chunk search. Its retrieval en
 | "Only search files I changed" | Git changed/untracked-file scope |
 | "Search outside functions too" | Python `CodeBlock` extraction for top-level logic |
 | "Use this from Codex" | Codex-ready MCP bridge with `owlspotlight.search_code` |
-| "Keep code private" | Local index/search server on `127.0.0.1` |
+| "Search locally" | Search inside VS Code or through a local Python backend |
 
 ![Demo Preview](screenshot/detect_function.png)
 
@@ -79,65 +67,64 @@ Explore callers and callees alongside the source code. Function and method resul
 - **Connect the graph to code:** call names are highlighted with their target node's color. Source definitions use the usual function, method, and class highlights, with the selected definition line in yellow.
 - **Explore the neighborhood:** drag the background to pan and use the wheel to zoom. Selecting a node centers it at 83% zoom. Open **⚙** for **Fit**, **Expand selected**, **Reset**, and similarity controls.
 - **Compare similar code:** **Show similar functions** adds up to five embedding neighbors with dotted lines. Cosine similarity appears as a number and bar; it is not a probability. Run a semantic search after edits if current embeddings are unavailable.
-- **Understand the arrows:** dashed calls are conservative Python same-file estimates; solid calls come from VS Code Call Hierarchy. Calls across files are included when the installed language extension can resolve them within the selected directory. External-directory calls are omitted, and unresolved calls may be missing. The graph is not a complete runtime dependency map.
+- **Understand the arrows:** dashed calls are static call estimates; solid calls come from VS Code Call Hierarchy. Calls across files are included when the installed language extension can resolve them within the selected directory. External-directory calls are omitted, and unresolved calls may be missing. The graph is not a complete runtime dependency map.
 
 Toggle **Settings → Show dependency graph** in OwlSpotlight for code-only navigation, or use **Open dependency graph** to open it explicitly. Toggle editor synchronization under **⚙ → Settings → Sync graph and source code**. The graph explores beyond result filters, displays at most 80 nodes, and does not graph historical diff hunks. Provider-only nodes stay unscored until indexed and expanded.
 
 ### Highlights
 
 - **Search modes**: `hybrid`, `semantic`, `bm25`, or literal `keyword` mode.
-- **Python static analysis**: params, return annotations, decorators, imports, calls, assigned names, docstrings, local call graph, and import dependencies.
-- **Python CodeBlocks**: searches top-level logic outside functions and classes, grouped by the regions between function/class definitions.
-- **Framework-aware metadata**: FastAPI route and pytest symbol hints.
+- **Python static analysis (Python backend)**: params, return annotations, decorators, imports, calls, assigned names, docstrings, local call graph, and import dependencies.
+- **Python CodeBlocks (Python backend)**: searches top-level logic outside functions and classes, grouped by the regions between function/class definitions.
+- **Framework-aware metadata (Python backend)**: FastAPI route and pytest symbol hints.
 - **Search scopes**: all files, auto-detected source folders, or a `Git Diff` scope where you pick base/head commits from a built-in commit graph and search either the changed functions or the unified diff hunks.
 - **Selection search**: right-click selected code and run `OwlSpotlight: Find Similar to Selection`.
-- **Automatic incremental indexing**: a file watcher refreshes the index whenever supported files change.
-- **Codex MCP support**: register OwlSpotlight directly from the sidebar and use `owlspotlight.search_code`, `owlspotlight.grep_repo`, and compact Agent Activity inside Codex.
+- **Index updates**: the Python backend watches for file changes; simple mode refreshes saved files on each search.
+- **Codex MCP support**: register OwlSpotlight from the sidebar to search and read code from Codex. The Python backend also provides repository grep and Agent Activity.
 - **Claude Code**: support is coming in the next few days.
-- **Cross-platform setup**: `uv` + Python 3.11 on macOS, Linux, and Windows, with CPU, GPU, and MPS support.
 - **Japanese queries**: optional Japanese-to-English query translation via the Gemini API.
+
+#### Execution modes
+
+At setup, choose the execution mode that suits your environment:
+
+- **backend_server(python)** starts a local Python search server and supports GPU acceleration on compatible systems. Install [`uv`](https://docs.astral.sh/uv/getting-started/installation/) first; OwlSpotlight handles the Python environment setup.
+- **node_onnx** runs on the CPU inside VS Code without a Python server. Use it if server setup is unavailable or you prefer a simpler setup. The model downloads on the first semantic search.
+
+The choice is saved. To change it, search for `owlspotlight.searchBackend` in **VS Code Settings** (default: `ask`). Python setup offers GPU auto-detection to select a compatible PyTorch/CUDA build for your GPU and driver. If the backend still will not run, try `node_onnx`; setup and startup failures switch to it automatically.
 
 ### Supported Languages
 
 | Language | Support |
 |---|---|
-| Python | Stable. Functions, methods, CodeBlocks, AST metadata, FastAPI/pytest hints |
+| Python | Functions and methods in both modes; CodeBlocks, AST metadata, and FastAPI/pytest hints with the Python backend |
 | Java | Functions/methods/classes via Tree-sitter |
 | TypeScript / TSX | Functions and class methods via Tree-sitter |
 | JavaScript / JSX | Functions and class methods via Tree-sitter |
 
 ### Quick Start
 
-Prerequisite: install [`uv`](https://docs.astral.sh/uv/getting-started/installation/). `uv` can also manage Python 3.11 for you.
+1. Install OwlSpotlight from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=Shun0212.owlspotlight).
+2. Open a project and the OwlSpotlight sidebar.
+3. Click **Choose search mode** and select **backend_server(python)** or **node_onnx**. Starting a search also opens this choice if no mode has been saved.
+4. Complete setup, then describe the code you want to find.
 
-1. Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=Shun0212.owlspotlight).
-2. Open the OwlSpotlight sidebar.
-3. Click **Setup / Start**.
-4. Search in natural language.
-
-Manual command-palette flow:
-
-```text
-OwlSpotlight: Setup Python Environment
-OwlSpotlight: Start Server
-```
-
-Server logs appear under **View -> Output -> OwlSpotlight**. OwlSpotlight runs as a background process and never takes over your terminal.
+Logs appear under **View → Output → OwlSpotlight**. The Python server runs in the background without occupying your terminal.
 
 ### Search Options
 
-The sidebar keeps the main search bar compact. Click **Options** to choose:
+Open **Settings** in the sidebar to adjust search options:
 
 | Option | Values |
 |---|---|
 | Language | Python, Java, TypeScript, TSX, JavaScript, JSX |
 | Scope | `All`, `Source`, `Git Diff` |
 | Mode | `Hybrid`, `Semantic`, `BM25`, `Keyword` |
-| Type | `All`, `Functions`, `Methods`, `CodeBlocks` |
+| Type | `All`, `Functions`, `Methods`, `CodeBlocks` (Python backend only) |
 
 `Source` auto-detects folders such as `src`, `app`, `lib`, `packages`, `client`, `server`, `backend`, and `frontend`.
 
-With no saved settings, the sidebar opens in `Git Diff` and automatically loads the current branch's complete first-parent history, including its initial commit. Explicitly saved scope and range selections are preserved. Merge commits remain (compared with their first parent), while individual commits from merged side branches are excluded.
+The Python mode defaults to `Git Diff` and automatically loads the current branch's complete first-parent history, including its initial commit. Simple mode starts with `All`. Saved scope and range selections are preserved. Merge commits remain (compared with their first parent), while individual commits from merged side branches are excluded.
 
 In **Settings → Search behavior**, choose **Range** (`Current branch: first → latest`, `Custom: From → To`, or `HEAD → working tree`) and **History** (`First parent only` or `Include merged branch history`). Custom ranges exclude From and include To. The tree remains visible outside Settings: From is blue, To is yellow, and selected commits and edges are green. Click a commit to set From; Shift+Click sets To and switches to a custom range. The tree shows up to 1,000 recent commits; the search includes the full selected history.
 
@@ -150,7 +137,7 @@ Choose a **Diff view**:
 
 Use `Git Diff` when you want to review a working-tree change, a branch comparison, or a PR-sized patch by intent, instead of reading a raw diff from top to bottom. OwlSpotlight builds the search corpus from the selected diff range only, so queries like "where was the new retry logic added?" or "why did the MaxSim aggregation change?" surface the changed code that matches your intent.
 
-- Leave base/head blank to compare `HEAD` with the working tree, or set `main`, `origin/main`, a tag, or a commit SHA for branch/commit comparisons.
+- Choose `HEAD → working tree` for local changes, `Current branch: first → latest` for branch history, or `Custom: From → To` for a specific comparison.
 - `Functions` maps changed line ranges back to the function-level code units they belong to, then searches those units.
 - `Unified diff` searches the actual patch hunks — added, removed, and context lines — and results can open in VS Code's native side-by-side diff editor.
 - All the usual ranking modes apply: use `Hybrid` / `Semantic` for intent-based review, `BM25` for lexical terms, and `Keyword` for exact identifiers.
@@ -163,7 +150,7 @@ Agents can use the same feature through `owlspotlight.search_code`: set `search_
 
 ### Python Static Analysis
 
-For Python, OwlSpotlight uses `ast` first and falls back to Tree-sitter when AST parsing fails — for example, while a file is temporarily broken mid-edit.
+With the Python backend, OwlSpotlight uses `ast` first and falls back to Tree-sitter when AST parsing fails — for example, while a file is temporarily broken mid-edit.
 
 Extracted metadata includes:
 
@@ -183,9 +170,11 @@ Extracted metadata includes:
 
 CodeBlocks represent top-level code that lives outside functions and classes. They are grouped by the regions between function/class definitions rather than split aggressively at blank lines.
 
-### MCP Server Mode
+### MCP Integration
 
-Start the VS Code OwlSpotlight server first, then run the MCP stdio bridge:
+Use **Agent Setup → Create/update project Codex configuration** in the sidebar to connect your agent. The generated launcher uses your selected search mode. With **node_onnx**, it runs a Node.js stdio process with `owlspotlight.search_code` and `owlspotlight.read_code`; no Python or HTTP backend is needed. Restart the connected agent after changing modes.
+
+The manual setup and additional tools below apply to **backend_server(python)**. Start the OwlSpotlight Python backend, then run the MCP stdio bridge:
 
 ```bash
 python model_server/mcp_server.py
@@ -237,22 +226,20 @@ npx vsce package
 
 Then install the generated `.vsix` with `Extensions: Install from VSIX...`.
 
+Run `npm run test:unit` for unit tests and `npm run test:onnx` for a CPU inference smoke test. The ONNX test downloads a model into the system temporary directory; set `OWL_ONNX_SMOKE_OFFLINE=1` to reuse a cached copy without downloads.
+
 ### Architecture
 
 ```text
-VS Code Sidebar/Webview
-        |
-        | localhost HTTP
-        v
-FastAPI background server
-        |
-        |-- Tree-sitter extractors: Java, JS, JSX, TS, TSX
-        |-- Python AST extractor + Tree-sitter fallback
-        |-- NightOwl-CodeEmbedding embeddings
-        |-- FAISS vector index
-        |-- Lightweight BM25 ranking
-        |-- Literal keyword matching
-        |-- Disk + memory incremental cache
+VS Code sidebar
+  ├─ backend_server(python)
+  │    └─ Local HTTP → Python / FastAPI server
+  │         ├─ Python AST and Tree-sitter analysis
+  │         └─ Embeddings, FAISS, BM25, and keyword search
+  └─ node_onnx
+       └─ Node.js worker inside the extension
+            ├─ Tree-sitter function and method extraction
+            └─ ONNX CPU inference, BM25, and keyword search
 ```
 
 ### Commands
@@ -264,13 +251,20 @@ FastAPI background server
 | `OwlSpotlight: Stop Server` | Stop the server |
 | `OwlSpotlight: Code Search` | Open the sidebar search panel |
 | `OwlSpotlight: Find Similar to Selection` | Search for code similar to the selected editor text |
-| `OwlSpotlight: Clear Cache` | Clear the FAISS/index cache |
+| `OwlSpotlight: Clear Cache` | Clear the search index or simple-mode embeddings |
+| `OwlSpotlight: Open Search Backend Settings` | Open the extension setting for choosing a search mode |
 | `OwlSpotlight: Remove Virtual Environment` | Delete `.venv` and start fresh |
 
 ### Configuration
 
+Open VS Code Settings and search for `owlspotlight` to find these options. The ONNX settings apply to `node_onnx`, which defaults to NightOwl 35M with INT8 precision (about 35 MB). Models are downloaded once and cached; BM25 and keyword search do not need a model.
+
 | Setting | Default | Description |
 |---|---:|---|
+| `owlspotlight.searchBackend` | `ask` | Choose on first setup; `python` displays as backend_server(python), `node-onnx` as node_onnx |
+| `owlspotlight.onnxModel` | `Shuu12121/NightOwl-CodeEmbedding-35M` | Simple-mode embedding model |
+| `owlspotlight.onnxDtype` | `q8` | Simple-mode precision: INT8 or FP32 |
+| `owlspotlight.onnxLocalFilesOnly` | `false` | Use cached models only |
 | `owlspotlight.modelName` | `Shuu12121/NightOwl-CodeEmbedding` | Hugging Face embedding model |
 | `owlspotlight.batchSize` | `2` | Embedding batch size |
 | `owlspotlight.autoStartServer` | `false` | Start the server when VS Code opens |
@@ -284,11 +278,11 @@ FastAPI background server
 
 | Problem | Fix |
 |---|---|
-| Server won't start | Run `OwlSpotlight: Setup Python Environment`, then check **Output -> OwlSpotlight** |
-| `uv` not found | Install uv from the official docs, or via Homebrew, WinGet, or pipx |
+| Python server fails to start | Check **Output → OwlSpotlight** for the cause. Search falls back to simple mode; select the Python backend again in extension settings after fixing the environment. |
+| `uv` not found | Install uv to use the Python backend, or use simple mode without it. |
 | No results | Check the server status, language option, scope option, and whether files with that extension exist |
-| Changed scope returns nothing | Make sure the workspace is a git repository and there are modified or untracked files |
-| Memory issues | Lower `owlspotlight.batchSize` to `1` |
+| Git Diff returns nothing | Check that the workspace is a Git repository and the selected range contains changes in the selected language. |
+| Memory issues | For Python, lower `owlspotlight.batchSize` to `1`. For simple mode, use NightOwl 35M with INT8 precision. |
 | Python file has syntax errors | OwlSpotlight falls back to Tree-sitter, so function/method search stays available |
 
 ### Contact
@@ -313,19 +307,11 @@ For questions, bug reports, feedback, or collaboration, reach out at [owlspotlig
 
 </div>
 
-### 簡易モード（Node.js + ONNX）
-
-初回のSetup／検索時に **Node.jsの簡易モード** と **Pythonの通常モード** を選択できます。選択は保存され、VS Code拡張機能の **Owlspotlight: Search Backend** 設定から変更できます。簡易モードではPythonのインストールやサーバー起動は不要です。Python環境の構築や起動に失敗した場合は、自動的に簡易モードへ切り替えて原因をOUTPUTへ記録します。設定画面をキャンセルしただけの場合は切り替えません。モデルは初回の意味検索でダウンロードされ、以後はオフラインでも検索できます。初期モデルは軽量なNightOwl 35MのINT8版で、通常のNightOwlやFP32にも切り替えられます。
-
-Python・Java・JavaScript/JSX・TypeScript/TSXをNode.js内で構文解析し、**関数・メソッド単位**で検索します。長い関数も途中で分割せず、関数名・クラス名と正しいソース範囲を表示します。保存済みファイルの変更・削除は次回検索に反映されます。旧ブロック方式の埋め込みキャッシュは再利用しません。
-
-簡易モードでもGit履歴・作業ツリー・指定範囲の差分検索、依存グラフ、類似関数、クラス統計、日本語翻訳、Gemini検索改善、MCPによる検索・コード取得を利用できます。依存グラフの静的解析は推定として表示します。GeminiはAPIキーと既存のデータ共有設定に従います。MCPの結果注釈・フィードバック・Agent Activityへの同期はPythonモードの機能です。
-
 ### OwlSpotlight とは
 
 OwlSpotlight は、関数やクラスの名前を覚えていなくても「**そのコードが何をするものか**」を説明するだけで目的のコードを見つけられる VS Code 拡張機能です。サイドバーから自然言語(日本語・英語)で入力すると、該当する関数・メソッド・クラス・トップレベルのコードブロック・FastAPI のルート・テストを見つけ出し、その場所へジャンプして定義をハイライト表示します。エディタで選択したコードに似たコードを探したり、検索範囲を Git の変更ファイルだけに絞り込んだり、Hybrid / Semantic / BM25 / 完全一致キーワードの各モードを切り替えたりすることもできます。
 
-検索とインデックス作成は `127.0.0.1` のローカルサーバーで動き、ファイル編集時に索引を更新します。任意のGemini機能を使う場合はクエリや取得したコードがGoogleへ送信されます。MCPで返したコードは接続先エージェントとそのAIサービスに共有されます。MCP自体はGeminiを呼び出しません。
+検索とインデックス作成はローカルで実行します。任意のGemini機能を使う場合はクエリや取得したコードがGoogleへ送信されます。MCPで返したコードは接続先エージェントとそのAIサービスに共有されます。MCP自体はGeminiを呼び出しません。
 
 内部の仕組みも、単なるチャンク検索ではありません。検索エンジンには、私が独自に開発したコード埋め込みモデル **NightOwl-CodeEmbedding**(約 150M パラメータ、ModernBERT アーキテクチャの Bi-Encoder。ゼロから学習させた自作のベースモデル「NightOwl」をコード検索向けにファインチューニングしたもの)を採用しています。Python の構造・呼び出し・import・FastAPI のルート・pytest といった静的解析メタデータに、このモデルによる密ベクトル検索(dense retrieval)・BM25・完全一致キーワード検索を組み合わせて検索します。
 
@@ -344,7 +330,7 @@ OwlSpotlight は、関数やクラスの名前を覚えていなくても「**�
 - **色で呼び出し先を確認**：コード内の呼び出し名には、呼び出し先ノードと同じ色を付けます。定義には通常の関数・メソッド・クラスのハイライトを使い、選択中の定義行は黄色で示します。
 - **周辺を展開**：背景ドラッグで移動、ホイールで拡大縮小できます。ノード選択時は83%で中央に表示します。右上の **⚙** に **Fit**、**Expand selected**、**Reset**、類似度の操作をまとめています。
 - **類似コードを比較**：**Show similar functions** で最大5件の類似ノードを点線で追加します。コサイン類似度は数値とバーで表示し、確率ではありません。編集後に類似度を取得できない場合は、セマンティック検索を実行してください。
-- **矢印の意味**：破線はPythonの同一ファイル内の静的推定、実線はVS CodeのCall Hierarchyによる呼び出しです。別ファイルへの呼び出しも、選択ディレクトリ内で言語拡張が解決できれば表示します。範囲外の呼び出しは除外し、解決できない呼び出しは表示されない場合があります。実行時の依存関係をすべて網羅するものではありません。
+- **矢印の意味**：破線は静的解析による推定、実線はVS CodeのCall Hierarchyによる呼び出しです。別ファイルへの呼び出しも、選択ディレクトリ内で言語拡張が解決できれば表示します。範囲外の呼び出しは除外し、解決できない呼び出しは表示されない場合があります。実行時の依存関係をすべて網羅するものではありません。
 
 OwlSpotlightの **Settings → 依存グラフを表示** で自動表示を切り替え、**Open dependency graph** から明示的に開けます。コードとの連動は **⚙ → Settings → Sync graph and source code** で切り替えます。グラフは検索結果のフィルターを越えて探索し、最大80ノードを表示します。履歴の差分hunkは対象外です。言語機能だけで追加したノードは、索引に登録して展開するまでスコアが付かない場合があります。
 
@@ -371,49 +357,51 @@ AIはカードの見出し、注目する行、青・緑・黄・紫の色、短
 ### 主な機能
 
 - **検索モード**: `Hybrid` / `Semantic` / `BM25` / `Keyword` を切り替え可能。
-- **Python の静的解析**: params、return annotation、decorator、import、call、代入名、docstring、call graph、import dependency を抽出。
-- **Python の CodeBlock 検索**: 関数やクラスの外にあるトップレベルの処理も検索対象に含めます。
-- **FastAPI / pytest のヒント**: ルートや test / fixture をメタデータとして保持。
+- **Python の静的解析（Python版）**: params、return annotation、decorator、import、call、代入名、docstring、call graph、import dependency を抽出。
+- **Python の CodeBlock 検索（Python版）**: 関数やクラスの外にあるトップレベルの処理も検索対象に含めます。
+- **FastAPI / pytest のヒント（Python版）**: ルートや test / fixture をメタデータとして保持。
 - **検索スコープ**: 全体、source 系フォルダ、Git の変更済み・未追跡ファイル、またはブランチ比較から作った diff hunk から選択可能。
 - **選択範囲からの類似検索**: エディタでコードを選択すると、似たコードへジャンプできます。
-- **自動の差分インデックス**: 対応ファイルが変更されると、サーバー側の差分インデックスを更新します。
-- **Codex MCP 対応**: サイドバーから Codex へ直接登録し、`owlspotlight.search_code` / `owlspotlight.grep_repo` とコンパクトな Agent Activity を利用できます。
+- **変更の反映**: Python版はファイル変更時に索引を更新し、簡易版は検索時に保存済みファイルを読み直します。
+- **Codex MCP 対応**: サイドバーから登録し、Codexからコードを検索・取得できます。Python版ではリポジトリ内のgrepやAgent Activityも利用できます。
 - **Claude Code**: 数日中に対応予定。
-- **ローカルファースト**: 検索もインデックスも `127.0.0.1` のローカルサーバーで実行します。
+- **ローカルで検索**: 拡張機能内、またはローカルのPythonバックエンドで検索を実行します。
 - **日本語クエリ対応**: Gemini API を設定すると、日本語のクエリを英語へ翻訳して検索します。
+
+#### 実行方式
+
+セットアップ時に、環境に合わせて実行方式を選びます。
+
+- **backend_server(python)**：ローカルのPython検索サーバーを起動します。対応環境ではGPUを利用できます。先に [`uv`](https://docs.astral.sh/uv/getting-started/installation/) をインストールすると、Python環境の構築はOwlSpotlightが行います。
+- **node_onnx**：Pythonサーバーを使わず、VS Code内でCPU実行する簡易版です。サーバーを構築できない場合や、手軽に使いたい場合に選んでください。モデルは初回の意味検索時にダウンロードします。
+
+選択は保存されます。変更するには **VS Codeの設定で `owlspotlight.searchBackend` を検索**してください（初期値は `ask`）。Pythonのセットアップでは、GPUやドライバーに合うPyTorch/CUDAを自動判定し、手動設定を減らしています。それでも実行できない場合は `node_onnx` も試してみてください。環境構築・起動に失敗した場合は自動的に切り替わります。
 
 ### クイックスタート
 
-前提: [`uv`](https://docs.astral.sh/uv/getting-started/installation/) をインストールしておいてください。Python 3.11 のインストールも `uv` に任せられます。
-
 1. [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=Shun0212.owlspotlight) からインストールします。
-2. OwlSpotlight のサイドバーを開きます。
-3. **Setup / Start** をクリックします。
-4. 自然言語で検索します。
+2. プロジェクトとOwlSpotlightのサイドバーを開きます。
+3. **Choose search mode** をクリックし、**backend_server(python)** または **node_onnx** を選びます。未設定のまま検索を始めた場合も、選択画面が開きます。
+4. セットアップが終わったら、探したいコードの内容を自然言語で入力します。
 
-手動で行う場合は、コマンドパレットから次を実行します:
-
-```text
-OwlSpotlight: Setup Python Environment
-OwlSpotlight: Start Server
-```
-
-ログは **表示 -> 出力 -> OwlSpotlight** に表示されます。バックグラウンドで動作するため、VS Code のターミナルを占有することはありません。
+ログは **表示 → 出力 → OwlSpotlight** で確認できます。Pythonサーバーはバックグラウンドで動作し、ターミナルを占有しません。
 
 ### 検索オプション
 
-検索バー右側の **Options** から変更できます。
+サイドバーの **Settings** から検索条件を変更できます。
 
 | Option | 内容 |
 |---|---|
 | Language | Python, Java, TypeScript, TSX, JavaScript, JSX |
 | Scope | `All`, `Source`, `Git Diff` |
 | Mode | `Hybrid`, `Semantic`, `BM25`, `Keyword` |
-| Type | `All`, `Functions`, `Methods`, `CodeBlocks` |
+| Type | `All`, `Functions`, `Methods`, `CodeBlocks`（Python版のみ） |
 
 `Source` は `src`, `app`, `lib`, `packages`, `client`, `server`, `backend`, `frontend` などのフォルダを自動的に検出します。
 
-`Git Diff` は検索対象を git の差分に限定します。内蔵の**コミットグラフ**から base / head のコミットを選び(コミットをクリックで base、Shift+クリックで head を設定。両方空なら `HEAD` とワーキングツリーを比較)、**Diff view** を選択します。
+`Git Diff` は検索対象をGitの差分に限定します。Python版の初期範囲は `Git Diff`、簡易版は `All` で、保存済みの選択があればそれを使います。
+
+**Settings → Search behavior** の **Range** で、現在のブランチ全体、指定したFrom/To間、作業ツリーの変更を選べます。現在のブランチでは、既定で最初のコミットから最新までのfirst-parent履歴を検索します。コミットグラフではクリックでFrom、Shift+クリックでToを設定できます。続いて **Diff view** を選択します。
 
 - `Functions` — 選択した差分で変更された関数のみ。
 - `Unified diff` — 変更行を unified diff の hunk として表示。
@@ -422,7 +410,7 @@ OwlSpotlight: Start Server
 
 `Git Diff` は、作業ツリーの変更、ブランチ比較、PR サイズのパッチを、生の diff を上から順に読む代わりに「どんな意図の変更か」でレビューしたいときに使います。選択した diff 範囲だけを検索対象にするため、`リトライ処理を追加した箇所` や `MaxSim の集計を変えた差分` のようなクエリで、意図に合う変更済みコードだけを順位付けできます。
 
-- base/head を空にすると `HEAD` とワーキングツリーを比較します。`main`、`origin/main`、タグ、commit SHA を指定するとブランチ / コミット間の比較になります。
+- 作業中の変更は `HEAD → working tree`、ブランチの履歴は `Current branch: first → latest`、特定の範囲は `Custom: From → To` を選びます。
 - `Functions` は変更行を含む関数レベルのコード単位へ写像し、そのコード単位を検索します。
 - `Unified diff` は追加行・削除行・前後の context を含む実際の patch hunk を検索し、結果から VS Code の左右 diff エディタを開けます。
 - 通常の検索モードもそのまま使えます。意図ベースのレビューは `Hybrid` / `Semantic`、用語一致は `BM25`、識別子の完全一致は `Keyword` が向いています。
@@ -433,9 +421,11 @@ OwlSpotlight: Start Server
 
 *クエリ、差分 hunk の検索結果、VS Code の左右 diff 表示を同じ流れで確認できます。*
 
-### MCP サーバーモード
+### MCP連携
 
-先に VS Code 側の OwlSpotlight サーバーを起動してから、MCP の stdio ブリッジを起動します。
+サイドバーの **Agent Setup → Create/update project Codex configuration** から接続設定を作成できます。選択中の検索モードに合わせたランチャーが生成されます。**node_onnx** ではNode.jsのstdioプロセスを使い、PythonやHTTPバックエンドなしで `owlspotlight.search_code` と `owlspotlight.read_code` を利用できます。モードを変更したら、接続先のエージェントを再起動してください。
+
+以下の手動設定と追加ツールの説明は **backend_server(python)** 向けです。先にOwlSpotlightのPythonバックエンドを起動し、続いてMCPのstdioブリッジを起動します。
 
 ```bash
 python model_server/mcp_server.py

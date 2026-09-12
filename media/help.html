@@ -1,60 +1,46 @@
-<!-- help.html: Help content for OwlSpotlight sidebar modal -->
+<!-- Help content for the OwlSpotlight sidebar modal -->
 <div>
   <h2>OwlSpotlight Help / ヘルプ</h2>
-  <h3>How to Use (English)</h3>
+  <h3>Getting started</h3>
+  <p>Open a project, choose a search mode on first setup, and describe the code you want to find. To change modes later, open <b>VS Code Settings</b> and search for <code>owlspotlight.searchBackend</code>, or run <b>OwlSpotlight: Open Search Backend Settings</b>.</p>
+  <p><b>backend_server(python)</b> starts a local Python search server. Install <code>uv</code> first, then run <b>Setup Python Environment</b>. Setup is designed to keep manual configuration to a minimum: the GPU auto-detect option checks your NVIDIA GPU and driver and selects a compatible PyTorch/CUDA build from the supported versions. If no compatible GPU build is found, it uses the CPU build. Apple Silicon can use MPS acceleration where supported.</p>
+  <p>If the Python backend still will not run, try <b>node_onnx</b>, the simple version that runs on the CPU inside VS Code without a Python server. Setup and startup failures automatically switch to this mode; you can also select it in extension settings. Its model downloads on the first semantic search. BM25 and keyword search do not require the model.</p>
+  <p>Check <b>View → Output → OwlSpotlight</b> for setup errors and progress. The Python server runs in the background and selects another local port if the default is busy.</p>
+
+  <h3>Commands</h3>
+  <p>Open the <b>Command Palette</b> (<code>Cmd+Shift+P</code> / <code>Ctrl+Shift+P</code>) and type <b>OwlSpotlight</b>. Commands use the selected search mode.</p>
   <ul>
-    <li>Use the <b>Command Palette</b> (<code>Cmd+Shift+P</code> or <code>Ctrl+Shift+P</code>) and type <b>OwlSpotlight</b> to access all features.</li>
-    <li><b>Start Server</b>: <code>OwlSpotlight: Start Server</code></li>
-    <li><b>Stop Server</b>: <code>OwlSpotlight: Stop Server</code></li>
-    <li><b>Clear Cache</b>: <code>OwlSpotlight: Clear Cache</code></li>
-    <li><b>Setup Python Environment</b>: <code>OwlSpotlight: Setup Python Environment</code></li>
-    <li><b>Agent Setup</b>: <code>OwlSpotlight: Generate Agent Setup</code> registers Codex MCP directly or creates/copies MCP setup for Cursor and similar agents. Claude Code support is planned in the next few days.</li>
-    <li><b>PyTorch setup:</b> GPU auto-detect is recommended. OwlSpotlight picks CUDA 12.8 or 12.4 when an NVIDIA GPU is detected, and falls back to CPU otherwise.</li>
-    <li>All main actions are available from the Command Palette. You can also use the sidebar buttons for quick access. If the default port is busy, OwlSpotlight will use the next free local port automatically.</li>
+    <li><b>Code Search / Find Similar to Selection</b>: search from the sidebar or selected code. Both support ONNX mode.</li>
+    <li><b>Clear Cache</b>: clears the search cache. In ONNX mode, stops the current operation and removes embeddings, keeping downloaded models. Embeddings are rebuilt as needed on the next search.</li>
+    <li><b>Cancel Indexing / Embedding</b>: stops the active operation in either mode.</li>
+    <li><b>Start Server / Stop Server</b>: starts or stops the Python backend. In ONNX mode, Start Server updates the status without starting a server; Stop Server stops the current search operation.</li>
+    <li><b>Setup Python Environment</b>: sets up the Python backend. In ONNX mode, displays a message that Python setup is unnecessary.</li>
+    <li><b>Remove Virtual Environment</b>: removes the Python environment after confirmation. It does not remove ONNX models or embeddings.</li>
+    <li><b>Generate Agent Setup</b>: creates MCP configuration for the selected mode. ONNX mode supports <code>owlspotlight.search_code</code> and <code>owlspotlight.read_code</code>; annotations, feedback, and Agent Activity require the Python backend.</li>
   </ul>
-  <h3>使い方 (日本語)</h3>
+
+  <h3>使い始めるには</h3>
+  <p>プロジェクトを開き、初回セットアップで実行方式を選んで、探したいコードの内容を入力してください。変更するには、<b>VS Codeの設定で <code>owlspotlight.searchBackend</code> を検索</b>するか、<b>OwlSpotlight: Open Search Backend Settings</b> を実行します。</p>
+  <p><b>backend_server(python)</b> はローカルのPython検索サーバーを起動します。先に <code>uv</code> をインストールし、<b>Setup Python Environment</b> を実行してください。なるべく手軽に構築できるよう、GPU自動判定ではNVIDIA GPUとドライバーを確認し、対応するPyTorch/CUDAのバージョンを選びます。対応するGPU用ビルドが見つからない場合はCPU版を使用します。Apple Siliconでは、対応環境でMPSによる高速化を利用できます。</p>
+  <p>それでもPythonバックエンドを実行できない場合は、簡易版の <b>node_onnx</b> も試してみてください。Pythonサーバーを構築せず、VS Code内でCPU実行できます。環境構築・起動に失敗した場合は自動的に切り替わるほか、拡張機能の設定からも選択できます。モデルは初回の意味検索時にダウンロードします。BM25・Keyword検索にはモデルは不要です。</p>
+  <p>進捗やエラーは <b>表示 → 出力 → OwlSpotlight</b> で確認できます。Pythonサーバーはバックグラウンドで動作し、既定のポートが使用中なら別の空きローカルポートを選びます。</p>
+
+  <h3>コマンド</h3>
+  <p><b>コマンドパレット</b>（<code>Cmd+Shift+P</code> / <code>Ctrl+Shift+P</code>）で <b>OwlSpotlight</b> と入力してください。選択中のモードに合わせて動作します。</p>
   <ul>
-    <li><b>コマンドパレット</b>（<code>Cmd+Shift+P</code> または <code>Ctrl+Shift+P</code>）で <b>OwlSpotlight</b> と入力すると、すべての機能が利用できます。</li>
-    <li><b>サーバー起動</b>: <code>OwlSpotlight: Start Server</code></li>
-    <li><b>サーバー停止</b>: <code>OwlSpotlight: Stop Server</code></li>
-    <li><b>キャッシュ削除</b>: <code>OwlSpotlight: Clear Cache</code></li>
-    <li><b>Python環境セットアップ</b>: <code>OwlSpotlight: Setup Python Environment</code></li>
-    <li><b>Agent Setup</b>: <code>OwlSpotlight: Generate Agent Setup</code> で Codex MCP を直接登録したり、Cursor など向けの MCP 設定を作成またはコピーできます。Claude Code 対応は数日中に追加予定です。</li>
-    <li><b>PyTorch セットアップ:</b> GPU 自動判定がおすすめです。NVIDIA GPU が見つかれば CUDA 12.8 / 12.4 を選び、見つからなければ CPU に切り替えます。</li>
-    <li>主な操作はコマンドパレットから実行できます。サイドバーのボタンもご利用ください。既定のポートが使用中なら、自動で次の空きローカルポートを使います。</li>
+    <li><b>Code Search / Find Similar to Selection</b>：サイドバーや選択したコードから検索します。ONNXモードにも対応しています。</li>
+    <li><b>Clear Cache</b>：検索キャッシュを削除します。ONNXモードでは実行中の処理を停止し、ダウンロード済みモデルを残して埋め込みを削除します。次回検索時に必要な埋め込みを再生成します。</li>
+    <li><b>Cancel Indexing / Embedding</b>：どちらのモードでも実行中の処理を停止します。</li>
+    <li><b>Start Server / Stop Server</b>：Pythonバックエンドを起動・停止します。ONNXモードでは、Start Serverはサーバーを起動せず状態表示を更新し、Stop Serverは実行中の検索処理を停止します。</li>
+    <li><b>Setup Python Environment</b>：Python環境を構築します。ONNXモードではセットアップ不要と案内します。</li>
+    <li><b>Remove Virtual Environment</b>：確認後にPython環境を削除します。ONNXのモデルや埋め込みは削除しません。</li>
+    <li><b>Generate Agent Setup</b>：選択中のモードに合わせたMCP設定を作成します。ONNXモードでは <code>owlspotlight.search_code</code> と <code>owlspotlight.read_code</code> に対応します。結果注釈・フィードバック・Agent ActivityはPython版の機能です。</li>
   </ul>
-  <h3>Translation Settings / 翻訳設定</h3>
-  <ul>
-    <li><b>Gemini API Translation:</b> To use Google Gemini for translation, configure in VS Code Settings:<br>
-      <code>owlspotlight.translationSettings.geminiApiKey</code> to your <b>Gemini API key</b><br>
-      <code>owlspotlight.translationSettings.enableJapaneseTranslation</code> to <b>true</b>
-    </li>
-    <li><b>Gemini API翻訳:</b> Google Geminiを翻訳に使用するには、VS Codeの設定で以下を設定してください:<br>
-      <code>owlspotlight.translationSettings.geminiApiKey</code> に <b>Gemini APIキー</b> を<br>
-      <code>owlspotlight.translationSettings.enableJapaneseTranslation</code> を <b>true</b> に
-    </li>
-    <li><b>Get Gemini API Key:</b> Visit <a href="https://aistudio.google.com/app/apikey">Google AI Studio</a> to get your free API key.<br>
-      <b>Gemini APIキー取得:</b> <a href="https://aistudio.google.com/app/apikey">Google AI Studio</a>で無料のAPIキーを取得できます。
-    </li>
-  </ul>
-  <h3>Environment Setup / 環境設定</h3>
-  <ul>
-    <li><b>Python 3.11 is required.</b> If you use <b>pyenv</b> (recommended):<br>
-      <code>pyenv install 3.11.8</code><br>
-      <code>pyenv global 3.11.8</code><br>
-      Then restart VS Code.<br>
-      <i>Make sure <code>python3.11</code> is available in your PATH.</i>
-    </li>
-    <li><b>日本語:</b> Python 3.11が必要です。<b>pyenv</b>を使う場合:<br>
-      <code>pyenv install 3.11.8</code><br>
-      <code>pyenv global 3.11.8</code><br>
-      その後VS Codeを再起動してください。<br>
-      <i><code>python3.11</code>コマンドがPATHで使えることを確認してください。</i>
-    </li>
-    <li>On Windows, use the official Python installer and add Python to PATH.<br>
-      Windowsの場合は公式インストーラーでPythonを入れ、PATHに追加してください。
-    </li>
-  </ul>
+
+  <h3>Gemini translation and search / 翻訳・検索改善</h3>
+  <p>Open <b>Settings → Gemini Search → API key &amp; data sharing</b> in the sidebar to save your Gemini API key and review what is shared. Enable <b>JP → EN</b> for query translation or <b>Agentic search</b> for search refinement. These optional features work in both modes and send queries and inspected code to Google.</p>
+  <p>サイドバーの <b>Settings → Gemini Search → API key &amp; data sharing</b> で、送信内容を確認してGemini APIキーを保存できます。クエリ翻訳は <b>JP → EN</b>、検索改善は <b>Agentic search</b> を有効にしてください。どちらのモードでも利用でき、クエリや参照したコードをGoogleへ送信します。</p>
+  <p><a href="https://aistudio.google.com/app/apikey">Get an API key in Google AI Studio / APIキーを取得</a></p>
   <hr>
-  <div style="font-size:0.95em;color:#888;">For more details, see the README or GitHub repository.<br>詳細はREADMEやGitHubもご覧ください。</div>
+  <p>For more details, see the README. / 詳細はREADMEをご覧ください。</p>
 </div>

@@ -62,9 +62,9 @@ window.onload = function() {
         if (simpleBackend && filter && filter.value === 'codeblocks') filter.value = 'function_level';
         const codeBlocksButton = document.querySelector('[data-select="resultTypeFilter"] [data-value="codeblocks"]');
         if (codeBlocksButton) codeBlocksButton.hidden = simpleBackend;
-        document.querySelector('.tabs').hidden = !simpleBackend;
-        document.getElementById('stats-tab').hidden = !simpleBackend;
-        if (!simpleBackend) document.querySelector('[data-tab="search"]').click();
+        document.querySelector('.tabs').hidden = true;
+        document.getElementById('stats-tab').hidden = true;
+        document.querySelector('[data-tab="search"]').click();
         if (backendInitialized && wasSimple !== simpleBackend) {
             currentResults = []; renderResults([], currentFolderPath || '');
             serverOperation = null; cancelPending = false;
