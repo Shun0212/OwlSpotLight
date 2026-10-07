@@ -151,3 +151,84 @@ class JsTsExtractorTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GenericExtractorTests(unittest.TestCase):
+    def extract_from_temp_file(self, suffix: str, source: str):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / f"sample{suffix}"
+            path.write_text(textwrap.dedent(source).lstrip(), encoding="utf-8")
+            return extract_functions(path)
+
+    def summarize(self, functions):
+        return [(f["name"], f["class_name"], f["lineno"]) for f in functions]
+
+    def test_rust_functions_impl_and_trait_methods(self):
+        functions = self.extract_from_temp_file(
+            ".rs",
+            """
+            /// Parse a config file.
+            fn parse_config(path: &str) -> Config {
+                todo!()
+            }
+
+            impl<T> Cache<T> {
+                fn get(&self, key: &str) -> Option<&T> { None }
+            }
+
+            trait Store {
+                fn save(&self) {}
+                fn load(&self);
+            }
+
+            mod util {
+                pub fn helper() {}
+            }
+            """,
+        )
+        self.assertEqual(
+            self.summarize(functions),
+            [
+                ("parse_config", None, 2),
+                ("get", "Cache", 7),
+                ("save", "Store", 11),
+                ("helper", None, 16),
+            ],
+        )
+        self.assertEqual(functions[0]["docstring"], "Parse a config file.")
+
+    def test_go_functions_and_methods(self):
+        functions = self.extract_from_temp_file(
+            ".go",
+            """
+            package main
+
+            // Run starts the server.
+            func Run() {}
+
+            func (s *Server) Handle(w Writer) {}
+            """,
+        )
+        self.assertEqual(self.summarize(functions), [("Run", None, 4), ("Handle", "Server", 6)])
+        self.assertEqual(functions[0]["docstring"], "Run starts the server.")
+
+    def test_c_and_cpp_functions(self):
+        c_functions = self.extract_from_temp_file(".c", "static int *make_buffer(int n) { return 0; }\n")
+        self.assertEqual(self.summarize(c_functions), [("make_buffer", None, 1)])
+
+        cpp_functions = self.extract_from_temp_file(
+            ".cpp",
+            """
+            class Widget {
+              void draw() {}
+            };
+
+            void Widget::resize(int w) {}
+
+            namespace ns { int compute() { return 1; } }
+            """,
+        )
+        self.assertEqual(
+            self.summarize(cpp_functions),
+            [("draw", "Widget", 2), ("resize", "Widget", 5), ("compute", None, 7)],
+        )

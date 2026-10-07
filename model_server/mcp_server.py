@@ -16,7 +16,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from language_scope import matches_language
+from language_scope import SUPPORTED_FILE_EXTENSIONS, matches_language
 from pathspec import PathSpec
 from pathspec.patterns import GitWildMatchPattern
 
@@ -27,7 +27,6 @@ DEFAULT_WORKSPACE = os.environ.get("OWLSPOTLIGHT_WORKSPACE", "")
 DEFAULT_SEARCH_MODE = "semantic"
 DEFAULT_TOP_K = 30
 DEFAULT_SEARCH_TIMEOUT = float(os.environ.get("OWLSPOTLIGHT_SEARCH_TIMEOUT", "1800"))
-SUPPORTED_FILE_EXTENSIONS = (".py", ".java", ".ts", ".tsx", ".js", ".jsx")
 IGNORED_DIR_NAMES = {
     ".git",
     ".mypy_cache",
@@ -444,7 +443,7 @@ def tool_definitions() -> list[dict[str, Any]]:
                     "file_ext": {
                         "type": "string",
                         "description": "File extension to search. Use auto unless the target language is known; auto searches all supported languages while respecting .owlignore plus git ignore/exclude rules.",
-                        "enum": ["auto", ".py", ".java", ".ts", ".tsx", ".js", ".jsx"],
+                        "enum": ["auto", *SUPPORTED_FILE_EXTENSIONS],
                         "default": "auto",
                     },
                     "top_k": {"type": "integer", "minimum": 1, "maximum": 50, "default": DEFAULT_TOP_K},

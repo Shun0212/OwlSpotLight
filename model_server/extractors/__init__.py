@@ -2,6 +2,20 @@ from pathlib import Path
 from .python_extractor import extract_python_functions
 from .java_extractor import extract_java_functions
 from .typescript_extractor import extract_typescript_functions
+from .generic_extractor import extract_generic_functions
+
+# Python backend only: the server-free Node.js backend does not parse these.
+GENERIC_LANGUAGE_BY_EXTENSION = {
+    ".rs": "rust",
+    ".go": "go",
+    ".c": "c",
+    ".h": "cpp",
+    ".cc": "cpp",
+    ".cpp": "cpp",
+    ".cxx": "cpp",
+    ".hh": "cpp",
+    ".hpp": "cpp",
+}
 
 
 def extract_functions(file_path: str | Path) -> list[dict]:
@@ -23,6 +37,8 @@ def extract_functions(file_path: str | Path) -> list[dict]:
         return extract_typescript_functions(source_bytes, "tsx" if ext == ".tsx" else "typescript")
     if ext in {".js", ".jsx"}:
         return extract_typescript_functions(source_bytes, "jsx" if ext == ".jsx" else "javascript")
+    if ext in GENERIC_LANGUAGE_BY_EXTENSION:
+        return extract_generic_functions(source_bytes, GENERIC_LANGUAGE_BY_EXTENSION[ext])
     return []
 
 __all__ = ["extract_functions"]

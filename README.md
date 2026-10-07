@@ -103,6 +103,7 @@ Settings → **Language & Scope → Language** defaults to **All languages**, se
 | Java | Functions/methods/classes via Tree-sitter |
 | TypeScript / TSX | Functions and class methods via Tree-sitter |
 | JavaScript / JSX | Functions and class methods via Tree-sitter |
+| Rust / Go / C / C++ | Python backend only: functions, `impl`/trait methods (Rust), receiver methods (Go), class methods (C++) via Tree-sitter |
 
 ### Quick Start
 

@@ -1018,7 +1018,8 @@ async function detectLanguages(): Promise<string[]> {
                 { glob: '**/*.ts', ext: '.ts' },
                 { glob: '**/*.tsx', ext: '.tsx' },
                 { glob: '**/*.js', ext: '.js' },
-                { glob: '**/*.jsx', ext: '.jsx' }
+                { glob: '**/*.jsx', ext: '.jsx' },
+                ...pythonOnlySearchExtensions.map((ext) => ({ glob: `**/*${ext}`, ext }))
         ];
         const detected: string[] = [];
         for (const p of patterns) {
@@ -1047,7 +1048,9 @@ type AgentSearchEvent = {
 	results?: any[];
 };
 
-const supportedSearchExtensions = new Set(['.py', '.java', '.ts', '.tsx', '.js', '.jsx']);
+// Rust/Go/C/C++ are parsed only by the Python backend; node_onnx ignores these files.
+const pythonOnlySearchExtensions = ['.rs', '.go', '.c', '.h', '.cc', '.cpp', '.cxx', '.hh', '.hpp'];
+const supportedSearchExtensions = new Set(['.py', '.java', '.ts', '.tsx', '.js', '.jsx', ...pythonOnlySearchExtensions]);
 const sourceDirectoryNames = new Set([
 	'src',
 	'app',
@@ -1163,7 +1166,7 @@ function buildCommitUrl(remoteUrl: string, hash: string): string | undefined {
 }
 
 async function findWorkspaceFilesByExtension(workspaceFolder: vscode.WorkspaceFolder, fileExt: string): Promise<string[]> {
-	const pattern = new vscode.RelativePattern(workspaceFolder, fileExt === 'auto' ? '**/*.{py,java,ts,tsx,js,jsx}' : `**/*${fileExt}`);
+	const pattern = new vscode.RelativePattern(workspaceFolder, fileExt === 'auto' ? `**/*.{${[...supportedSearchExtensions].map((ext) => ext.slice(1)).join(',')}}` : `**/*${fileExt}`);
 	const files = await vscode.workspace.findFiles(pattern, '**/{node_modules,.git,dist,build,out,coverage,.venv}/**');
 	return files.map((file) => file.fsPath);
 }
@@ -2650,7 +2653,16 @@ class OwlspotlightSidebarProvider implements vscode.WebviewViewProvider {
                         '.ts': 'TypeScript',
                         '.tsx': 'TypeScript React',
                         '.js': 'JavaScript',
-                        '.jsx': 'JavaScript React'
+                        '.jsx': 'JavaScript React',
+                        '.rs': 'Rust (Python server)',
+                        '.go': 'Go (Python server)',
+                        '.c': 'C (Python server)',
+                        '.h': 'C/C++ header (Python server)',
+                        '.cpp': 'C++ .cpp (Python server)',
+                        '.cc': 'C++ .cc (Python server)',
+                        '.cxx': 'C++ .cxx (Python server)',
+                        '.hpp': 'C++ header .hpp (Python server)',
+                        '.hh': 'C++ header .hh (Python server)'
                 };
                 const options = '<option value="auto">All languages</option>' + Object.keys(langMap).map(l => `<option value="${l}">${langMap[l] || l}</option>`).join('');
 
