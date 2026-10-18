@@ -132,7 +132,7 @@ class JsTsExtractorTests(unittest.TestCase):
         self.assertIn("pathlib.Path", code_blocks[0]["python_static"]["calls"])
         self.assertIn("config", code_blocks[0]["python_static"]["assigned_names"])
 
-    def test_python_syntax_error_falls_back_to_tree_sitter(self):
+    def test_python_syntax_error_keeps_static_metadata(self):
         functions = self.extract_from_temp_file(
             ".py",
             """
@@ -146,7 +146,45 @@ class JsTsExtractorTests(unittest.TestCase):
         names = {function["name"] for function in functions}
         self.assertIn("valid_before_error", names)
         function = next(item for item in functions if item["name"] == "valid_before_error")
-        self.assertEqual(function["python_static"]["fallback"], "tree_sitter")
+        self.assertEqual(function["symbol_kind"], "function")
+        self.assertEqual(function["python_static"]["calls"], [])
+        self.assertFalse(function["python_static"]["is_async"])
+
+    def test_python_tree_sitter_edge_cases(self):
+        functions = self.extract_from_temp_file(
+            ".py",
+            """
+            class Service:
+                @staticmethod
+                async def run(
+                    first: dict[
+                        str,
+                        int,
+                    ],
+                    *args,
+                    flag: bool = False,
+                    **kwargs,
+                ) -> None:
+                    '''Run \\\\ it.'''
+                    with (open("a") if flag else open("b") as handle):
+                        (handle).read()
+                    values = [*collect(args)]
+                    # trailing comment belongs to the module, not the method
+            """,
+        )
+
+        run = next(item for item in functions if item["name"] == "run")
+        static = run["python_static"]
+        self.assertEqual(run["class_name"], "Service")
+        self.assertEqual(run["end_lineno"], 15)
+        self.assertTrue(static["is_async"])
+        self.assertEqual(static["decorators"], ["staticmethod"])
+        self.assertEqual(static["params"], ["first: dict[str, int]", "flag: bool", "args", "kwargs"])
+        self.assertEqual(static["returns"], "None")
+        self.assertEqual(run["docstring"], "Run \\ it.")
+        self.assertEqual(static["assigned_names"], ["handle", "values"])
+        self.assertIn("handle.read", static["calls"])
+        self.assertIn("collect", static["calls"])
 
     def test_python_framework_and_call_graph_metadata(self):
         functions = self.extract_from_temp_file(

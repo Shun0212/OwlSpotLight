@@ -112,6 +112,13 @@ class GraphTests(unittest.TestCase):
         self.assertEqual([s['column'] for s in sites], [18, 28])
         self.assertEqual([s['endColumn'] for s in sites], [24, 34])
 
+    def test_call_sites_skip_parentheses_and_star_unpacking(self):
+        item = function('run', 1, 'def run():\n    (helper)()\n    return [*helper(), *store.load()]')
+        calls = {call: sites for call, _, sites in direct_calls(item)}
+        self.assertEqual([(s['line'], s['column'], s['endColumn']) for s in calls['helper']],
+                         [(2, 5, 11), (3, 13, 19)])
+        self.assertEqual([(s['column'], s['endColumn']) for s in calls['store.load']], [(24, 34)])
+
     def test_directions_scopes_and_unknown_calls(self):
         root = function('run', 1, 'def run(self):\n    self.save()\n    helper()\n    other.save()\n    missing()', 'Service')
         own = function('save', 20, owner='Service')

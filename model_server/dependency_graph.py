@@ -1,10 +1,11 @@
 """Bounded call neighborhoods and cosine scores from an existing index snapshot."""
-import ast
 import hashlib
 import os
 import textwrap
 
 import numpy as np
+
+from extractors.python_extractor import PY_PARSER, parameter_binding, store_targets, target_names
 
 
 def node_id(item):
@@ -43,60 +44,72 @@ def direct_calls(item):
     raw_code = item.get('raw_code', item.get('code', ''))
     source = textwrap.dedent(raw_code)
     raw_lines, source_lines = raw_code.splitlines(), source.splitlines()
-    try:
-        tree = ast.parse(source)
-    except (SyntaxError, ValueError):
-        return None
-    root = next((n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))), None)
+    source_bytes = source.encode('utf-8')
+    tree = PY_PARSER.parse(source_bytes)
+    root = next((n for n in tree.root_node.named_children if n.type == 'function_definition'), None)
     if root is None:
         return None
     calls = {}
 
-    def record_call(name, node):
+    def record_call(name, node, start=None):
         def column(line, byte_offset):
             text = source_lines[line - 1]
             indentation = raw_lines[line - 1][:len(raw_lines[line - 1]) - len(text)]
             prefix = text.encode('utf-8')[:byte_offset].decode('utf-8')
             return len((indentation + prefix).encode('utf-16-le')) // 2
+        (start_row, start_col), (end_row, end_col) = (start or node).start_point, node.end_point
         calls.setdefault(name, []).append(dict(file=item['file'],
-            line=item['lineno'] + node.lineno - 1, column=column(node.lineno, node.col_offset),
-            endLine=item['lineno'] + node.end_lineno - 1, endColumn=column(node.end_lineno, node.end_col_offset)))
-    shadowed = {arg.arg for arg in ast.walk(root.args) if isinstance(arg, ast.arg)}
+            line=item['lineno'] + start_row, column=column(start_row + 1, start_col),
+            endLine=item['lineno'] + end_row, endColumn=column(end_row + 1, end_col)))
 
-    class Visitor(ast.NodeVisitor):
-        def visit_FunctionDef(self, node):
-            shadowed.add(node.name)
+    def text(node):
+        return source_bytes[node.start_byte:node.end_byte].decode('utf-8', errors='replace')
 
-        visit_AsyncFunctionDef = visit_FunctionDef
+    def unwrap(node):
+        # `(f)()` and tree-sitter's `[*f(x)]` -> call(list_splat(f)) wrap the callee.
+        while node.type in {'parenthesized_expression', 'list_splat'} and node.named_child_count == 1:
+            node = node.named_children[0]
+        return node
 
-        def visit_ClassDef(self, node):
-            shadowed.add(node.name)
+    shadowed = set()
+    for parameter in root.child_by_field_name('parameters').named_children:
+        name, _, _ = parameter_binding(parameter, source_bytes)
+        if name:
+            shadowed.add(name)
 
-        def visit_Lambda(self, node):
-            pass
-
-        def visit_Name(self, node):
-            if isinstance(node.ctx, ast.Store):
-                shadowed.add(node.id)
-
-        def visit_Import(self, node):
-            shadowed.update(alias.asname or alias.name.split('.')[0] for alias in node.names)
-
-        def visit_ImportFrom(self, node):
-            shadowed.update(alias.asname or alias.name for alias in node.names)
-
-        def visit_Call(self, node):
-            if isinstance(node.func, ast.Name):
-                record_call(node.func.id, node.func)
-            elif isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
-                record_call(f'{node.func.value.id}.{node.func.attr}', node.func)
+    stack = list(reversed(root.child_by_field_name('body').named_children))
+    while stack:
+        node = stack.pop()
+        if node.type == 'decorated_definition':
+            node = node.child_by_field_name('definition')
+        if node.type in {'function_definition', 'class_definition'}:
+            shadowed.add(text(node.child_by_field_name('name')))
+            continue
+        if node.type in {'lambda', 'comment'}:
+            continue
+        if node.type in {'import_statement', 'import_from_statement'}:
+            for name in node.children_by_field_name('name'):
+                if name.type == 'aliased_import':
+                    shadowed.add(text(name.child_by_field_name('alias')))
+                elif node.type == 'import_statement':
+                    shadowed.add(text(name).split('.')[0])
+                else:
+                    shadowed.add(text(name))
+            continue
+        for target in store_targets(node):
+            target_names(target, source_bytes, shadowed)
+        if node.type == 'call':
+            func = unwrap(node.child_by_field_name('function'))
+            owner = unwrap(func.child_by_field_name('object')) if func.type == 'attribute' else None
+            if func.type == 'identifier':
+                record_call(text(func), func)
+            elif owner is not None and owner.type == 'identifier':
+                # `[*a.f(x)]` parses as attribute(list_splat(a), f): start the site at `a`, not `*`.
+                start = owner if func.child_by_field_name('object').type == 'list_splat' else None
+                record_call(f"{text(owner)}.{text(func.child_by_field_name('attribute'))}", func, start)
             else:
-                record_call('<dynamic>', node.func)
-            self.generic_visit(node)
-
-    visitor = Visitor()
-    for statement in root.body:
-        visitor.visit(statement)
+                record_call('<dynamic>', func)
+        stack.extend(reversed(node.children))
     return [(call, call in shadowed, calls[call]) for call in sorted(calls)]
 
 
