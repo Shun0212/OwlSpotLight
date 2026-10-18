@@ -60,6 +60,40 @@ class JsTsExtractorTests(unittest.TestCase):
         method = next(function for function in functions if function["name"] == "renderName")
         self.assertEqual(method["class_name"], "UserPresenter")
 
+    def test_typescript_jsdoc_only_when_directly_above(self):
+        functions = self.extract_from_temp_file(
+            ".ts",
+            """
+            /** Add two numbers. */
+            export function add(a: number, b: number) {
+              return a + b;
+            }
+
+            function globs() {
+              return ['src/**/*.ts', 'out/**'];
+            }
+
+            function plain() {
+              return 1;
+            }
+
+            class Store {
+              /**
+               * Save a value.
+               */
+              save() {
+                return true;
+              }
+            }
+            """,
+        )
+
+        docs = {function["name"]: function.get("docstring") for function in functions}
+        self.assertEqual(docs["add"], "Add two numbers.")
+        self.assertIsNone(docs["globs"])
+        self.assertIsNone(docs["plain"])
+        self.assertEqual(docs["save"], "Save a value.")
+
     def test_python_static_metadata_and_code_blocks(self):
         functions = self.extract_from_temp_file(
             ".py",

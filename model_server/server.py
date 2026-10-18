@@ -707,6 +707,24 @@ class GlobalIndexerState:
         else:
             print("[load] Failed to load any cache files")
 
+    def repair_nonfinite_embeddings(self) -> bool:
+        """古いバージョン (MPS + SDPA) で NaN になった埋め込みを再計算し、ディスクにも書き戻す。"""
+        emb = self.embeddings
+        if emb is None or self.indexer is None or len(self.indexer.functions) != emb.shape[0]:
+            return False
+        bad = np.flatnonzero(~np.isfinite(emb).all(axis=1))
+        if bad.size == 0:
+            return False
+        print(f"[load] Repairing {bad.size} non-finite embeddings")
+        emb = np.array(emb, copy=True)
+        emb[bad] = encode_code([self.indexer.functions[i]["code"] for i in bad], settings.batch_size, show_progress=True)
+        faiss_index = faiss.IndexFlatL2(emb.shape[1])
+        faiss_index.add(emb)
+        self.embeddings = emb
+        self.faiss_index = faiss_index
+        self.save()
+        return True
+
 global_index_state = GlobalIndexerState()
 # サーバー起動時は自動ロードを行わない（メモリキャッシュ優先、必要時のみディスクアクセス）
 
@@ -1975,6 +1993,11 @@ def build_index(directory: str, file_ext: str = "auto", max_workers: int = 8, up
     # 2. メモリキャッシュが無効な場合、ディスクからロード
     global_index_state.load(directory, file_ext)
     global_index_state.set_index_dir(directory, file_ext)
+    if (
+        global_index_state.model_config == current_model_config and
+        global_index_state.model_name in (None, model_name)
+    ):
+        global_index_state.repair_nonfinite_embeddings()
     
     # Keep the loaded model config until validation; replacing it here would
     # make stale embeddings appear to belong to the current model.
@@ -2105,30 +2128,31 @@ def build_index(directory: str, file_ext: str = "auto", max_workers: int = 8, up
         prev_funcs = prev_indexer.functions if prev_indexer else []
         prev_func_ids = [func_id(f) for f in prev_funcs]
         prev_func_id2idx = {fid: i for i, fid in enumerate(prev_func_ids)}
-        # results_func_ids: 新しい順序
-        keep_indices = [prev_func_id2idx[fid] for fid in results_func_ids if fid in prev_func_id2idx]
-        # 新規関数（前回に存在しないもの）
-        new_func_indices = [i for i, fid in enumerate(results_func_ids) if fid not in prev_func_id2idx]
+        prev_embeddings = global_index_state.embeddings
+        # results の位置 -> 再利用する前回の行。コードが同一かつ有限な埋め込みのみ再利用する
+        reuse = {}
+        if prev_embeddings is not None and len(prev_funcs) == prev_embeddings.shape[0]:
+            for i, fid in enumerate(results_func_ids):
+                j = prev_func_id2idx.get(fid)
+                if (
+                    j is not None
+                    and prev_funcs[j].get("code") == results[i].get("code")
+                    and np.isfinite(prev_embeddings[j]).all()
+                ):
+                    reuse[i] = j
+        new_func_indices = [i for i in range(len(results)) if i not in reuse]
         # 埋め込み配列を順序通りに構築
-        if prev_indexer and global_index_state.embeddings is not None and global_index_state.faiss_index is not None and keep_indices:
-            prev_embeddings = global_index_state.embeddings
-            kept_embeddings = prev_embeddings[keep_indices] if keep_indices else np.zeros((0, prev_embeddings.shape[1]), dtype=prev_embeddings.dtype)
-            # 新規分のみ埋め込み
+        if prev_indexer and global_index_state.faiss_index is not None and reuse:
+            embeddings = np.zeros((len(results), prev_embeddings.shape[1]), dtype=prev_embeddings.dtype)
+            for res_idx, prev_idx in reuse.items():
+                embeddings[res_idx] = prev_embeddings[prev_idx]
+            # 新規・変更分のみ埋め込み
             if new_func_indices:
                 progress.raise_if_cancelled()
                 new_codes = [results[i]["code"] for i in new_func_indices]
                 print(f"Generating embeddings for {len(new_codes)} new/modified functions...")
                 new_embeddings = encode_code(new_codes, settings.batch_size, show_progress=True)
-                # 埋め込みを順序通りに合成
-                embeddings = np.zeros((len(results), new_embeddings.shape[1]), dtype=new_embeddings.dtype)
-                # 既存分
-                for idx, keep_idx in enumerate(keep_indices):
-                    embeddings[idx] = prev_embeddings[keep_idx]
-                # 新規分
-                for arr_idx, res_idx in enumerate(new_func_indices):
-                    embeddings[res_idx] = new_embeddings[arr_idx]
-            else:
-                embeddings = kept_embeddings
+                embeddings[new_func_indices] = new_embeddings
             if embeddings is not None and embeddings.shape[0] > 0:
                 faiss_index = faiss.IndexFlatL2(embeddings.shape[1])
                 faiss_index.add(embeddings)

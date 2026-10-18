@@ -68,7 +68,10 @@ def load_model_with_device_fallback():
     
     print(f"[model] Loading model: {model_name}")
     
-    model = SentenceTransformer(model_name)
+    # MPS の SDPA は全マスク行で NaN を返し、ModernBERT のローカル窓 (±64) を超えて
+    # パディングされた行の埋め込みが NaN になる。eager はマスクを有限値で扱うため安全。
+    model_kwargs = {"attn_implementation": "eager"} if get_device() == "mps" else None
+    model = SentenceTransformer(model_name, model_kwargs=model_kwargs)
 
     # MPSデバイスの場合、torch.compileを無効化してwarningを防ぐ
     if hasattr(model, '_modules'):
@@ -121,6 +124,20 @@ def _encode_inputs(current_model, inputs: list[str], batch_size: int, input_type
     )
 
 
+def _repair_nonfinite_rows(current_model, codes: list[str], embeddings: np.ndarray, input_type: str) -> np.ndarray:
+    """NaN/inf になった行をパディングなし (1件ずつ) で再エンコードする。
+
+    バックエンド依存の数値不具合 (例: MPS の SDPA で全マスク行が NaN になる) に対する安全網。"""
+    bad = np.flatnonzero(~np.isfinite(embeddings).all(axis=1))
+    if bad.size == 0:
+        return embeddings
+    _builtins.print(f"[embed] Re-encoding {bad.size} non-finite embeddings one at a time", flush=True)
+    for i in bad:
+        progress.raise_if_cancelled()
+        embeddings[i] = _encode_inputs(current_model, [codes[i]], 1, input_type)[0]
+    return embeddings
+
+
 def encode_code(
     codes: list[str],
     batch_size: int = 2,
@@ -168,7 +185,7 @@ def encode_code(
                 # 出力パネルには要約を1行だけ。
                 _builtins.print(f"[embed] {total} items in {time.time() - t0:.1f}s", flush=True)
             if chunks:
-                return np.vstack(chunks)
+                return _repair_nonfinite_rows(current_model, codes, np.vstack(chunks), input_type)
             emb_dim = current_model.get_sentence_embedding_dimension()
             return np.zeros((0, emb_dim), dtype=np.float32)
 

@@ -49,7 +49,18 @@ def _build_class_ranges(root_node, source_bytes, language):
     return class_ranges
 
 
-_JSDOC_PATTERN = re.compile(r"/\*\*([\s\S]*?)\*/", re.MULTILINE)
+def _leading_jsdoc(node, source_bytes):
+    """JSDoc comment directly above the function (or its export statement), if any."""
+    if node.parent is not None and node.parent.type == "export_statement":
+        node = node.parent
+    comment = node.prev_named_sibling
+    if comment is None or comment.type != "comment" or comment.end_point[0] < node.start_point[0] - 1:
+        return None
+    text = source_bytes[comment.start_byte:comment.end_byte].decode("utf-8", errors="replace")
+    if not text.startswith("/**"):
+        return None
+    # remove /** and */ and leading *
+    return re.sub(r"^\s*\* ?", "", text[3:-2], flags=re.MULTILINE).strip() or None
 
 
 def extract_typescript_functions(source_bytes: bytes, language_kind: str = "typescript") -> list[dict]:
@@ -91,10 +102,6 @@ def extract_typescript_functions(source_bytes: bytes, language_kind: str = "type
         print(f"[TS extractor] function query error: {e}")
         return []
 
-    # Prepare JSDoc list over the original text
-    source_text = source_bytes.decode("utf-8", errors="replace")
-    jsdocs = [(m.start(), m.end(), m.group(0)) for m in _JSDOC_PATTERN.finditer(source_text)]
-
     results = []
     for _, capture_dict in func_matches:
         func_def_nodes = capture_dict.get("func.def", [])
@@ -115,17 +122,7 @@ def extract_typescript_functions(source_bytes: bytes, language_kind: str = "type
             "utf-8", errors="replace"
         )
 
-        # Attach JSDoc if the closest preceding one exists
-        docstring_content = None
-        func_start_byte = func_def_node.start_byte
-        closest_jsdoc = None
-        for jsdoc_start, jsdoc_end, jsdoc_text in reversed(jsdocs):
-            if jsdoc_end <= func_start_byte:
-                closest_jsdoc = jsdoc_text
-                break
-        if closest_jsdoc:
-            # remove /** and */ and leading *
-            docstring_content = re.sub(r"^\s*\* ?", "", closest_jsdoc[3:-2], flags=re.MULTILINE).strip()
+        docstring_content = _leading_jsdoc(func_def_node, source_bytes)
 
         func_start = func_def_node.start_point
         belonging_class = None
