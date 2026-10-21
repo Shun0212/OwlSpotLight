@@ -86,7 +86,7 @@ def load_model_with_device_fallback():
             model.to(device)
             model_device = device
             print(f"[model] Model loaded successfully on {device}")
-            emb_dim = model.get_sentence_embedding_dimension()
+            emb_dim = model.get_embedding_dimension()
             print(f"[model] Embedding dimension: {emb_dim}")
             return model
         except Exception as e:
@@ -163,7 +163,7 @@ def encode_code(
         try:
             progress.raise_if_cancelled()
             if total == 0:
-                emb_dim = current_model.get_sentence_embedding_dimension()
+                emb_dim = current_model.get_embedding_dimension()
                 return np.zeros((0, emb_dim), dtype=np.float32)
             if report:
                 progress.start("Embedding", total)
@@ -186,7 +186,7 @@ def encode_code(
                 _builtins.print(f"[embed] {total} items in {time.time() - t0:.1f}s", flush=True)
             if chunks:
                 return _repair_nonfinite_rows(current_model, codes, np.vstack(chunks), input_type)
-            emb_dim = current_model.get_sentence_embedding_dimension()
+            emb_dim = current_model.get_embedding_dimension()
             return np.zeros((0, emb_dim), dtype=np.float32)
 
         except (RuntimeError, torch.cuda.OutOfMemoryError) as e:
@@ -217,7 +217,7 @@ def encode_code(
 def get_model_embedding_dim() -> int:
     """モデルの埋め込み次元数を取得"""
     current_model = get_model()
-    return current_model.get_sentence_embedding_dimension()
+    return current_model.get_embedding_dimension()
 
 def get_current_device() -> str:
     """現在使用中のデバイスを取得"""
